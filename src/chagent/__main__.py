@@ -42,11 +42,15 @@ async def _run(
         host_commands = allow_commands or settings.allow_host_commands
         if model_settings is None:
             runner = create_demo_runner(database, tool_name=tool or "echo", tool_arguments=arguments,
-                                        allow_host_commands=host_commands, max_turns=settings.max_turns)
+                                        allow_host_commands=host_commands, max_turns=settings.max_turns,
+                                        max_tool_concurrency=settings.max_tool_concurrency,
+                                        memory_worker_concurrency=settings.memory_worker_concurrency)
         else:
             assert client is not None
             runner = create_runner(database, model_settings.model(), client,
-                                   allow_host_commands=host_commands, timeout=model_settings.run_timeout, max_turns=settings.max_turns)
+                                   allow_host_commands=host_commands, timeout=model_settings.run_timeout, max_turns=settings.max_turns,
+                                   max_tool_concurrency=settings.max_tool_concurrency,
+                                   memory_worker_concurrency=settings.memory_worker_concurrency)
         if session_id is None:
             session = await SessionManager(runner.conversations).create(workspace, title="新会话")
             session_id = session.id
@@ -59,6 +63,13 @@ async def _run(
             print("\n".join(block.text for block in result.message.content if isinstance(block, TextContent)))
         else:
             print("Tools requested a normal stop; no final model reply was generated.")
+        # One-shot runs drain the queue so memories are available before exit;
+        # a pending job is kept and resumed by the next process.
+        if runner.memory_worker is not None and result.message is not None:
+            try:
+                await runner.memory_worker.drain(timeout=runner.memory_service.policy.timeout + 5)
+            except TimeoutError:
+                print("Memory: extraction is still pending and will resume on the next run.")
         history = await runner.conversations.messages(session_id)
         events = await runner.runs.events(result.run_id)
         print(f"Persisted: {len(history)} messages; {len(events)} events in this run.")

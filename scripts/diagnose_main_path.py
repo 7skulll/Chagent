@@ -94,6 +94,8 @@ class ObservedDatabase(Database):
 
 class CountingCounter:
     name = "diagnostic_utf8_json_bytes"
+    # Delegates to ByteTokenCounter, so per-message costs are additive.
+    additive = True
 
     def __init__(self):
         self.calls = self.items = 0
@@ -149,10 +151,10 @@ class ScriptedClient:
         yield DoneEvent(message.stop_reason, message)
 
 
-def runner_for(database, client, *, memory=False, extract=True, timeout=10, counter=None):
+def runner_for(database, client, *, memory=False, extract=True, timeout=10, counter=None, max_concurrency=4):
     return create_runner(
         database, Model("offline-diagnostic", "local-test", "fake", 65536, 2048), client,
-        timeout=timeout, max_turns=32, token_counter=counter,
+        timeout=timeout, max_turns=32, token_counter=counter, max_tool_concurrency=max_concurrency,
         compaction_policy=CompactionPolicy(enabled=False),
         memory_policy=MemoryPolicy(enabled=memory, extract=extract, timeout=2),
     )
@@ -179,12 +181,12 @@ def instrument(runner, database, *, event_delay=0):
         setattr(owner, method_name, measured)
 
     for method in ("begin", "event", "start_model_call", "save_response", "start_tool_call",
-                   "save_tool_result", "finish"):
+                   "queue_tool_calls", "save_tool_result", "finish"):
         wrap(runner.runs, method, method)
     wrap(runner, "_response", "model_stream")
     wrap(runner.context_manager, "prepare", "context_prepare")
     wrap(runner.memory_service, "enrich", "memory_recall")
-    wrap(runner.memory_service, "prepare_completed", "memory_extract")
+    wrap(runner.memory_service, "on_completed", "memory_enqueue")
     wrap(runner.tools, "execute", "tool_execute")
 
 
@@ -192,7 +194,7 @@ async def measure_run(database, workspace, spec):
     client = ScriptedClient(**spec.get("client", {}))
     counter = CountingCounter()
     runner = runner_for(database, client, memory=spec.get("memory", False),
-                        extract=spec.get("extract", True), counter=counter)
+                        extract=spec.get("extract", True), counter=counter, max_concurrency=spec.get("max_concurrency", 4))
     if delay := spec.get("tool_delay", 0):
         echo = runner.tools.registry.get("echo")
         original = echo.execute
@@ -216,10 +218,18 @@ async def measure_run(database, workspace, spec):
     assert events[-1]["type"] == "run_completed"
     assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
     assert "".join(event["payload"]["delta"] for event in events if event["type"] == "text_delta") == result.message.content[0].text
+    # Extraction is drained after the measurement so its cost is reported
+    # separately instead of being folded into the run.
+    drained_ms = None
+    if spec.get("memory"):
+        drain_started = perf_counter()
+        await runner.memory_worker.drain(timeout=15)
+        drained_ms = round((perf_counter() - drain_started) * 1000, 3)
     return {
         "elapsed_ms": round((ended - started) * 1000, 3),
         "first_text_committed_ms": round((database.metrics.first_text_committed - started) * 1000, 3),
         "after_final_model_output_ms": round((ended - client.final_ready) * 1000, 3),
+        "memory_drain_ms": drained_ms,
         "task_model_calls": client.task_calls, "memory_model_calls": client.memory_calls,
         "events": len(events), "counter_calls": counter.calls,
         "messages_serialized_for_count": counter.items, **metrics,
@@ -286,22 +296,30 @@ async def fault_probes(database, workspace):
     result = {"output_budget": {"requested": 17, "actual_transport_body_by_provider": budgets,
                                 "all_transmitted": True}}
 
-    client = ScriptedClient(memory_delay=2)
+    # Extraction must no longer share the run's timeout: a 2s provider with a
+    # 0.5s run budget used to fail an answer that was already durable.
+    client = ScriptedClient(memory_delay=1)
     runner = runner_for(database, client, memory=True, timeout=0.5)
     session = await runner.conversations.create_session(workspace)
-    identity = []
     try:
-        await runner.run(session, "long diagnostic input " * 8, on_started=identity.append)
+        completed = await runner.run(session, "long diagnostic input " * 8)
         outcome = "completed"
     except RunFailedError:
-        outcome = "failed"
+        completed, outcome = None, "failed"
     records = await runner.conversations.messages(session)
-    result["memory_tail_timeout"] = {
-        "status": outcome, "final_answer_persisted": any(
+    job = await runner.memory_worker.jobs.for_run(completed.run_id) if completed else None
+    result["memory_tail_isolation"] = {
+        "status": outcome,
+        "final_answer_persisted": any(
             isinstance(record.message, AssistantMessage) and record.message.stop_reason == "stop" for record in records),
-        "memory_calls": client.memory_calls,
+        "memory_calls_during_run": client.memory_calls,
+        "job_status_after_run": job["status"] if job else None,
     }
-    assert client.memory_calls == 1, "Fixture did not reach memory extraction; rerun on a less busy host"
+    if completed is not None:
+        await runner.memory_worker.drain(timeout=15)
+        result["memory_tail_isolation"]["memory_calls_after_drain"] = client.memory_calls
+        result["memory_tail_isolation"]["job_status_after_drain"] = (
+            await runner.memory_worker.jobs.for_run(completed.run_id))["status"]
 
     client = ScriptedClient(steps=1, fail_after_tool=True, tool_name="write_file",
                             tool_arguments={"path": "side-effect.txt", "content": "completed write"})
@@ -380,10 +398,11 @@ async def diagnose(args):
                     "text_32_deltas": {"client": {"deltas": 32}},
                     "text_128_deltas": {"client": {"deltas": 128}},
                     "text_32_deltas_5ms_sink": {"client": {"deltas": 32}, "event_delay": 0.005},
+                    "three_20ms_tools_serial": {"client": {"steps": 1, "calls": 3}, "tool_delay": 0.02, "max_concurrency": 1},
                     "three_20ms_tools": {"client": {"steps": 1, "calls": 3}, "tool_delay": 0.02},
                     "eight_tool_rounds": {"client": {"steps": 8}},
                     "memory_recall_only": {"memory": True, "extract": False, "client": {"steps": 8}},
-                    "memory_50ms_extraction": {"memory": True, "client": {"memory_delay": 0.05}},
+                    "memory_500ms_extraction": {"memory": True, "client": {"memory_delay": 0.5}},
                 }
                 scenarios = {}
                 with tempfile.TemporaryDirectory(prefix="chagent-diag-") as temporary:
@@ -398,7 +417,7 @@ async def diagnose(args):
                     faults = await fault_probes(database, workspace)
                 root = Path(__file__).resolve().parents[1]
                 sources = ["agent/runner.py", "context/builder.py", "context/manager.py", "memory/service.py",
-                           "storage/repositories.py", "models/transcript.py", "models/openai_chat.py", "web/app.py"]
+                           "storage/repositories.py", "tools/scheduler.py", "tools/executor.py", "tools/filesystem.py", "models/transcript.py", "models/openai_chat.py", "web/app.py"]
                 return {
                     "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
                     "environment": {"python": platform.python_version(), "platform": platform.system(),

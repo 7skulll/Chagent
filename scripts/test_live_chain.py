@@ -15,6 +15,8 @@ from pathlib import Path
 import platform
 from time import perf_counter
 import tempfile
+import threading
+from time import sleep
 from uuid import uuid4
 
 import httpx
@@ -87,7 +89,30 @@ class LiveSuite:
                              memory_policy=MemoryPolicy(enabled=memory, extract=extract, timeout=25),
                              compaction_policy=CompactionPolicy(enabled=compact, max_calls=3, timeout=45))
 
-    async def run(self, name, runner, prompt, *, session=None, verify=None):
+    async def settle_memory(self, runner, run_id):
+        """Process queued extraction outside the run, then re-read the stream.
+
+        Extraction is deliberately not part of ``runner.run`` any more, so the
+        live check has to advance the queue itself and prove that the model call
+        happened after the run reached its terminal state.
+        """
+        record = {"extraction_ms": None, "memory_job": None}
+        if getattr(runner, "memory_worker", None) is None or run_id is None:
+            return record
+        started = perf_counter()
+        try:
+            record["processed_jobs"] = await runner.memory_worker.drain(timeout=120)
+        except TimeoutError:
+            record["processed_jobs"], record["extraction_timed_out"] = None, True
+        record["extraction_ms"] = round((perf_counter() - started) * 1000, 3)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT status, attempts, max_attempts, last_error FROM memory_jobs WHERE run_id = %s", (run_id,))
+            row = await cursor.fetchone()
+        record["memory_job"] = dict(row) if row else None
+        return record
+
+    async def run(self, name, runner, prompt, *, session=None, verify=None, settle_memory=False):
         session = session or await runner.conversations.create_session(self.workspace, name)
         self.database.metrics = Metrics()
         instrument(runner, self.database)
@@ -102,6 +127,10 @@ class LiveSuite:
             error = type(caught).__name__
         elapsed = (perf_counter() - started) * 1000
         metrics = self.database.metrics.snapshot()
+        # Settle before reading the stream so extraction events are included,
+        # but after ``elapsed`` so the reported latency stays pure run time.
+        extraction = (await self.settle_memory(runner, identities[0] if identities else None)
+                      if settle_memory else {})
         events = await runner.runs.events(identities[0]) if identities else []
         persisted_run = await runner.runs.get(identities[0]) if identities else None
         model_rows = []
@@ -109,18 +138,22 @@ class LiveSuite:
             async with self.database.connection() as connection:
                 cursor = await connection.execute("SELECT request, context_snapshot FROM model_calls WHERE run_id = %s ORDER BY iteration", (identities[0],))
                 model_rows = await cursor.fetchall()
+        types = [event["type"] for event in events]
+        terminal = types.index("run_completed") if "run_completed" in types else None
+        # Extraction events append to the same stream after the terminal event,
+        # so "terminal" means: nothing but memory bookkeeping follows it.
         checks = {"run_completed": result is not None,
                   "ordered_events": [event["sequence"] for event in events] == list(range(1, len(events) + 1)),
-                  "terminal_event": bool(events) and events[-1]["type"] == "run_completed"}
+                  "terminal_event": terminal is not None and all(kind.startswith("memory_") for kind in types[terminal + 1:])}
         if result is not None:
             checks["end_reason_consistent"] = (result.end_reason == persisted_run["end_reason"]
-                                                == events[-1]["payload"]["end_reason"])
+                                                == events[terminal]["payload"]["end_reason"])
         extra = {}
         if result is not None and verify is not None:
             extra_checks, extra = await verify(result, events, model_rows)
             checks.update(extra_checks)
         record = {"name": name, "passed": all(checks.values()), "checks": checks,
-                  "elapsed_ms": round(elapsed, 3), "error_type": error,
+                  "elapsed_ms": round(elapsed, 3), "error_type": error, **extraction,
                   "failure_reason": (persisted_run["error"] or "").replace(self.selected.api_key, "[redacted]") if persisted_run else None,
                   "end_reason": result.end_reason if result else None,
                   "answer": text(result.message)[:1500] if result else None,
@@ -203,14 +236,26 @@ class LiveSuite:
             if valid:
                 await self.memory.change(valid[0].id, session_info.workspace_id,
                                          expected_revision=valid[0].revision, action="accept")
-            return {"correct_candidate": bool(valid), "candidate_requires_review": bool(valid) and valid[0].status == "candidate"}, {
+            kinds = [event["type"] for event in events]
+            async with self.database.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT status, attempts FROM memory_jobs WHERE run_id = %s", (result.run_id,))
+                job = await cursor.fetchone()
+            # The whole point of the refactor: the answer was already terminal
+            # when extraction started, and the job is what carries the retries.
+            return {"correct_candidate": bool(valid), "candidate_requires_review": bool(valid) and valid[0].status == "candidate",
+                    "queued_in_completion_txn": "memory_job_queued" in kinds,
+                    "extraction_started_after_run": ("memory_extraction_started" in kinds
+                                                      and kinds.index("memory_extraction_started") > kinds.index("run_completed")),
+                    "job_reached_terminal_state": job is not None and job["status"] == "completed"}, {
+                "memory_job": dict(job) if job else None,
                 "candidates": [{"key": item.key, "content": item.content, "status_before_review": item.status,
                                 "evidence": item.evidence} for item in candidates]}
 
         preference = (f"这是用于验证长期偏好的测试数据。以后请默认称呼我为{nickname}。这个称呼是我的长期偏好，"
                       "请在今后的对话中沿用，而不是只用于这一次回答。这次仅用一句话确认，不要调用工具，也不要写任何文件。")
         runner = self.runner(memory=True, extract=True)
-        await self.run("automatic_memory_candidate", runner, preference, verify=extracted)
+        await self.run("automatic_memory_candidate", runner, preference, verify=extracted, settle_memory=True)
 
         async def nickname_recall(result, events, rows):
             return {"reviewed_preference_recalled": nickname in text(result.message),
@@ -305,6 +350,62 @@ class LiveSuite:
                              "provider_calls": self.client.calls[first:]})
         print(json.dumps({"case": "web_api_sse_replay", "checks": checks}, ensure_ascii=False), flush=True)
 
+    async def scheduling_case(self):
+        runner = self.runner()
+        values = [13, 29, 47]
+        markers = [uuid4().hex[:12] for _ in values]
+        for index, (value, marker) in enumerate(zip(values, markers)):
+            (self.workspace / f"batch-{index}.json").write_text(
+                json.dumps({"value": value, "marker": marker}), encoding="utf-8")
+        active = peak = 0
+        lock = threading.Lock()
+        read_tool = runner.tools.registry.get("read_file")
+        original = read_tool.handle
+
+        def observed_read(*args, **kwargs):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            try:
+                # Controlled I/O latency makes real worker overlap observable.
+                sleep(.05)
+                return original(*args, **kwargs)
+            finally:
+                with lock:
+                    active -= 1
+
+        read_tool.handle = observed_read
+
+        async def verify(result, events, rows):
+            try:
+                saved = json.loads((self.workspace / "batch-result.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                saved = {}
+            async with self.database.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT model_call_id, call_id, name, status, call_index FROM tool_calls WHERE run_id = %s ORDER BY created_at, call_index",
+                    (result.run_id,))
+                calls = await cursor.fetchall()
+            read_groups = {}
+            for call in calls:
+                if call["name"] == "read_file":
+                    read_groups.setdefault(str(call["model_call_id"]), []).append(call)
+            completed = [event["payload"]["tool_call_id"] for event in events if event["type"] == "tool_completed"]
+            queued = [event["payload"]["tool_call_id"] for event in events if event["type"] == "tool_queued"]
+            return {"correct_sum": saved.get("sum") == sum(values), "hidden_markers": saved.get("markers") == markers,
+                    "same_response_three_reads": any(len(group) == 3 for group in read_groups.values()),
+                    "read_workers_overlap": peak >= 2, "ordered_results": completed == queued,
+                    "all_calls_completed": bool(calls) and all(call["status"] == "completed" for call in calls),
+                    "no_remaining_workers": active == 0}, {"read_worker_peak": peak, "result_file": saved,
+                    "injected_read_latency_ms": 50, "tool_batch_sizes": [len(group) for group in read_groups.values()]}
+
+        await self.run("real_parallel_read_then_write", runner,
+                       '必须在同一个 assistant 响应中发出三个独立的 read_file 调用，分别读取 batch-0.json、batch-1.json、batch-2.json。'
+                       '这三个读取没有依赖，应当一起提交。拿到全部结果后，将三个 value 的和及按文件编号排序的 marker 原值数组'
+                       '用 write_file 创建 batch-result.json，格式为 {"sum":数值,"markers":[三个原值]}。'
+                       '只操作这四个文件，最后简短报告结果。', verify=verify)
+
     async def explicit_case(self):
         runner = self.runner(memory=True)
 
@@ -348,6 +449,8 @@ async def main_async(args):
                                 await suite.execute()
                             elif args.case == "core":
                                 await suite.execute(core_only=True)
+                            elif args.case == "scheduling":
+                                await suite.scheduling_case()
                             elif args.case == "web":
                                 await suite.web_case()
                             else:
@@ -372,7 +475,9 @@ async def main_async(args):
         root = Path(__file__).resolve().parents[1]
         report["source_sha256"] = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
                                    for path in (root / "src/chagent/agent/runner.py", root / "src/chagent/memory/service.py",
-                                                root / "src/chagent/models/openai_chat.py", root / "src/chagent/context/manager.py")}
+                                                root / "src/chagent/models/openai_chat.py", root / "src/chagent/context/manager.py",
+                                                root / "src/chagent/tools/scheduler.py", root / "src/chagent/tools/executor.py",
+                                                root / "src/chagent/tools/filesystem.py")}
         serialized = json.dumps(report, ensure_ascii=False, indent=2)
         assert selected.api_key not in serialized, "Refusing to save a credential-bearing report"
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -384,7 +489,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-calls", type=int, default=24)
-    parser.add_argument("--case", choices=("all", "core", "web", "explicit"), default="all")
+    parser.add_argument("--case", choices=("all", "core", "web", "explicit", "scheduling"), default="all")
     args = parser.parse_args()
     if not 1 <= args.max_calls <= 30:
         parser.error("--max-calls must be between 1 and 30")

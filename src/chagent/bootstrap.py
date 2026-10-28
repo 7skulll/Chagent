@@ -7,9 +7,11 @@ from chagent.domain.json_types import JsonObject
 from chagent.domain.context import ContextPolicy
 from chagent.domain.summaries import CompactionPolicy
 from chagent.context.tokens import TokenCounter
+from chagent.memory.worker import MemoryWorker
 from chagent.models.base import Model, ModelClient
 from chagent.models.fake import FakeModelClient
 from chagent.storage.database import Database
+from chagent.storage.memory_jobs import MemoryJobRepository
 from chagent.storage.repositories import ConversationRepository, RunRepository
 from chagent.storage.summaries import SummaryRepository
 from chagent.storage.artifacts import ArtifactRepository
@@ -27,12 +29,16 @@ def create_demo_runner(
     compaction_policy: CompactionPolicy | None = None,
     max_turns: int = 32,
     memory_policy: MemoryPolicy | None = None,
+    max_tool_concurrency: int = 4,
+    memory_worker_concurrency: int = 1,
 ) -> AgentRunner:
     return create_runner(
         database, Model(id="fake-echo", provider="local-test", api="fake", context_window=8192, max_tokens=512),
         FakeModelClient(tool_name, tool_arguments), allow_host_commands=allow_host_commands,
         context_policy=context_policy, token_counter=token_counter, compaction_policy=compaction_policy, timeout=60, max_turns=max_turns,
         memory_policy=memory_policy,
+        max_tool_concurrency=max_tool_concurrency,
+        memory_worker_concurrency=memory_worker_concurrency,
     )
 
 
@@ -43,15 +49,29 @@ def create_runner(
     compaction_policy: CompactionPolicy | None = None,
     max_turns: int = 32,
     memory_policy: MemoryPolicy | None = None,
+    max_tool_concurrency: int = 4,
+    memory_worker_concurrency: int = 1,
 ) -> AgentRunner:
     registry = create_builtin_registry(allow_host_commands=allow_host_commands, artifacts=ArtifactRepository(database))
     builder = BasicContextBuilder(policy=context_policy, counter=token_counter)
     conversations, runs = ConversationRepository(database), RunRepository(database)
-    return AgentRunner(
+    memory_service = MemoryService(MemoryRepository(database), conversations, runs, builder.counter,
+                                   policy=memory_policy, jobs=MemoryJobRepository(database))
+    runner = AgentRunner(
         model=model, client=client, context=builder,
         tools=ToolExecutor(registry, allow_host_commands=allow_host_commands),
         conversations=conversations, runs=runs,
         context_manager=ContextManager(builder, conversations, runs, SummaryRepository(database), policy=compaction_policy),
-        memory_service=MemoryService(MemoryRepository(database), conversations, runs, builder.counter, policy=memory_policy),
+        memory_service=memory_service,
         timeout=timeout, max_turns=max_turns,
+        max_tool_concurrency=max_tool_concurrency,
     )
+    # One worker per runner: it reads model/client at call time, so a replaced
+    # client (test doubles, provider switch) applies to extraction as well.
+    runner.memory_worker = MemoryWorker(
+        MemoryJobRepository(database), memory_service, runner,
+        concurrency=memory_worker_concurrency,
+        lease_seconds=max(60.0, memory_service.policy.timeout * 3),
+        retry_delay=5.0,
+    )
+    return runner

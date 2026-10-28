@@ -1,4 +1,4 @@
-"""Sequential tool execution with schema validation and bounded execution time."""
+"""Single-invocation validation, permissions and bounded execution time."""
 
 import asyncio
 from copy import deepcopy
@@ -7,7 +7,7 @@ import math
 from jsonschema import Draft202012Validator
 
 from chagent.domain.messages import TextContent, ToolCall
-from chagent.tools.base import AgentToolResult
+from chagent.tools.base import AgentToolResult, AgentToolUpdateCallback
 from chagent.tools.context import ToolContext
 from chagent.tools.registry import ToolRegistry
 
@@ -20,7 +20,8 @@ class ToolExecutor:
         self.timeout = timeout
         self.allow_host_commands = allow_host_commands
 
-    async def execute(self, call: ToolCall, *, context: ToolContext | None = None) -> AgentToolResult:
+    async def execute(self, call: ToolCall, *, context: ToolContext | None = None,
+                      signal: asyncio.Event | None = None, on_update: AgentToolUpdateCallback | None = None) -> AgentToolResult:
         execution_started = False
         try:
             tool = self.registry.get(call.name)
@@ -35,12 +36,15 @@ class ToolExecutor:
                 raise PermissionError("This tool requires a session workspace")
             if tool.requires_host_execution and not self.allow_host_commands:
                 raise PermissionError("Host command execution is disabled")
+            if signal is not None and signal.is_set():
+                raise asyncio.CancelledError()
             async with asyncio.timeout(self.timeout):
                 execution_started = True
                 if tool.requires_workspace:
-                    result = await tool.execute(call.id, deepcopy(call.arguments), context=context)
+                    result = await tool.execute(call.id, deepcopy(call.arguments), signal=signal,
+                                                on_update=on_update, context=context)
                 else:
-                    result = await tool.execute(call.id, deepcopy(call.arguments))
+                    result = await tool.execute(call.id, deepcopy(call.arguments), signal=signal, on_update=on_update)
             if not isinstance(result, AgentToolResult):
                 raise TypeError("Tool returned an invalid result")
             if result.structured_content is not None and tool.output_schema is not None:

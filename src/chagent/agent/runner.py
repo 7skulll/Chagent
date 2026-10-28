@@ -1,9 +1,9 @@
-"""Sequential model/tool loop with commit-driven state and explicit endings."""
+"""Model/tool loop with commit-driven state, bounded batches and explicit endings."""
 
 import asyncio
 import math
 from collections.abc import Callable
-from time import monotonic_ns, time_ns
+from time import time_ns
 from uuid import UUID
 
 from psycopg import Error as DatabaseError
@@ -13,7 +13,7 @@ from chagent.agent.types import FinishDecision, RunState
 from chagent.context.builder import ContextBudgetError, ContextBuilder
 from chagent.context.manager import ContextManager
 from chagent.memory.service import MemoryService
-from chagent.domain.messages import AssistantMessage, ToolCall, ToolResultMessage, UserMessage
+from chagent.domain.messages import AssistantMessage, ToolCall, UserMessage
 from chagent.domain.runs import RunEndReason, RunResult
 from chagent.models.base import Model, ModelClient, ModelRequest
 from chagent.models.events import ContentDeltaEvent, DoneEvent, ErrorEvent, StartEvent
@@ -21,6 +21,7 @@ from chagent.storage.repositories import ConversationRepository, RunRepository
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
+from chagent.tools.scheduler import ToolScheduler
 
 
 class RunFailedError(RuntimeError):
@@ -53,6 +54,8 @@ class AgentRunner:
         max_turns: int = 8, timeout: float = 60,
         context_manager: ContextManager | None = None,
         memory_service: MemoryService | None = None,
+        max_tool_concurrency: int = 4,
+        memory_worker=None,
     ):
         if max_turns < 1 or not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("Run limits must be positive and finite")
@@ -61,9 +64,11 @@ class AgentRunner:
         self.context = context
         self.context_manager = context_manager
         self.memory_service = memory_service
+        self.memory_worker = memory_worker
         self.tools = tools
         self.conversations = conversations
         self.runs = runs
+        self.scheduler = ToolScheduler(runs, max_concurrency=max_tool_concurrency)
         self.max_turns = max_turns
         self.timeout = timeout
         self._tasks: dict[UUID, asyncio.Task] = {}
@@ -90,13 +95,15 @@ class AgentRunner:
                 state = await self._load_state(run_id, session_id)
                 self._states[run_id] = state
                 result = await self._loop(state)
-                proposals = (await self.memory_service.prepare_completed(
-                    session_id, run_id, self.model, self.client, state=state)
-                    if self.memory_service and result.message is not None else [])
             async def commit(connection):
-                await self.memory_service.commit(connection, session_id, run_id, proposals)
+                # Explicit memories are deterministic; automatic extraction only
+                # enqueues a job so this answer never waits for a second model call.
+                await self.memory_service.on_completed(
+                    connection, session_id, run_id, state=state, has_answer=result.message is not None)
             await self.runs.finish(run_id, "completed", end_reason=result.end_reason,
-                                   on_completed=commit if proposals else None)
+                                   on_completed=commit if self.memory_service is not None else None)
+            if self.memory_worker is not None and result.message is not None:
+                self.memory_worker.wake()
         except asyncio.CancelledError:
             if (await self.runs.get(run_id))["status"] == "running":
                 await self.runs.finish(run_id, "cancelled", "Run cancelled", end_reason="user_cancelled")
@@ -124,6 +131,8 @@ class AgentRunner:
             self._states.pop(run_id, None)
             if self.context_manager is not None:
                 self.context_manager.release(run_id)
+            if self.memory_service is not None:
+                self.memory_service.release(run_id)
 
     async def _load_state(self, run_id: UUID, session_id: UUID) -> RunState:
         session = await self.conversations.get_session(session_id)
@@ -180,24 +189,11 @@ class AgentRunner:
                 raise RunExecutionError("Tool calls require toolUse stop reason", "model_protocol_error")
             if len({call.id for call in calls}) != len(calls):
                 raise RunExecutionError("Duplicate tool call IDs in one response", "model_protocol_error")
-            results, result_messages = [], []
-            for call in calls:
-                record_id = await self.runs.start_tool_call(run_id, model_call_id, call)
-                started = monotonic_ns()
-                result = await self.tools.execute(call, context=tool_context)
-                result_message = ToolResultMessage(
-                    tool_call_id=call.id, tool_name=call.name, content=result.content,
-                    is_error=result.is_error, timestamp=time_ns() // 1_000_000,
-                    details=result.details, usage=result.usage,
-                    duration_ms=(monotonic_ns() - started) // 1_000_000,
-                )
-                record = await self.runs.save_tool_result(run_id, session_id, record_id, result, result_message)
-                state.append_committed(record)
-                results.append(result)
-                result_messages.append(record.message)
-            decision = decide_next_step(results)
+            batch = await self.scheduler.execute_batch(calls, context=tool_context, model_call_id=model_call_id,
+                                                        executor=self.tools, on_committed=state.append_committed)
+            decision = decide_next_step(batch.results)
             if decision.action == "complete":
-                return RunResult(run_id, session_id, None, decision.reason, result_messages)
+                return RunResult(run_id, session_id, None, decision.reason, batch.messages)
         raise RunExecutionError("Maximum model turns exceeded", "turn_limit")
 
     async def _response(self, run_id: UUID, request: ModelRequest) -> AssistantMessage:

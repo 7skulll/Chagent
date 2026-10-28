@@ -17,6 +17,8 @@ class Settings:
     db_timeout: float = 5.0
     allow_host_commands: bool = False
     max_turns: int = 32
+    max_tool_concurrency: int = 4
+    memory_worker_concurrency: int = 1
 
     def __post_init__(self) -> None:
         if not self.database_url.strip():
@@ -35,6 +37,11 @@ class Settings:
             raise ValueError("CHAGENT_DB_TIMEOUT must be finite and positive")
         if not 1 <= self.max_turns <= 128:
             raise ValueError("CHAGENT_MAX_TURNS must be between 1 and 128")
+        if isinstance(self.max_tool_concurrency, bool) or not isinstance(self.max_tool_concurrency, int) or not 1 <= self.max_tool_concurrency <= 32:
+            raise ValueError("CHAGENT_MAX_TOOL_CONCURRENCY must be an integer between 1 and 32")
+        if isinstance(self.memory_worker_concurrency, bool) or not isinstance(self.memory_worker_concurrency, int) \
+                or not 1 <= self.memory_worker_concurrency <= 4:
+            raise ValueError("CHAGENT_MEMORY_WORKER_CONCURRENCY must be an integer between 1 and 4")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -49,4 +56,6 @@ class Settings:
             db_timeout=float(values.get("CHAGENT_DB_TIMEOUT", "5")),
             allow_host_commands=allow_commands == "true",
             max_turns=int(values.get("CHAGENT_MAX_TURNS", "32")),
+            max_tool_concurrency=int(values.get("CHAGENT_MAX_TOOL_CONCURRENCY", "4")),
+            memory_worker_concurrency=int(values.get("CHAGENT_MEMORY_WORKER_CONCURRENCY", "1")),
         )

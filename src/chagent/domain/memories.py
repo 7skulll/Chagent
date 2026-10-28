@@ -16,12 +16,15 @@ class MemoryPolicy:
     max_tokens: int = 2048
     max_items: int = 8
     timeout: float = 20
+    max_attempts: int = 3
 
     def __post_init__(self):
         if not 1 <= self.max_tokens <= 16000 or not 1 <= self.max_items <= 20:
             raise ValueError("Invalid memory budget")
         if not math.isfinite(self.timeout) or self.timeout <= 0:
             raise ValueError("Invalid memory extraction timeout")
+        if isinstance(self.max_attempts, bool) or not 1 <= self.max_attempts <= 10:
+            raise ValueError("Invalid memory job attempt limit")
 
     @classmethod
     def from_env(cls, env=None):
@@ -31,7 +34,8 @@ class MemoryPolicy:
             raise ValueError("Memory flags must be true or false")
         try:
             return cls(flags[0] == "true", flags[1] == "true", int(values.get("CHAGENT_MEMORY_TOKENS", "2048")),
-                       int(values.get("CHAGENT_MEMORY_ITEMS", "8")), float(values.get("CHAGENT_MEMORY_TIMEOUT", "20")))
+                       int(values.get("CHAGENT_MEMORY_ITEMS", "8")), float(values.get("CHAGENT_MEMORY_TIMEOUT", "20")),
+                       int(values.get("CHAGENT_MEMORY_ATTEMPTS", "3")))
         except (ValueError, OverflowError):
             raise ValueError("Invalid memory configuration") from None
 

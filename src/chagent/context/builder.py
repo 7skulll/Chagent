@@ -6,14 +6,13 @@ import json
 from time import time_ns
 from typing import Protocol
 
+from chagent.context.projection import ProjectionCache
 from chagent.context.tokens import ByteTokenCounter, TokenCounter
 from chagent.domain.context import ContextPolicy, ContextSelection, ContextSnapshot
 from chagent.domain.messages import AssistantMessage, Message, SystemMessage, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.runs import StoredMessage
 from chagent.domain.sessions import TaskState
 from chagent.domain.summaries import SessionSummary
-from chagent.domain.artifacts import artifact_text
-from chagent.domain.messages import TextContent, ImageContent
 from chagent.domain.tools import Tool
 from chagent.models.base import Model, ModelRequest
 from uuid import UUID
@@ -57,6 +56,7 @@ class BasicContextBuilder:
         *, task_state: TaskState | None = None, current_run_id: UUID | None = None,
         summary: SessionSummary | None = None,
         allow_over_budget: bool = False,
+        cache: ProjectionCache | None = None,
     ) -> BuiltContext:
         original = history
         if len({item.id for item in history}) != len(history):
@@ -97,26 +97,14 @@ class BasicContextBuilder:
 
         groups: list[list[StoredMessage]] = []
         pinned: set[UUID] = set()
-        prepared: dict[UUID, Message] = {}
+        projections = cache if cache is not None else ProjectionCache()
+        visible = {}
         for item in history:
-            message = deepcopy(item.message)
-            if isinstance(message, ToolResultMessage):
-                if message.artifact is not None:
-                    message.content = [TextContent(artifact_text(message.artifact)),
-                                       *(block for block in message.content if isinstance(block, ImageContent))]
-                    message.artifact = None
-                # Host/UI metadata must not silently become model context.
-                message.details = None
-                message.usage = None
-                message.duration_ms = None
-            if isinstance(message, AssistantMessage):
-                message.usage = None
-                message.duration_ms = None
-            prepared[item.id] = message
-            if isinstance(message, SystemMessage):
+            visible[item.id] = projections.project(item, self.counter)
+            if isinstance(item.message, SystemMessage):
                 pinned.add(item.id)
                 continue
-            if isinstance(message, UserMessage):
+            if isinstance(item.message, UserMessage):
                 groups.append([])
             if not groups:
                 if summary is None:
@@ -140,9 +128,18 @@ class BasicContextBuilder:
 
         def render(identities: set[UUID]) -> list[Message]:
             reference = [] if summary is None else [self.summary_message(summary.content)]
-            return [system, *reference, *(prepared[item.id] for item in history if item.id in identities)]
+            # Copies, so a mutated request can never corrupt the projection cache.
+            return [deepcopy(system), *reference,
+                    *(deepcopy(visible[item.id].message) for item in history if item.id in identities)]
 
-        required_cost = self.counter.count(render(selected))
+        # Counters that promise additivity let us select turns from cumulative
+        # per-message costs; every other counter keeps exact re-rendering.
+        additive = getattr(self.counter, "additive", False)
+        fixed_cost = (self.counter.count([system] + ([] if summary is None
+                                                    else [self.summary_message(summary.content)]))
+                      if additive else 0)
+        required_cost = (fixed_cost + sum(visible[identity].cost for identity in selected) if additive
+                         else self.counter.count(render(selected)))
         if required_cost > budget and not allow_over_budget:
             raise ContextBudgetError(
                 f"Required context estimate {required_cost} exceeds input budget {budget}; "
@@ -150,6 +147,7 @@ class BasicContextBuilder:
                 required_tokens=required_cost, input_budget=budget,
             )
         exclusion = "history_limit"
+        running = required_cost
         for group in reversed(groups):
             identities = {item.id for item in group}
             if identities <= selected:
@@ -158,10 +156,12 @@ class BasicContextBuilder:
             if len(trial) > self.policy.max_history_messages:
                 exclusion = "history_limit"
                 break
-            if self.counter.count(render(trial)) > budget:
+            trial_cost = (running + sum(visible[identity].cost for identity in identities - selected) if additive
+                          else self.counter.count(render(trial)))
+            if trial_cost > budget:
                 exclusion = "token_budget"
                 break
-            selected = trial
+            selected, running = trial, trial_cost
             reasons.update({identity: "recent_complete_turn" for identity in identities})
         messages = render(selected)
         return BuiltContext(
@@ -181,7 +181,8 @@ class BasicContextBuilder:
                 summary_id=str(summary.id) if summary else None,
                 summary_revision=summary.revision if summary else None,
                 summary_covered_through=summary.covered_through_sequence if summary else None,
-                projected_token_estimate=self.counter.count(render(set(prepared))),
+                projected_token_estimate=(fixed_cost + sum(visible[item.id].cost for item in history) if additive
+                                          else self.counter.count(render(set(visible)))),
                 artifact_ids=[item.message.artifact.id for item in history if item.id in selected
                               and isinstance(item.message, ToolResultMessage) and item.message.artifact is not None],
                 summary_source_run_id=str(summary.source_run_id) if summary and summary.source_run_id else None,

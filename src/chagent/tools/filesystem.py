@@ -30,7 +30,9 @@ class FileTool(AgentTool):
             name=name, label=name, description=description,
             parameters={"type": "object", "properties": properties, "required": required, "additionalProperties": False},
             requires_workspace=True, replay="safe" if read_only else "never",
+            execution_mode="parallel" if read_only else "sequential",
         )
+        self.read_only = read_only
 
     async def execute(
         self, tool_call_id: str, params: JsonObject, signal: asyncio.Event | None = None,
@@ -40,7 +42,17 @@ class FileTool(AgentTool):
             raise asyncio.CancelledError()
         if context is None:
             raise PermissionError("A session workspace is required")
-        return self.handle(WorkspaceFS(context.workspace), params)
+        filesystem = WorkspaceFS(context.workspace)
+        if not self.read_only:
+            return self.handle(filesystem, params)
+        task = asyncio.create_task(asyncio.to_thread(self.handle, filesystem, params))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # A thread cannot be forcibly cancelled. Drain it before releasing
+            # its scheduler slot so late reads cannot cross a write barrier.
+            await asyncio.gather(task, return_exceptions=True)
+            raise
 
     def handle(self, filesystem: WorkspaceFS, params: JsonObject) -> AgentToolResult:
         raise NotImplementedError

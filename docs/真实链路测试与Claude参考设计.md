@@ -156,5 +156,6 @@ env -u CHAGENT_API_KEY uv run --env-file .env python scripts/test_live_chain.py 
 - [首次完整场景结果](diagnostics/live-chain-2026-10-28-initial.json)，包含最初的 SSE 脚本断言失败，数据未改写
 - [修正 SSE 解析后的专项复测](diagnostics/live-chain-2026-10-28-web-retest.json)
 - [普通偏好命令的失败复现](diagnostics/live-chain-2026-10-28-explicit-retest.json)
+- [记忆提取移出运行后的完整复测](diagnostics/live-chain-step4-2026-10-28.json)：9 个场景 8 通过。`automatic_memory_candidate` 证实事件顺序为 `run_completed` → `memory_extraction_started` → `memory_saved`，提取是独立的 `purpose=memory` 请求且在运行终结之后发生；`explicit_memory` 仍因模型自行写 `memory.json` 而失败，属第 6 节待修复项，不是回归。
 
 脚本后续已经加强显式命令的“不得多余调用文件工具”断言。因此初次记录中的 passed=true 只表示当时的存储／协议检查通过，不应被解读为命令行为正确。所有结果必须结合具体 checks 和本报告理解。

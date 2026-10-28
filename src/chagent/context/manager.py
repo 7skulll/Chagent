@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from chagent.agent.types import RunState
 from chagent.context.builder import BasicContextBuilder, BuiltContext, ContextBudgetError
 from chagent.context.compactor import ContextCompactor, CompactionError, PROMPT_VERSION
+from chagent.context.projection import ProjectionCache
 from chagent.context.segments import exchanges
 from chagent.domain.messages import SystemMessage, UserMessage
 from chagent.domain.summaries import CompactionPolicy, SessionSummary
@@ -22,9 +23,16 @@ class ContextManager:
         self.policy = policy or CompactionPolicy.from_env()
         self.compactor = ContextCompactor(builder, summaries, self.policy)
         self._attempted: dict[UUID, tuple[int, int]] = {}
+        # One projection cache per run: appended messages are projected and
+        # counted once, not once per model turn.
+        self._projections: dict[UUID, ProjectionCache] = {}
 
     def release(self, run_id: UUID):
         self._attempted.pop(run_id, None)
+        self._projections.pop(run_id, None)
+
+    def _cache(self, run_id: UUID) -> ProjectionCache:
+        return self._projections.setdefault(run_id, ProjectionCache())
 
     @staticmethod
     def _checked(built):
@@ -44,7 +52,8 @@ class ContextManager:
 
         async def build(summary):
             return await self.builder.build(history, model, tools, task_state=task_state,
-                                            current_run_id=run_id, summary=summary, allow_over_budget=True)
+                                            current_run_id=run_id, summary=summary, allow_over_budget=True,
+                                            cache=self._cache(run_id))
 
         baseline = await build(previous)
         omissions = any(not item.selected and item.reason != "summarized" for item in baseline.snapshot.selections)

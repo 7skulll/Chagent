@@ -12,6 +12,7 @@ from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
 
 from chagent.bootstrap import create_demo_runner
+from chagent.agent.runner import RunFailedError
 from chagent.config import Settings
 from chagent.domain.memories import MemoryPolicy, MemoryProposal
 from chagent.domain.messages import AssistantMessage, TextContent, UserMessage
@@ -50,6 +51,14 @@ class ExtractClient(FakeModelClient):
         yield DoneEvent(reason="stop", message=message)
 
 
+class BrokenClient(FakeModelClient):
+    """Provider failure while answering; the run must fail without a memory job."""
+
+    async def stream(self, request):
+        raise RuntimeError("provider unavailable")
+        yield  # pragma: no cover - makes this an async generator
+
+
 @unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")
 class MemoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -70,6 +79,10 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def drop_schema(self):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
+
+    async def extract(self, timeout=10):
+        """Drain queued extraction: the run no longer waits for it."""
+        return await self.runner.memory_worker.drain(timeout=timeout)
 
     async def test_explicit_memory_survives_restart_and_is_used_in_new_session(self):
         result = await self.runner.run(self.session, "/remember user response.language = 用中文回答")
@@ -112,6 +125,7 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.runner.client = ExtractClient()
         for _ in range(2):
             await self.runner.run(self.session, "我偏好中文，并希望回答简洁。")
+            await self.extract()
         pending = (await self.repository.list(self.workspace, status="candidate"))["items"]
         self.assertEqual(len(pending), 1)
         self.assertEqual(await self.repository.recall(self.workspace, ["中文"]), [])
@@ -119,6 +133,7 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(memory.status, "active")
         self.assertEqual(len(await self.repository.revisions(memory.id, self.workspace)), 2)
         await self.runner.run(self.session, "我偏好中文，并希望回答简洁。")
+        await self.extract()
         self.assertEqual((await self.repository.list(self.workspace, status="candidate"))["items"], [])
 
     async def test_conflict_accept_requires_reviewed_identity_and_revision(self):
@@ -139,10 +154,12 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.runner.memory_service.policy = MemoryPolicy()
         self.runner.client = ExtractClient()
         await self.runner.run(self.session, "我偏好中文。")
+        await self.extract()
         memory = (await self.repository.list(self.workspace, status="candidate"))["items"][0]
         memory = await self.repository.change(memory.id, self.workspace, expected_revision=memory.revision, action="accept")
         await self.repository.change(memory.id, self.workspace, expected_revision=memory.revision, action="delete")
         await self.runner.run(self.session, "我偏好中文。")
+        await self.extract()
         self.assertEqual(await self.repository.recall(self.workspace, ["中文"]), [])
         self.assertEqual((await self.repository.list(self.workspace, status="candidate"))["items"], [])
 
@@ -159,26 +176,36 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         for mode in ("bad_evidence", "credentials", "exception"):
             self.runner.client = ExtractClient(mode)
             result = await self.runner.run(self.session, "我偏好中文。")
+            await self.extract()
             self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
             events = await self.runner.runs.events(result.run_id)
             self.assertIn("memory_extraction_failed", [event["type"] for event in events])
             self.assertNotIn("never-log-this-credential", json.dumps(events, default=str))
         self.assertEqual((await self.repository.list(self.workspace, status="all"))["items"], [])
 
-    async def test_cancelled_extraction_and_incomplete_sources_cannot_write(self):
+    async def test_cancelled_extraction_returns_job_to_queue_without_writing(self):
         self.runner.memory_service.policy = MemoryPolicy()
         self.runner.client = ExtractClient("block")
-        ids = []
-        task = asyncio.create_task(self.runner.run(self.session, "我偏好中文。", on_started=ids.append))
+        result = await self.runner.run(self.session, "我偏好中文。")
+        # The answer is already durable; cancelling background extraction cannot
+        # change the run's outcome.
+        self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
+        self.runner.memory_worker.start()
         await asyncio.wait_for(self.runner.client.entered.wait(), 5)
-        self.runner.cancel(ids[0])
-        with self.assertRaises(asyncio.CancelledError):
-            await task
+        await self.runner.memory_worker.stop()
+        job = await self.runner.memory_worker.jobs.for_run(result.run_id)
+        self.assertEqual(job["status"], "queued")
         self.assertEqual((await self.repository.list(self.workspace, status="all"))["items"], [])
+        # Extraction alone was cancelled; a source from a failed run still cannot
+        # be used as memory provenance.
+        self.runner.client = BrokenClient()
+        with self.assertRaises(RunFailedError) as failure:
+            await self.runner.run(self.session, "我偏好中文。")
         source = (await self.runner.conversations.messages(self.session))[0]
         with self.assertRaises(ValueError):
             await self.repository.propose(MemoryProposal("bad.source", "中文", source_session_id=self.session,
-                source_run_id=ids[0], source_message_ids=[str(source.id)], evidence="中文"), self.workspace)
+                source_run_id=failure.exception.run_id, source_message_ids=[str(source.id)], evidence="中文"),
+                self.workspace)
 
     async def test_memory_commit_failure_rolls_back_without_failing_completed_task(self):
         async def broken(connection, session_id, run_id, proposals):
@@ -194,6 +221,7 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.runner.memory_service.policy = MemoryPolicy()
         self.runner.client = ExtractClient()
         await self.runner.run(self.session, "我偏好中文。")
+        await self.extract()
         candidate = (await self.repository.list(self.workspace, status="candidate"))["items"][0]
         await self.runner.run(self.session, "/remember user response.language = 用中文简洁回答")
         memory = (await self.repository.list(self.workspace))["items"][0]
@@ -207,7 +235,10 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.runner.client = ExtractClient("block")
         result = await self.runner.run(self.session, "我偏好中文。")
         self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
+        await self.extract()
         self.assertEqual((await self.repository.list(self.workspace, status="all"))["items"], [])
+        job = await self.runner.memory_worker.jobs.for_run(result.run_id)
+        self.assertEqual((job["status"], job["attempts"]), ("queued", 1))
 
 
 class MemoryUnitTests(unittest.TestCase):

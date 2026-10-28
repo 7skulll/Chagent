@@ -1,14 +1,38 @@
 from copy import deepcopy
+from dataclasses import asdict
+import json
 import unittest
 from uuid import uuid4
 
 from chagent.context.builder import BasicContextBuilder, ContextBudgetError, ContextIntegrityError
+from chagent.context.projection import ProjectionCache
 from chagent.domain.context import ContextPolicy
 from chagent.domain.messages import AssistantMessage, SystemMessage, TextContent, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.runs import StoredMessage
 from chagent.domain.sessions import TaskState
 from chagent.domain.tools import Tool
 from chagent.models.base import Model
+
+
+class RecordingCounter:
+    """Same numbers as ByteTokenCounter, but records serialization volume.
+
+    ``additive=False`` mimics a future counter (for example one that models
+    inter-message structure) that cannot promise additive per-message costs.
+    """
+
+    name = "recording_estimate"
+
+    def __init__(self, additive=True):
+        self.additive = additive
+        self.calls = 0
+        self.serialized = 0
+
+    def count(self, messages):
+        self.calls += 1
+        self.serialized += len(messages)
+        return sum(len(json.dumps(asdict(message), ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 8
+                   for message in messages)
 
 
 class ContextTests(unittest.IsolatedAsyncioTestCase):
@@ -94,3 +118,60 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(built.snapshot.input_budget, 100_000 - 128 - 256)
         with self.assertRaises(ContextBudgetError):
             await BasicContextBuilder(policy=ContextPolicy(output_tokens=129)).build(history, self.model, [])
+
+
+class CountingTests(unittest.IsolatedAsyncioTestCase):
+    """The projection cache must not change what is selected, only its cost."""
+
+    def setUp(self):
+        self.model = Model("test", "test", "fake", 200_000, 128)
+
+    def history(self, turns):
+        records, sequence = [], 0
+        for index in range(turns):
+            sequence += 1
+            records.append(StoredMessage(uuid4(), sequence, UserMessage(f"问题 {index} " + "字" * 180, sequence), uuid4()))
+            sequence += 1
+            records.append(StoredMessage(uuid4(), sequence, AssistantMessage(
+                [TextContent(f"回答 {index} " + "字" * 180)], "fake", "test", "test", sequence, "stop"), records[-1].run_id))
+        return records
+
+    def snapshot(self, built):
+        return (built.snapshot.source_message_ids, built.snapshot.token_estimate,
+                built.snapshot.projected_token_estimate, built.snapshot.message_count,
+                [(item.message_id, item.selected, item.reason) for item in built.snapshot.selections])
+
+    async def test_additive_and_fallback_counters_select_the_same_context(self):
+        history = self.history(60)
+        model = Model("test", "test", "fake", 12_000, 128)
+        results = []
+        for counter in (RecordingCounter(True), RecordingCounter(False)):
+            built = await BasicContextBuilder(counter=counter).build(history, model, [], current_run_id=history[-1].run_id)
+            results.append(self.snapshot(built))
+        self.assertEqual(results[0], results[1])
+        self.assertTrue(results[0][0], "the budget must still select completed turns")
+
+    async def test_selection_work_is_linear_and_reuses_the_projection_cache(self):
+        history = self.history(60)
+        counter = RecordingCounter(True)
+        builder = BasicContextBuilder(counter=counter, policy=ContextPolicy(max_history_messages=1000))
+        cache = ProjectionCache()
+        first = await builder.build(history, self.model, [], current_run_id=history[-1].run_id, cache=cache)
+        self.assertLessEqual(counter.serialized, 3 * len(history),
+                             "selection must not re-serialize every candidate turn")
+        baseline = counter.serialized
+        # A second turn in the same run only projects and counts the new messages.
+        appended = history + [StoredMessage(uuid4(), history[-1].sequence + 1, UserMessage("more", 1), history[-1].run_id)]
+        second = await builder.build(appended, self.model, [], current_run_id=history[-1].run_id, cache=cache)
+        self.assertLessEqual(counter.serialized - baseline, len(appended) + 8,
+                             "a cached projection must not be recomputed for new turns")
+        self.assertEqual(second.snapshot.message_count, first.snapshot.message_count + 1)
+
+    async def test_cached_projection_does_not_leak_mutations_into_later_builds(self):
+        history = self.history(3)
+        cache = ProjectionCache()
+        builder = BasicContextBuilder()
+        first = await builder.build(history, self.model, [], current_run_id=history[-1].run_id, cache=cache)
+        first.request.messages[-1].content[0].text = "mutated"
+        second = await builder.build(history, self.model, [], current_run_id=history[-1].run_id, cache=cache)
+        self.assertEqual(second.request.messages[-1].content[0].text, history[-1].message.content[0].text)

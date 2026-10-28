@@ -15,3 +15,6 @@ dist/
 # Vendored upstream reference sources (not this project's code)
 /nanobot-main/
 /pi-main1.4.0/
+
+# Assistant workspace state (local notes and caches, not project content)
+.workbuddy/

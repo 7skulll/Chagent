@@ -14,7 +14,7 @@ class EchoTool(AgentTool):
             parameters={
                 "type": "object", "properties": {"text": {"type": "string"}},
                 "required": ["text"], "additionalProperties": False,
-            }, replay="safe",
+            }, replay="safe", execution_mode="parallel",
         )
 
     async def execute(

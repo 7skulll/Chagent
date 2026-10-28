@@ -153,14 +153,26 @@ function connectRun(runId, version) {
       if (!liveText) { const row = displayMessage({role: "assistant", content: ""}, $("live")); liveText = row.querySelector(".content"); }
       liveText.append(document.createTextNode(payload.delta)); $("status").textContent = "正在生成…";
     }
-    if (type === "tool_started") {
-      const row = textNode("div", `正在执行 · ${payload.name}`, "tool-status");
-      toolRows.set(payload.tool_call_id, {row, name: payload.name}); $("live").append(row);
-      $("status").textContent = `正在执行 ${payload.name}…`;
+    if (type === "tool_queued" || type === "tool_started") {
+      let tool = toolRows.get(payload.tool_call_id);
+      if (!tool) {
+        const row = textNode("div", "", "tool-status");
+        tool = {row, name: payload.name}; toolRows.set(payload.tool_call_id, tool); $("live").append(row);
+      }
+      tool.row.textContent = `${payload.name} · ${type === "tool_queued" ? "等待执行" : "正在执行"}`;
+      if (type === "tool_started") $("status").textContent = `正在执行 ${payload.name}…`;
     }
     if (type === "tool_completed") {
       const tool = toolRows.get(payload.tool_call_id);
       if (tool) { tool.row.textContent = `${tool.name} · ${payload.outcome_unknown ? "结果未知" : payload.is_error ? "失败" : "完成"}`; tool.row.classList.toggle("failed", payload.is_error || payload.outcome_unknown); }
+    }
+    if (type === "tool_progress") {
+      const tool = toolRows.get(payload.tool_call_id);
+      if (tool) tool.row.textContent = `${tool.name} · ${payload.text}`;
+    }
+    if (type === "tool_interrupted" || type === "tool_cancelled") {
+      const tool = toolRows.get(payload.tool_call_id);
+      if (tool) { tool.row.textContent = `${tool.name} · ${type === "tool_cancelled" ? "未执行，已取消" : "结果未知"}`; tool.row.classList.add("failed"); }
     }
     if (nearBottom) scrollBottom();
   });

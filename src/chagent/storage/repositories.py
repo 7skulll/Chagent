@@ -299,14 +299,25 @@ class RunRepository:
             })
         return record
 
-    async def start_tool_call(self, run_id: UUID, model_call_id: UUID, call: ToolCall) -> UUID:
-        record_id = uuid4()
+    async def queue_tool_calls(self, run_id: UUID, model_call_id: UUID, calls: list[ToolCall]) -> list[UUID]:
+        identities = [uuid4() for _ in calls]
         async with self.database.transaction() as connection:
-            await connection.execute(
-                "INSERT INTO tool_calls (id, run_id, model_call_id, call_id, name, arguments) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (record_id, run_id, model_call_id, call.id, call.name, Jsonb(call.arguments)),
-            )
+            for index, (identity, call) in enumerate(zip(identities, calls)):
+                await connection.execute(
+                    "INSERT INTO tool_calls (id, run_id, model_call_id, call_id, name, arguments, status, call_index) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s)",
+                    (identity, run_id, model_call_id, call.id, call.name, Jsonb(call.arguments), index))
+                await self._event(connection, run_id, "tool_queued", {"tool_call_id": call.id, "name": call.name})
+        return identities
+
+    async def start_tool_call(self, run_id: UUID, model_call_id: UUID, call: ToolCall, *, record_id: UUID) -> UUID:
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "UPDATE tool_calls SET status = 'running' WHERE id = %s AND run_id = %s "
+                "AND model_call_id = %s AND call_id = %s AND status = 'queued' RETURNING id",
+                (record_id, run_id, model_call_id, call.id))
+            if await cursor.fetchone() is None:
+                raise StateConflictError("Tool call is no longer queued")
             await self._event(connection, run_id, "tool_started", {
                 "tool_call_id": call.id, "name": call.name,
             })
@@ -348,10 +359,18 @@ class RunRepository:
             )
             if await cursor.fetchone() is None:
                 raise RuntimeError("Run is missing or already terminal")
-            await connection.execute(
+            cursor = await connection.execute(
                 "UPDATE tool_calls SET status = 'unknown', ended_at = now() "
-                "WHERE run_id = %s AND status = 'running'", (run_id,),
+                "WHERE run_id = %s AND status = 'running' RETURNING call_id, name", (run_id,),
             )
+            unknown = await cursor.fetchall()
+            cursor = await connection.execute(
+                "UPDATE tool_calls SET status = 'cancelled', ended_at = now() "
+                "WHERE run_id = %s AND status = 'queued' RETURNING call_id, name", (run_id,))
+            cancelled = await cursor.fetchall()
+            for kind, rows in (("tool_interrupted", unknown), ("tool_cancelled", cancelled)):
+                for row in rows:
+                    await self._event(connection, run_id, kind, {"tool_call_id": row["call_id"], "name": row["name"]})
             await connection.execute(
                 "UPDATE model_calls SET status = %s, ended_at = now() "
                 "WHERE run_id = %s AND status = 'running'",

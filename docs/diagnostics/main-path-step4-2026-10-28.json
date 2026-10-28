@@ -1,0 +1,4094 @@
+{
+  "recorded_at_utc": "2026-10-28T06:15:47.782751+00:00",
+  "environment": {
+    "python": "3.13.9",
+    "platform": "Darwin",
+    "postgresql": "16.15 (Homebrew)"
+  },
+  "method": {
+    "repeats": 5,
+    "provider": "offline scripted; budget probes use MockTransport, no external HTTP",
+    "sql_count_excludes": "implicit BEGIN/COMMIT, fetch, pool maintenance, setup and validation",
+    "span_times": "inclusive and nested; do not sum overlapping spans",
+    "output_chars": 1024,
+    "builder_history_limit": 1000,
+    "scope": "single active run, no browser end-to-end or Pi/Codex speed comparison"
+  },
+  "source_sha256": {
+    "agent/runner.py": "877b2fb42fea6833dabc9c1f2b9b4a7e91fa78adb450808e3161cd7becb95118",
+    "context/builder.py": "a9fc8fb7970f502317c17f4a2428b813b48a85ac20ac3a21757867b7f54540e2",
+    "context/manager.py": "a870fb8d466e00b55ea3242e807aa454d6ba429285d8bdddc65fafa5eac40c0f",
+    "memory/service.py": "095af9da1a2671b46a9e974cab42119367ef84fef15c5dd1b83ffacf2d26067f",
+    "storage/repositories.py": "53a0d87568a80e89c6d5a7646692224c1ace4d9f9cb34a6890744489596e584f",
+    "tools/scheduler.py": "bc60f47f3d0a56dc01f51a939b357ad07bbf54de30b2e66927418ac77e7bae3a",
+    "tools/executor.py": "49ee105eebb8fe8bca922b93269f810f461fd8b00cae668a68edf890e6964cf9",
+    "tools/filesystem.py": "54fc87b571ab5948235b8eafd92924849eb9168edaa199a851841d7b7a007972",
+    "models/transcript.py": "a6d6105ceb054282ee8b7a840f9a96a9eb6c78012a6f12f21d4a99d9e20395e9",
+    "models/openai_chat.py": "36758ad0327ed3e6b3ab9d39bad618221a3f0385e4c5fabfffe9df6ee9eabf3a",
+    "web/app.py": "e9827b58c85352ee4496057d29de515d09a493140d6c46e59fa8d760283f9a7c"
+  },
+  "scenarios": {
+    "one_tool": {
+      "spec": {
+        "client": {
+          "steps": 1
+        }
+      },
+      "median_ms": 7.246,
+      "median_after_final_model_output_ms": 1.505,
+      "samples": [
+        {
+          "elapsed_ms": 8.569,
+          "first_text_committed_ms": 6.571,
+          "after_final_model_output_ms": 1.997,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 10,
+          "counter_calls": 7,
+          "messages_serialized_for_count": 11,
+          "sql_execute_calls": 44,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 3,
+            "start_tool_call": 3,
+            "save_tool_result": 4,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.412,
+            "other": 0.524,
+            "start_model_call": 0.871,
+            "save_response": 0.874,
+            "queue_tool_calls": 0.596,
+            "start_tool_call": 0.39,
+            "save_tool_result": 0.467,
+            "text_delta": 0.269,
+            "finish": 0.994
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.716
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 0.617
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.002
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 1.254
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.427
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 1.386
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 0.746
+            },
+            "start_tool_call": {
+              "calls": 1,
+              "total_ms": 0.532
+            },
+            "tool_execute": {
+              "calls": 1,
+              "total_ms": 0.035
+            },
+            "save_tool_result": {
+              "calls": 1,
+              "total_ms": 0.653
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.405
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.002
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.246
+            }
+          }
+        },
+        {
+          "elapsed_ms": 8.082,
+          "first_text_committed_ms": 6.576,
+          "after_final_model_output_ms": 1.505,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 10,
+          "counter_calls": 7,
+          "messages_serialized_for_count": 11,
+          "sql_execute_calls": 44,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 3,
+            "start_tool_call": 3,
+            "save_tool_result": 4,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.553,
+            "other": 0.877,
+            "start_model_call": 0.929,
+            "save_response": 0.8,
+            "queue_tool_calls": 0.306,
+            "start_tool_call": 0.318,
+            "save_tool_result": 0.433,
+            "text_delta": 0.136,
+            "finish": 0.686
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.717
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 0.608
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.002
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 1.334
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.406
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 1.142
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 0.485
+            },
+            "start_tool_call": {
+              "calls": 1,
+              "total_ms": 0.486
+            },
+            "tool_execute": {
+              "calls": 1,
+              "total_ms": 0.039
+            },
+            "save_tool_result": {
+              "calls": 1,
+              "total_ms": 0.622
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.386
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.941
+            }
+          }
+        },
+        {
+          "elapsed_ms": 7.246,
+          "first_text_committed_ms": 5.674,
+          "after_final_model_output_ms": 1.572,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 10,
+          "counter_calls": 7,
+          "messages_serialized_for_count": 11,
+          "sql_execute_calls": 44,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 3,
+            "start_tool_call": 3,
+            "save_tool_result": 4,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.553,
+            "other": 0.487,
+            "start_model_call": 0.688,
+            "save_response": 0.837,
+            "queue_tool_calls": 0.239,
+            "start_tool_call": 0.213,
+            "save_tool_result": 0.372,
+            "text_delta": 0.226,
+            "finish": 0.643
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.715
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 0.759
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.002
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 1.205
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.368
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 1.172
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 0.382
+            },
+            "start_tool_call": {
+              "calls": 1,
+              "total_ms": 0.344
+            },
+            "tool_execute": {
+              "calls": 1,
+              "total_ms": 0.03
+            },
+            "save_tool_result": {
+              "calls": 1,
+              "total_ms": 0.541
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.351
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.872
+            }
+          }
+        },
+        {
+          "elapsed_ms": 6.597,
+          "first_text_committed_ms": 5.158,
+          "after_final_model_output_ms": 1.438,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 10,
+          "counter_calls": 7,
+          "messages_serialized_for_count": 11,
+          "sql_execute_calls": 44,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 3,
+            "start_tool_call": 3,
+            "save_tool_result": 4,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.531,
+            "other": 0.483,
+            "start_model_call": 0.616,
+            "save_response": 0.679,
+            "queue_tool_calls": 0.229,
+            "start_tool_call": 0.209,
+            "save_tool_result": 0.294,
+            "text_delta": 0.161,
+            "finish": 0.652
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.69
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 0.572
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 0.974
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.299
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 1.013
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 0.506
+            },
+            "start_tool_call": {
+              "calls": 1,
+              "total_ms": 0.329
+            },
+            "tool_execute": {
+              "calls": 1,
+              "total_ms": 0.029
+            },
+            "save_tool_result": {
+              "calls": 1,
+              "total_ms": 0.453
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.281
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.884
+            }
+          }
+        },
+        {
+          "elapsed_ms": 7.056,
+          "first_text_committed_ms": 5.595,
+          "after_final_model_output_ms": 1.46,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 10,
+          "counter_calls": 7,
+          "messages_serialized_for_count": 11,
+          "sql_execute_calls": 44,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 3,
+            "start_tool_call": 3,
+            "save_tool_result": 4,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.476,
+            "other": 0.489,
+            "start_model_call": 0.684,
+            "save_response": 0.659,
+            "queue_tool_calls": 0.244,
+            "start_tool_call": 0.216,
+            "save_tool_result": 0.301,
+            "text_delta": 0.115,
+            "finish": 0.634
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.657
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 0.589
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 1.422
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.279
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 1.037
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 0.412
+            },
+            "start_tool_call": {
+              "calls": 1,
+              "total_ms": 0.379
+            },
+            "tool_execute": {
+              "calls": 1,
+              "total_ms": 0.032
+            },
+            "save_tool_result": {
+              "calls": 1,
+              "total_ms": 0.488
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.261
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.902
+            }
+          }
+        }
+      ]
+    },
+    "text_1_delta": {
+      "spec": {},
+      "median_ms": 5.159,
+      "median_after_final_model_output_ms": 1.997,
+      "samples": [
+        {
+          "elapsed_ms": 4.016,
+          "first_text_committed_ms": 2.621,
+          "after_final_model_output_ms": 1.394,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 5,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 27,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.48,
+            "other": 0.489,
+            "start_model_call": 0.365,
+            "text_delta": 0.113,
+            "save_response": 0.302,
+            "finish": 0.619
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.844
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.271
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.576
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.268
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 0.28
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.484
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.888
+            }
+          }
+        },
+        {
+          "elapsed_ms": 5.159,
+          "first_text_committed_ms": 2.404,
+          "after_final_model_output_ms": 2.754,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 5,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 27,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.465,
+            "other": 0.483,
+            "start_model_call": 0.311,
+            "text_delta": 0.112,
+            "save_response": 0.337,
+            "finish": 0.689
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.659
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.252
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.518
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.325
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 0.336
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 1.759
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.97
+            }
+          }
+        },
+        {
+          "elapsed_ms": 4.003,
+          "first_text_committed_ms": 2.443,
+          "after_final_model_output_ms": 1.56,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 5,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 27,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.48,
+            "other": 0.499,
+            "start_model_call": 0.331,
+            "text_delta": 0.126,
+            "save_response": 0.321,
+            "finish": 0.766
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.659
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.269
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.55
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.289
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 0.3
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.51
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.031
+            }
+          }
+        },
+        {
+          "elapsed_ms": 5.307,
+          "first_text_committed_ms": 3.31,
+          "after_final_model_output_ms": 1.997,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 5,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 27,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.533,
+            "other": 0.594,
+            "start_model_call": 0.6,
+            "text_delta": 0.3,
+            "save_response": 0.534,
+            "finish": 0.916
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.723
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.253
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 1.091
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.496
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 0.504
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.738
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.241
+            }
+          }
+        },
+        {
+          "elapsed_ms": 5.211,
+          "first_text_committed_ms": 3.119,
+          "after_final_model_output_ms": 2.091,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 5,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 27,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.692,
+            "other": 0.752,
+            "start_model_call": 0.493,
+            "text_delta": 0.184,
+            "save_response": 0.478,
+            "finish": 0.919
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.894
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.244
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.733
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.366
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 0.375
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.841
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.234
+            }
+          }
+        }
+      ]
+    },
+    "text_32_deltas": {
+      "spec": {
+        "client": {
+          "deltas": 32
+        }
+      },
+      "median_ms": 13.696,
+      "median_after_final_model_output_ms": 1.259,
+      "samples": [
+        {
+          "elapsed_ms": 13.696,
+          "first_text_committed_ms": 3.214,
+          "after_final_model_output_ms": 1.414,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.733,
+            "other": 0.756,
+            "start_model_call": 0.488,
+            "text_delta": 3.956,
+            "save_response": 0.344,
+            "finish": 0.629
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.96
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.253
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.724
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 9.397
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 9.467
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.517
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.879
+            }
+          }
+        },
+        {
+          "elapsed_ms": 10.677,
+          "first_text_committed_ms": 2.403,
+          "after_final_model_output_ms": 1.244,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.459,
+            "other": 0.483,
+            "start_model_call": 0.305,
+            "text_delta": 3.134,
+            "save_response": 0.279,
+            "finish": 0.539
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.622
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.391
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.497
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 7.213
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 7.287
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.462
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.763
+            }
+          }
+        },
+        {
+          "elapsed_ms": 18.366,
+          "first_text_committed_ms": 2.05,
+          "after_final_model_output_ms": 1.309,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.402,
+            "other": 0.398,
+            "start_model_call": 0.278,
+            "text_delta": 10.62,
+            "save_response": 0.286,
+            "finish": 0.607
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.555
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.246
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.453
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 15.18
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 15.261
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.451
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.835
+            }
+          }
+        },
+        {
+          "elapsed_ms": 18.055,
+          "first_text_committed_ms": 9.725,
+          "after_final_model_output_ms": 1.259,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.532,
+            "other": 0.592,
+            "start_model_call": 0.295,
+            "text_delta": 3.153,
+            "save_response": 0.288,
+            "finish": 0.552
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.701
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.253
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 7.798
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 7.235
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 7.313
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.443
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.794
+            }
+          }
+        },
+        {
+          "elapsed_ms": 10.744,
+          "first_text_committed_ms": 2.121,
+          "after_final_model_output_ms": 1.255,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.407,
+            "other": 0.391,
+            "start_model_call": 0.288,
+            "text_delta": 3.622,
+            "save_response": 0.273,
+            "finish": 0.636
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.564
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.253
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.462
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 7.586
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 7.679
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.413
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.815
+            }
+          }
+        }
+      ]
+    },
+    "text_128_deltas": {
+      "spec": {
+        "client": {
+          "deltas": 128
+        }
+      },
+      "median_ms": 32.666,
+      "median_after_final_model_output_ms": 1.294,
+      "samples": [
+        {
+          "elapsed_ms": 31.801,
+          "first_text_committed_ms": 2.242,
+          "after_final_model_output_ms": 1.29,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 132,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 281,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 256,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.474,
+            "other": 0.438,
+            "start_model_call": 0.305,
+            "text_delta": 12.622,
+            "save_response": 0.295,
+            "finish": 0.579
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.665
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.26
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.484
+            },
+            "text_delta": {
+              "calls": 128,
+              "total_ms": 28.219
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 28.507
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.456
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.002
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.809
+            }
+          }
+        },
+        {
+          "elapsed_ms": 32.666,
+          "first_text_committed_ms": 2.2,
+          "after_final_model_output_ms": 1.297,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 132,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 281,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 256,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.415,
+            "other": 0.399,
+            "start_model_call": 0.273,
+            "text_delta": 12.62,
+            "save_response": 0.294,
+            "finish": 0.554
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.569
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.252
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.45
+            },
+            "text_delta": {
+              "calls": 128,
+              "total_ms": 29.295
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 29.555
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.46
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.817
+            }
+          }
+        },
+        {
+          "elapsed_ms": 33.453,
+          "first_text_committed_ms": 2.25,
+          "after_final_model_output_ms": 1.083,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 132,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 281,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 256,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.407,
+            "other": 0.384,
+            "start_model_call": 0.27,
+            "text_delta": 12.539,
+            "save_response": 0.278,
+            "finish": 0.415
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.576
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.25
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.639
+            },
+            "text_delta": {
+              "calls": 128,
+              "total_ms": 30.134
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 30.378
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.437
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.624
+            }
+          }
+        },
+        {
+          "elapsed_ms": 32.597,
+          "first_text_committed_ms": 1.949,
+          "after_final_model_output_ms": 1.659,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 132,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 281,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 256,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.36,
+            "other": 0.226,
+            "start_model_call": 0.257,
+            "text_delta": 12.718,
+            "save_response": 0.313,
+            "finish": 0.554
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.521
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.243
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.586
+            },
+            "text_delta": {
+              "calls": 128,
+              "total_ms": 28.953
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 29.226
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.494
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.134
+            }
+          }
+        },
+        {
+          "elapsed_ms": 33.595,
+          "first_text_committed_ms": 2.122,
+          "after_final_model_output_ms": 1.294,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 132,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 281,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 256,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.399,
+            "other": 0.396,
+            "start_model_call": 0.289,
+            "text_delta": 12.737,
+            "save_response": 0.271,
+            "finish": 0.418
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.577
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.253
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.493
+            },
+            "text_delta": {
+              "calls": 128,
+              "total_ms": 30.186
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 30.437
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.622
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.648
+            }
+          }
+        }
+      ]
+    },
+    "text_32_deltas_5ms_sink": {
+      "spec": {
+        "client": {
+          "deltas": 32
+        },
+        "event_delay": 0.005
+      },
+      "median_ms": 235.683,
+      "median_after_final_model_output_ms": 7.175,
+      "samples": [
+        {
+          "elapsed_ms": 201.613,
+          "first_text_committed_ms": 7.613,
+          "after_final_model_output_ms": 5.276,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.359,
+            "other": 0.223,
+            "start_model_call": 0.256,
+            "text_delta": 5.594,
+            "save_response": 1.652,
+            "finish": 1.749
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.541
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.251
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.451
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 194.583
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 194.743
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 2.771
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.004
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.416
+            }
+          }
+        },
+        {
+          "elapsed_ms": 227.215,
+          "first_text_committed_ms": 12.759,
+          "after_final_model_output_ms": 3.791,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.089,
+            "other": 2.011,
+            "start_model_call": 0.902,
+            "text_delta": 17.491,
+            "save_response": 1.094,
+            "finish": 1.397
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 2.189
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.514
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 1.317
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 216.678
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 217.124
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 1.642
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.003
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.054
+            }
+          }
+        },
+        {
+          "elapsed_ms": 235.683,
+          "first_text_committed_ms": 9.872,
+          "after_final_model_output_ms": 7.175,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.272,
+            "other": 0.7,
+            "start_model_call": 0.568,
+            "text_delta": 21.53,
+            "save_response": 1.898,
+            "finish": 2.769
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.652
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.307
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.842
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 223.828
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 224.812
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 2.859
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.008
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 4.121
+            }
+          }
+        },
+        {
+          "elapsed_ms": 241.856,
+          "first_text_committed_ms": 13.195,
+          "after_final_model_output_ms": 7.798,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.304,
+            "other": 1.725,
+            "start_model_call": 1.127,
+            "text_delta": 22.062,
+            "save_response": 2.117,
+            "finish": 2.627
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.769
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.747
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.003
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 1.893
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 226.954
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 227.521
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 3.634
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.009
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 3.981
+            }
+          }
+        },
+        {
+          "elapsed_ms": 242.292,
+          "first_text_committed_ms": 12.043,
+          "after_final_model_output_ms": 8.511,
+          "memory_drain_ms": null,
+          "task_model_calls": 1,
+          "memory_model_calls": 0,
+          "events": 36,
+          "counter_calls": 3,
+          "messages_serialized_for_count": 4,
+          "sql_execute_calls": 89,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 3,
+            "text_delta": 64,
+            "save_response": 4,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.448,
+            "other": 0.775,
+            "start_model_call": 0.925,
+            "text_delta": 21.698,
+            "save_response": 2.084,
+            "finish": 3.67
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.931
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.695
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.002
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 1.417
+            },
+            "text_delta": {
+              "calls": 32,
+              "total_ms": 227.984
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 228.586
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 3.105
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.008
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 5.155
+            }
+          }
+        }
+      ]
+    },
+    "three_20ms_tools_serial": {
+      "spec": {
+        "client": {
+          "steps": 1,
+          "calls": 3
+        },
+        "tool_delay": 0.02,
+        "max_concurrency": 1
+      },
+      "median_ms": 97.78,
+      "median_after_final_model_output_ms": 4.592,
+      "samples": [
+        {
+          "elapsed_ms": 97.78,
+          "first_text_committed_ms": 93.186,
+          "after_final_model_output_ms": 4.592,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.606,
+            "other": 0.871,
+            "start_model_call": 2.389,
+            "save_response": 2.35,
+            "queue_tool_calls": 3.075,
+            "start_tool_call": 2.485,
+            "save_tool_result": 5.677,
+            "text_delta": 0.389,
+            "finish": 1.474
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 2.135
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 2.213
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.005
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 3.707
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.865
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 4.003
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 3.59
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 4.172
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 63.196
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 8.751
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.793
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.005
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.315
+            }
+          }
+        },
+        {
+          "elapsed_ms": 100.027,
+          "first_text_committed_ms": 93.471,
+          "after_final_model_output_ms": 6.551,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.543,
+            "other": 0.715,
+            "start_model_call": 3.225,
+            "save_response": 2.927,
+            "queue_tool_calls": 2.45,
+            "start_tool_call": 2.159,
+            "save_tool_result": 4.284,
+            "text_delta": 0.799,
+            "finish": 2.402
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 2.016
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 3.834
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.007
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 5.751
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 1.708
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 4.422
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 3.011
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 3.453
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 62.96
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 6.792
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 1.616
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.006
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 3.488
+            }
+          }
+        },
+        {
+          "elapsed_ms": 98.627,
+          "first_text_committed_ms": 94.788,
+          "after_final_model_output_ms": 3.837,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.564,
+            "other": 0.983,
+            "start_model_call": 2.756,
+            "save_response": 1.969,
+            "queue_tool_calls": 2.036,
+            "start_tool_call": 3.186,
+            "save_tool_result": 5.864,
+            "text_delta": 0.356,
+            "finish": 1.436
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 2.083
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 2.558
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.007
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 4.068
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.752
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 3.102
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 2.95
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 4.978
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 64.05
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 8.989
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.686
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.005
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.153
+            }
+          }
+        },
+        {
+          "elapsed_ms": 93.791,
+          "first_text_committed_ms": 89.015,
+          "after_final_model_output_ms": 4.772,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.114,
+            "other": 0.682,
+            "start_model_call": 3.489,
+            "save_response": 2.003,
+            "queue_tool_calls": 1.843,
+            "start_tool_call": 3.007,
+            "save_tool_result": 3.585,
+            "text_delta": 0.684,
+            "finish": 1.826
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.509
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 2.477
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.005
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 4.872
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 1.261
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 3.054
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 2.193
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 4.259
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 63.679
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 5.614
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 1.197
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.005
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.675
+            }
+          }
+        },
+        {
+          "elapsed_ms": 93.985,
+          "first_text_committed_ms": 90.127,
+          "after_final_model_output_ms": 3.855,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.532,
+            "other": 0.984,
+            "start_model_call": 2.236,
+            "save_response": 2.281,
+            "queue_tool_calls": 2.264,
+            "start_tool_call": 2.375,
+            "save_tool_result": 3.839,
+            "text_delta": 0.386,
+            "finish": 1.383
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 2.086
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 2.489
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.005
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 3.483
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 1.004
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 3.608
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 2.751
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 3.644
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 63.762
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 6.307
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.951
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.004
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.041
+            }
+          }
+        }
+      ]
+    },
+    "three_20ms_tools": {
+      "spec": {
+        "client": {
+          "steps": 1,
+          "calls": 3
+        },
+        "tool_delay": 0.02
+      },
+      "median_ms": 49.859,
+      "median_after_final_model_output_ms": 4.581,
+      "samples": [
+        {
+          "elapsed_ms": 59.347,
+          "first_text_committed_ms": 53.923,
+          "after_final_model_output_ms": 5.421,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.578,
+            "other": 0.96,
+            "start_model_call": 2.299,
+            "save_response": 3.464,
+            "queue_tool_calls": 2.03,
+            "start_tool_call": 2.999,
+            "save_tool_result": 12.958,
+            "text_delta": 0.402,
+            "finish": 1.612
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 2.133
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 2.216
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.006
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 3.723
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.873
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 4.982
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 2.527
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 7.426
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 61.758
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 15.132
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.821
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.005
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.426
+            }
+          }
+        },
+        {
+          "elapsed_ms": 49.859,
+          "first_text_committed_ms": 45.617,
+          "after_final_model_output_ms": 4.241,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.07,
+            "other": 2.914,
+            "start_model_call": 2.171,
+            "save_response": 2.424,
+            "queue_tool_calls": 4.044,
+            "start_tool_call": 3.494,
+            "save_tool_result": 3.21,
+            "text_delta": 0.733,
+            "finish": 1.751
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.469
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 1.868
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.004
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 3.338
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 1.228
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 3.48
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 4.536
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 4.905
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 62.039
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 4.923
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 1.179
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.003
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.552
+            }
+          }
+        },
+        {
+          "elapsed_ms": 48.413,
+          "first_text_committed_ms": 43.83,
+          "after_final_model_output_ms": 4.581,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 2.574,
+            "other": 1.554,
+            "start_model_call": 2.404,
+            "save_response": 3.325,
+            "queue_tool_calls": 2.012,
+            "start_tool_call": 3.182,
+            "save_tool_result": 3.63,
+            "text_delta": 0.425,
+            "finish": 1.635
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 3.005
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 1.803
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.004
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 3.896
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.878
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 4.269
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 2.412
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 4.413
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 61.955
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 5.065
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.84
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.003
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.347
+            }
+          }
+        },
+        {
+          "elapsed_ms": 45.664,
+          "first_text_committed_ms": 41.643,
+          "after_final_model_output_ms": 4.019,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.14,
+            "other": 1.114,
+            "start_model_call": 2.639,
+            "save_response": 2.31,
+            "queue_tool_calls": 2.123,
+            "start_tool_call": 3.664,
+            "save_tool_result": 3.447,
+            "text_delta": 0.458,
+            "finish": 1.547
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.476
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 1.738
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.003
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 3.727
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.955
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 3.234
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 2.719
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 5.015
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 61.814
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 5.224
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.923
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.002
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.171
+            }
+          }
+        },
+        {
+          "elapsed_ms": 51.267,
+          "first_text_committed_ms": 46.368,
+          "after_final_model_output_ms": 4.898,
+          "memory_drain_ms": null,
+          "task_model_calls": 2,
+          "memory_model_calls": 0,
+          "events": 16,
+          "counter_calls": 9,
+          "messages_serialized_for_count": 15,
+          "sql_execute_calls": 64,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 6,
+            "save_response": 8,
+            "queue_tool_calls": 9,
+            "start_tool_call": 9,
+            "save_tool_result": 12,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.328,
+            "other": 4.115,
+            "start_model_call": 2.655,
+            "save_response": 2.943,
+            "queue_tool_calls": 1.719,
+            "start_tool_call": 4.12,
+            "save_tool_result": 4.554,
+            "text_delta": 0.425,
+            "finish": 2.063
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.894
+            },
+            "context_prepare": {
+              "calls": 2,
+              "total_ms": 1.491
+            },
+            "memory_recall": {
+              "calls": 2,
+              "total_ms": 0.003
+            },
+            "start_model_call": {
+              "calls": 2,
+              "total_ms": 4.097
+            },
+            "model_stream": {
+              "calls": 2,
+              "total_ms": 0.864
+            },
+            "save_response": {
+              "calls": 2,
+              "total_ms": 4.031
+            },
+            "queue_tool_calls": {
+              "calls": 1,
+              "total_ms": 2.174
+            },
+            "start_tool_call": {
+              "calls": 3,
+              "total_ms": 5.559
+            },
+            "tool_execute": {
+              "calls": 3,
+              "total_ms": 61.852
+            },
+            "save_tool_result": {
+              "calls": 3,
+              "total_ms": 6.586
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.836
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.002
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.933
+            }
+          }
+        }
+      ]
+    },
+    "eight_tool_rounds": {
+      "spec": {
+        "client": {
+          "steps": 8
+        }
+      },
+      "median_ms": 45.589,
+      "median_after_final_model_output_ms": 2.46,
+      "samples": [
+        {
+          "elapsed_ms": 64.618,
+          "first_text_committed_ms": 61.865,
+          "after_final_model_output_ms": 2.752,
+          "memory_drain_ms": null,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 163,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.104,
+            "other": 1.444,
+            "start_model_call": 11.597,
+            "save_response": 7.649,
+            "queue_tool_calls": 4.278,
+            "start_tool_call": 4.293,
+            "save_tool_result": 5.508,
+            "text_delta": 0.292,
+            "finish": 1.176
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.793
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 6.761
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 0.009
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 16.144
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.67
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 11.573
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 6.938
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 6.619
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.37
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 8.263
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.59
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.002
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.665
+            }
+          }
+        },
+        {
+          "elapsed_ms": 55.05,
+          "first_text_committed_ms": 50.719,
+          "after_final_model_output_ms": 4.331,
+          "memory_drain_ms": null,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 163,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.351,
+            "other": 0.687,
+            "start_model_call": 9.337,
+            "save_response": 6.138,
+            "queue_tool_calls": 3.689,
+            "start_tool_call": 3.611,
+            "save_tool_result": 5.103,
+            "text_delta": 0.233,
+            "finish": 2.873
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.67
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 5.199
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 0.007
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 13.049
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.525
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 9.282
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 6.034
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 5.751
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.278
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 7.359
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.466
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 3.309
+            }
+          }
+        },
+        {
+          "elapsed_ms": 45.589,
+          "first_text_committed_ms": 43.517,
+          "after_final_model_output_ms": 2.071,
+          "memory_drain_ms": null,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 163,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.889,
+            "other": 1.674,
+            "start_model_call": 7.426,
+            "save_response": 4.928,
+            "queue_tool_calls": 3.022,
+            "start_tool_call": 3.087,
+            "save_tool_result": 4.393,
+            "text_delta": 0.222,
+            "finish": 0.901
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.199
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 4.556
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 0.006
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 10.349
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.479
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 7.697
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 4.863
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 5.088
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.233
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 6.465
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.428
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.261
+            }
+          }
+        },
+        {
+          "elapsed_ms": 45.571,
+          "first_text_committed_ms": 43.451,
+          "after_final_model_output_ms": 2.119,
+          "memory_drain_ms": null,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 163,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.888,
+            "other": 1.051,
+            "start_model_call": 8.269,
+            "save_response": 5.259,
+            "queue_tool_calls": 3.079,
+            "start_tool_call": 3.021,
+            "save_tool_result": 4.293,
+            "text_delta": 0.215,
+            "finish": 0.837
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.17
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 4.096
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 0.005
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 11.507
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.478
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 7.95
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 4.871
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 4.838
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.213
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 6.645
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.432
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.172
+            }
+          }
+        },
+        {
+          "elapsed_ms": 44.815,
+          "first_text_committed_ms": 42.355,
+          "after_final_model_output_ms": 2.46,
+          "memory_drain_ms": null,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 163,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.144,
+            "other": 0.505,
+            "start_model_call": 7.564,
+            "save_response": 5.214,
+            "queue_tool_calls": 3.35,
+            "start_tool_call": 2.836,
+            "save_tool_result": 4.36,
+            "text_delta": 0.191,
+            "finish": 1.292
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.432
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 3.779
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 0.005
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 10.862
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.581
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 7.53
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 5.374
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 4.634
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.194
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 6.783
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.539
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.001
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.611
+            }
+          }
+        }
+      ]
+    },
+    "memory_recall_only": {
+      "spec": {
+        "memory": true,
+        "extract": false,
+        "client": {
+          "steps": 8
+        }
+      },
+      "median_ms": 37.302,
+      "median_after_final_model_output_ms": 2.147,
+      "samples": [
+        {
+          "elapsed_ms": 41.434,
+          "first_text_committed_ms": 39.224,
+          "after_final_model_output_ms": 2.209,
+          "memory_drain_ms": 2.144,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 164,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.725,
+            "other": 0.738,
+            "memory_recall": 2.143,
+            "start_model_call": 5.906,
+            "save_response": 4.238,
+            "queue_tool_calls": 2.639,
+            "start_tool_call": 2.565,
+            "save_tool_result": 3.717,
+            "text_delta": 0.237,
+            "finish": 0.806
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.981
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 3.671
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 3.477
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 8.512
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.456
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 6.359
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 4.342
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 4.061
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.191
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 5.611
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.413
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.207
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.495
+            }
+          }
+        },
+        {
+          "elapsed_ms": 40.291,
+          "first_text_committed_ms": 37.911,
+          "after_final_model_output_ms": 2.38,
+          "memory_drain_ms": 1.147,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 164,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.684,
+            "other": 0.913,
+            "memory_recall": 1.405,
+            "start_model_call": 6.063,
+            "save_response": 4.356,
+            "queue_tool_calls": 2.717,
+            "start_tool_call": 2.454,
+            "save_tool_result": 3.553,
+            "text_delta": 0.26,
+            "finish": 1.252
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.909
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 3.76
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 1.494
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 9.088
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.501
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 6.722
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 4.277
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 3.961
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.205
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 5.259
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.455
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.006
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.62
+            }
+          }
+        },
+        {
+          "elapsed_ms": 36.685,
+          "first_text_committed_ms": 34.838,
+          "after_final_model_output_ms": 1.846,
+          "memory_drain_ms": 1.061,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 164,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.808,
+            "other": 0.486,
+            "memory_recall": 1.67,
+            "start_model_call": 5.224,
+            "save_response": 3.814,
+            "queue_tool_calls": 2.412,
+            "start_tool_call": 2.098,
+            "save_tool_result": 3.084,
+            "text_delta": 0.176,
+            "finish": 0.805
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.047
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 3.751
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 1.758
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 7.885
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.538
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 6.21
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 3.85
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 3.426
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.201
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 4.881
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.492
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.007
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.154
+            }
+          }
+        },
+        {
+          "elapsed_ms": 26.796,
+          "first_text_committed_ms": 25.468,
+          "after_final_model_output_ms": 1.327,
+          "memory_drain_ms": 0.4,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 164,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.393,
+            "other": 0.378,
+            "memory_recall": 0.306,
+            "start_model_call": 3.155,
+            "save_response": 2.476,
+            "queue_tool_calls": 1.479,
+            "start_tool_call": 1.377,
+            "save_tool_result": 2.036,
+            "text_delta": 0.131,
+            "finish": 0.458
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.553
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 3.689
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 0.399
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 5.727
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.335
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 4.371
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 2.671
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 2.495
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.211
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 3.762
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.279
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.007
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 0.7
+            }
+          }
+        },
+        {
+          "elapsed_ms": 37.302,
+          "first_text_committed_ms": 35.154,
+          "after_final_model_output_ms": 2.147,
+          "memory_drain_ms": 0.708,
+          "task_model_calls": 9,
+          "memory_model_calls": 0,
+          "events": 45,
+          "counter_calls": 35,
+          "messages_serialized_for_count": 116,
+          "sql_execute_calls": 164,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 27,
+            "save_response": 36,
+            "queue_tool_calls": 24,
+            "start_tool_call": 24,
+            "save_tool_result": 32,
+            "text_delta": 2,
+            "finish": 8
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.68,
+            "other": 0.72,
+            "memory_recall": 0.597,
+            "start_model_call": 5.966,
+            "save_response": 4.272,
+            "queue_tool_calls": 2.468,
+            "start_tool_call": 2.215,
+            "save_tool_result": 3.348,
+            "text_delta": 0.26,
+            "finish": 1.093
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 0.914
+            },
+            "context_prepare": {
+              "calls": 9,
+              "total_ms": 3.653
+            },
+            "memory_recall": {
+              "calls": 9,
+              "total_ms": 0.681
+            },
+            "start_model_call": {
+              "calls": 9,
+              "total_ms": 8.768
+            },
+            "model_stream": {
+              "calls": 9,
+              "total_ms": 0.499
+            },
+            "save_response": {
+              "calls": 9,
+              "total_ms": 6.151
+            },
+            "queue_tool_calls": {
+              "calls": 8,
+              "total_ms": 4.018
+            },
+            "start_tool_call": {
+              "calls": 8,
+              "total_ms": 3.903
+            },
+            "tool_execute": {
+              "calls": 8,
+              "total_ms": 0.19
+            },
+            "save_tool_result": {
+              "calls": 8,
+              "total_ms": 4.906
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.455
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.005
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 1.396
+            }
+          }
+        }
+      ]
+    },
+    "memory_500ms_extraction": {
+      "spec": {
+        "memory": true,
+        "client": {
+          "memory_delay": 0.5
+        }
+      },
+      "median_ms": 16.377,
+      "median_after_final_model_output_ms": 5.894,
+      "samples": [
+        {
+          "elapsed_ms": 7.041,
+          "first_text_committed_ms": 3.862,
+          "after_final_model_output_ms": 3.178,
+          "memory_drain_ms": 511.122,
+          "task_model_calls": 1,
+          "memory_model_calls": 1,
+          "events": 6,
+          "counter_calls": 4,
+          "messages_serialized_for_count": 6,
+          "sql_execute_calls": 31,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8,
+            "memory_enqueue": 3
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 0.847,
+            "other": 0.442,
+            "memory_recall": 0.602,
+            "start_model_call": 0.517,
+            "text_delta": 0.22,
+            "save_response": 0.489,
+            "finish": 1.143,
+            "memory_enqueue": 0.913
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.075
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.234
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 0.634
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 0.952
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.398
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 0.405
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 0.702
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 0.932
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 2.458
+            }
+          }
+        },
+        {
+          "elapsed_ms": 15.736,
+          "first_text_committed_ms": 9.84,
+          "after_final_model_output_ms": 5.894,
+          "memory_drain_ms": 512.918,
+          "task_model_calls": 1,
+          "memory_model_calls": 1,
+          "events": 6,
+          "counter_calls": 4,
+          "messages_serialized_for_count": 6,
+          "sql_execute_calls": 31,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8,
+            "memory_enqueue": 3
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.407,
+            "other": 1.693,
+            "memory_recall": 1.479,
+            "start_model_call": 1.185,
+            "text_delta": 0.505,
+            "save_response": 1.168,
+            "finish": 1.823,
+            "memory_enqueue": 1.444
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 1.934
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 1.2
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 1.589
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 2.052
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.959
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 0.984
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 1.678
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 1.504
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 4.164
+            }
+          }
+        },
+        {
+          "elapsed_ms": 17.474,
+          "first_text_committed_ms": 10.288,
+          "after_final_model_output_ms": 7.184,
+          "memory_drain_ms": 512.883,
+          "task_model_calls": 1,
+          "memory_model_calls": 1,
+          "events": 6,
+          "counter_calls": 4,
+          "messages_serialized_for_count": 6,
+          "sql_execute_calls": 31,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8,
+            "memory_enqueue": 3
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.782,
+            "other": 1.803,
+            "memory_recall": 1.591,
+            "start_model_call": 1.263,
+            "text_delta": 0.478,
+            "save_response": 1.906,
+            "finish": 1.982,
+            "memory_enqueue": 1.615
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 2.405
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.804
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 1.707
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 2.183
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 0.919
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 0.946
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 2.545
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 1.691
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 4.56
+            }
+          }
+        },
+        {
+          "elapsed_ms": 17.663,
+          "first_text_committed_ms": 10.218,
+          "after_final_model_output_ms": 7.443,
+          "memory_drain_ms": 514.443,
+          "task_model_calls": 1,
+          "memory_model_calls": 1,
+          "events": 6,
+          "counter_calls": 4,
+          "messages_serialized_for_count": 6,
+          "sql_execute_calls": 31,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8,
+            "memory_enqueue": 3
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 2.492,
+            "other": 1.272,
+            "memory_recall": 1.075,
+            "start_model_call": 1.407,
+            "text_delta": 0.585,
+            "save_response": 1.31,
+            "finish": 3.189,
+            "memory_enqueue": 1.25
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 3.045
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.785
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 1.206
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 2.078
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 1.348
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 1.382
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 1.87
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 1.328
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 5.495
+            }
+          }
+        },
+        {
+          "elapsed_ms": 16.377,
+          "first_text_committed_ms": 10.744,
+          "after_final_model_output_ms": 5.632,
+          "memory_drain_ms": 513.795,
+          "task_model_calls": 1,
+          "memory_model_calls": 1,
+          "events": 6,
+          "counter_calls": 4,
+          "messages_serialized_for_count": 6,
+          "sql_execute_calls": 31,
+          "sql_by_phase": {
+            "begin": 6,
+            "other": 4,
+            "memory_recall": 1,
+            "start_model_call": 3,
+            "text_delta": 2,
+            "save_response": 4,
+            "finish": 8,
+            "memory_enqueue": 3
+          },
+          "sql_execute_ms_by_phase": {
+            "begin": 1.654,
+            "other": 1.82,
+            "memory_recall": 2.032,
+            "start_model_call": 1.209,
+            "text_delta": 0.515,
+            "save_response": 1.161,
+            "finish": 1.698,
+            "memory_enqueue": 1.254
+          },
+          "spans": {
+            "begin": {
+              "calls": 1,
+              "total_ms": 2.243
+            },
+            "context_prepare": {
+              "calls": 1,
+              "total_ms": 0.793
+            },
+            "memory_recall": {
+              "calls": 1,
+              "total_ms": 2.139
+            },
+            "start_model_call": {
+              "calls": 1,
+              "total_ms": 1.937
+            },
+            "text_delta": {
+              "calls": 1,
+              "total_ms": 1.332
+            },
+            "model_stream": {
+              "calls": 1,
+              "total_ms": 1.36
+            },
+            "save_response": {
+              "calls": 1,
+              "total_ms": 1.638
+            },
+            "memory_enqueue": {
+              "calls": 1,
+              "total_ms": 1.301
+            },
+            "finish": {
+              "calls": 1,
+              "total_ms": 3.943
+            }
+          }
+        }
+      ]
+    }
+  },
+  "builder": [
+    {
+      "messages": 40,
+      "median_ms": 2.407,
+      "count_calls": 42,
+      "messages_serialized": 82
+    },
+    {
+      "messages": 200,
+      "median_ms": 7.117,
+      "count_calls": 202,
+      "messages_serialized": 402
+    },
+    {
+      "messages": 400,
+      "median_ms": 10.472,
+      "count_calls": 402,
+      "messages_serialized": 802
+    }
+  ],
+  "faults": {
+    "output_budget": {
+      "requested": 17,
+      "actual_transport_body_by_provider": {
+        "openai": {
+          "max_completion_tokens": 17
+        },
+        "deepseek": {
+          "max_tokens": 17
+        },
+        "qwen": {
+          "max_tokens": 17
+        },
+        "anthropic": {
+          "max_tokens": 17
+        },
+        "custom": {
+          "max_tokens": 17
+        }
+      },
+      "all_transmitted": true
+    },
+    "memory_tail_isolation": {
+      "status": "completed",
+      "final_answer_persisted": true,
+      "memory_calls_during_run": 0,
+      "job_status_after_run": "queued",
+      "memory_calls_after_drain": 1,
+      "job_status_after_drain": "completed"
+    },
+    "failed_run_side_effect": {
+      "file_exists": true,
+      "inspectable_messages_from_failed_run": 3,
+      "replayed_messages_from_failed_run": 0
+    },
+    "ownerless_run": {
+      "new_run_blocked": true,
+      "fresh_runner_can_cancel": false,
+      "persisted_status": "running"
+    },
+    "blocking_file_timeout": {
+      "configured_timeout_ms": 10,
+      "injected_blocking_ms": 50,
+      "elapsed_ms": 52.739,
+      "returned_error": true
+    }
+  }
+}

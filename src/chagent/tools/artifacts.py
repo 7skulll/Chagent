@@ -12,6 +12,7 @@ from chagent.tools.context import ToolContext
 class ReadArtifactTool(AgentTool):
     def __init__(self, artifacts: ArtifactRepository):
         super().__init__(name="read_artifact", label="Read saved tool output", replay="safe", requires_workspace=True,
+                         execution_mode="parallel",
                          description="Read an immutable tool-output artifact owned by this session, in character pages.",
                          parameters={"type": "object", "properties": {
                              "artifact_id": {"type": "string"}, "offset": {"type": "integer", "minimum": 0},

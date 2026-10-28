@@ -1,0 +1,151 @@
+"""Completion must not wait for extraction; the queue owns retries and leases."""
+
+import asyncio
+import json
+import os
+from time import monotonic
+from pathlib import Path
+import unittest
+from uuid import uuid4
+
+from psycopg import AsyncConnection, sql
+from psycopg.conninfo import make_conninfo
+
+from chagent.bootstrap import create_demo_runner
+from chagent.config import Settings
+from chagent.domain.memories import MemoryPolicy
+from chagent.domain.messages import AssistantMessage, TextContent
+from chagent.models.events import DoneEvent, StartEvent
+from chagent.models.fake import FakeModelClient
+from chagent.storage.database import Database
+from chagent.storage.memories import MemoryRepository
+from chagent.storage.memory_jobs import MemoryJobRepository
+from chagent.storage.migrate import migrate
+
+
+class SlowExtractClient(FakeModelClient):
+    """Answers immediately, but a memory extraction takes a long time."""
+
+    def __init__(self, delay=2.0):
+        super().__init__()
+        self.delay = delay
+
+    async def stream(self, request):
+        if request.purpose != "memory":
+            async for event in super().stream(request):
+                yield event
+            return
+        await asyncio.sleep(self.delay)
+        message = AssistantMessage([], request.model.api, request.model.provider, request.model.id, 1, "pending")
+        yield StartEvent(partial=message)
+        final = AssistantMessage([TextContent(json.dumps({"memories": []}))], request.model.api,
+                                 request.model.provider, request.model.id, 1, "stop")
+        yield DoneEvent(reason="stop", message=final)
+
+
+@unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")
+class MemoryJobTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.schema = "chagent_jobs_test_" + uuid4().hex
+        self.admin = await AsyncConnection.connect(os.environ["CHAGENT_TEST_DATABASE_URL"], autocommit=True)
+        self.addAsyncCleanup(self.admin.close)
+        await self.admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(self.schema)))
+        self.addAsyncCleanup(self.drop_schema)
+        self.database = Database(Settings(database_url=make_conninfo(
+            os.environ["CHAGENT_TEST_DATABASE_URL"], options=f"-c search_path={self.schema}")))
+        self.addAsyncCleanup(self.database.close)
+        await self.database.connect()
+        await migrate(self.database)
+        self.runner = create_demo_runner(self.database, memory_policy=MemoryPolicy())
+        self.session = await self.runner.conversations.create_session(Path.cwd())
+        self.jobs = MemoryJobRepository(self.database)
+
+    async def drop_schema(self):
+        await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
+
+    async def test_completed_run_enqueues_job_without_waiting_for_extraction(self):
+        self.runner.client = SlowExtractClient(delay=2.0)
+        started = monotonic()
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        elapsed = monotonic() - started
+        self.assertLess(elapsed, 1.2, "the run must not wait for memory extraction")
+        self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
+        job = await self.jobs.for_run(result.run_id)
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(job["attempts"], 0)
+        events = [event["type"] for event in await self.runner.runs.events(result.run_id)]
+        self.assertIn("memory_job_queued", events)
+        self.assertNotIn("memory_extraction_started", events)
+
+    async def test_extraction_runs_after_the_answer_and_records_candidates(self):
+        self.runner.client = SlowExtractClient(delay=0)
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        self.assertEqual((await self.jobs.for_run(result.run_id))["status"], "queued")
+        await self.runner.memory_worker.drain(timeout=10)
+        job = await self.jobs.for_run(result.run_id)
+        self.assertEqual((job["status"], job["attempts"]), ("completed", 0))
+        events = [event["type"] for event in await self.runner.runs.events(result.run_id)]
+        self.assertIn("memory_extraction_started", events)
+        self.assertLess(events.index("run_completed"), events.index("memory_extraction_started"))
+
+    async def test_lease_expiry_allows_another_worker_to_claim_the_same_job(self):
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        first = await self.jobs.claim(lease_seconds=60)
+        self.assertIsNotNone(first)
+        self.assertEqual(first.run_id, result.run_id)
+        # A worker that died leaves the row 'running'; the lease is the only
+        # signal that the work may be retaken, so a live lease blocks re-claiming.
+        self.assertIsNone(await self.jobs.claim(lease_seconds=30))
+        async with self.database.connection() as connection:
+            await connection.execute("UPDATE memory_jobs SET lease_expires_at = now() - interval '1 second'")
+        second = await self.jobs.claim(lease_seconds=30)
+        self.assertEqual((second.id, second.attempts), (first.id, 0))
+
+    async def test_retry_stops_at_max_attempts(self):
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        job = await self.jobs.for_run(result.run_id)
+        statuses = []
+        for _ in range(3):
+            await self.jobs.claim(lease_seconds=30)
+            statuses.append(await self.jobs.fail(job["id"], error="RuntimeError", retry_delay=0))
+        self.assertEqual(statuses, ["queued", "queued", "failed"])
+        self.assertEqual((await self.jobs.for_run(result.run_id))["attempts"], 3)
+        self.assertIsNone(await self.jobs.claim(lease_seconds=30))
+
+    async def test_enqueue_is_idempotent_per_run(self):
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        async with self.database.transaction() as connection:
+            duplicate = await self.jobs.enqueue(
+                connection, session_id=self.session, run_id=result.run_id,
+                source_message_id=uuid4(), prompt_version="test")
+        self.assertIsNone(duplicate)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute("SELECT count(*) AS total FROM memory_jobs")
+            self.assertEqual((await cursor.fetchone())["total"], 1)
+
+    async def test_disabled_or_short_input_does_not_queue_work(self):
+        self.runner.memory_service.policy = MemoryPolicy(enabled=False)
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        self.assertIsNone(await self.jobs.for_run(result.run_id))
+        self.runner.memory_service.policy = MemoryPolicy()
+        short = await self.runner.run(self.session, "继续")
+        self.assertIsNone(await self.jobs.for_run(short.run_id))
+
+    async def test_worker_failure_is_recorded_without_touching_the_run(self):
+        class FailingExtractClient(SlowExtractClient):
+            async def stream(self, request):
+                if request.purpose == "memory":
+                    raise RuntimeError("provider down")
+                async for event in super().stream(request):
+                    yield event
+        self.runner.client = FailingExtractClient()
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        await self.runner.memory_worker.drain(timeout=10)
+        self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
+        job = await self.jobs.for_run(result.run_id)
+        self.assertEqual((job["status"], job["attempts"], job["last_error"]), ("queued", 1, "RuntimeError"))
+        events = [event["type"] for event in await self.runner.runs.events(result.run_id)]
+        self.assertIn("memory_extraction_failed", events)
+        self.assertIn("memory_job_failed", events)
+        self.assertEqual((await MemoryRepository(self.database).list(
+            (await self.runner.conversations.get_session(self.session)).workspace_id, status="all"))["items"], [])

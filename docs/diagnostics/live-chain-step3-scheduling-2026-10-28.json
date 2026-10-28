@@ -1,0 +1,311 @@
+{
+  "recorded_at_utc": "2026-10-28T03:12:42.023127+00:00",
+  "configuration": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "api": "openai-chat",
+    "output_limit": 768,
+    "max_provider_requests": 6,
+    "key_source": "named provider key",
+    "case_selection": "scheduling"
+  },
+  "environment": {
+    "python": "3.13.9",
+    "platform": "Darwin"
+  },
+  "limits": "single sample per scenario; synthetic data; no browser TTFT or comparative Pi/Codex benchmark",
+  "results": [
+    {
+      "name": "real_parallel_read_then_write",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "correct_sum": true,
+        "hidden_markers": true,
+        "same_response_three_reads": true,
+        "read_workers_overlap": true,
+        "ordered_results": true,
+        "all_calls_completed": true,
+        "no_remaining_workers": true
+      },
+      "elapsed_ms": 3278.541,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "三个文件已并发读取完成，并已创建 batch-result.json：\n\n- 数值：13 + 29 + 47 = **89**\n- markers（按文件编号顺序）：`fa5c3d3cb3b8`, `738207fc6ca2`, `ad424e83a69b`",
+      "tool_calls": [
+        "read_file",
+        "read_file",
+        "read_file",
+        "write_file"
+      ],
+      "event_types": [
+        "run_started",
+        "model_started",
+        "model_completed",
+        "tool_queued",
+        "tool_queued",
+        "tool_queued",
+        "tool_started",
+        "tool_started",
+        "tool_started",
+        "tool_completed",
+        "tool_completed",
+        "tool_completed",
+        "model_started",
+        "model_completed",
+        "tool_queued",
+        "tool_started",
+        "tool_completed",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": null,
+          "consumer_wait_ms": 0.034,
+          "usage": {
+            "input": 350,
+            "output": 102,
+            "cache_read": 640,
+            "cache_write": 0,
+            "total_tokens": 1092,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "toolUse",
+          "response_model": "deepseek-flash",
+          "wall_ms": 1096.97
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 6,
+          "first_text_ms": null,
+          "consumer_wait_ms": 0.035,
+          "usage": {
+            "input": 345,
+            "output": 89,
+            "cache_read": 1024,
+            "cache_write": 0,
+            "total_tokens": 1458,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "toolUse",
+          "response_model": "deepseek-flash",
+          "wall_ms": 921.246
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 8,
+          "first_text_ms": 784.856,
+          "consumer_wait_ms": 48.493,
+          "usage": {
+            "input": 232,
+            "output": 66,
+            "cache_read": 1280,
+            "cache_write": 0,
+            "total_tokens": 1578,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 1167.261
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 211,
+        "sql_by_phase": {
+          "begin": 6,
+          "other": 4,
+          "start_model_call": 9,
+          "save_response": 12,
+          "queue_tool_calls": 12,
+          "start_tool_call": 12,
+          "save_tool_result": 16,
+          "text_delta": 132,
+          "finish": 8
+        },
+        "sql_execute_ms_by_phase": {
+          "begin": 1.512,
+          "other": 0.944,
+          "start_model_call": 2.389,
+          "save_response": 5.091,
+          "queue_tool_calls": 3.371,
+          "start_tool_call": 3.963,
+          "save_tool_result": 4.647,
+          "text_delta": 22.136,
+          "finish": 1.634
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 1.834
+          },
+          "context_prepare": {
+            "calls": 3,
+            "total_ms": 1.522
+          },
+          "memory_recall": {
+            "calls": 3,
+            "total_ms": 0.003
+          },
+          "start_model_call": {
+            "calls": 3,
+            "total_ms": 3.033
+          },
+          "model_stream": {
+            "calls": 3,
+            "total_ms": 3185.5
+          },
+          "save_response": {
+            "calls": 3,
+            "total_ms": 12.158
+          },
+          "queue_tool_calls": {
+            "calls": 2,
+            "total_ms": 4.129
+          },
+          "start_tool_call": {
+            "calls": 4,
+            "total_ms": 8.708
+          },
+          "tool_execute": {
+            "calls": 4,
+            "total_ms": 164.833
+          },
+          "save_tool_result": {
+            "calls": 4,
+            "total_ms": 6.316
+          },
+          "text_delta": {
+            "calls": 66,
+            "total_ms": 48.298
+          },
+          "memory_extract": {
+            "calls": 1,
+            "total_ms": 0.003
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 2.133
+          }
+        }
+      },
+      "read_worker_peak": 3,
+      "result_file": {
+        "sum": 89,
+        "markers": [
+          "fa5c3d3cb3b8",
+          "738207fc6ca2",
+          "ad424e83a69b"
+        ]
+      },
+      "injected_read_latency_ms": 50,
+      "tool_batch_sizes": [
+        3
+      ]
+    }
+  ],
+  "schema_cleaned": true,
+  "total_provider_requests": 3,
+  "reported_tokens": {
+    "input": 927,
+    "output": 257,
+    "cache_read": 2944,
+    "cache_write": 0,
+    "total_tokens": 4128
+  },
+  "usage_missing_calls": 0,
+  "monetary_cost": null,
+  "monetary_cost_note": "No monetary price assumed; see provider-reported token usage.",
+  "passed": true,
+  "source_sha256": {
+    "src/chagent/agent/runner.py": "631016ddca2b8b85431838d17e2300f14304c166d9d4adb4cb7446de8d98c0cc",
+    "src/chagent/memory/service.py": "9252ae7b7c67ffd88df23b28514fe2057d91339dc9009e49306c0ad0dcdbcd8e",
+    "src/chagent/models/openai_chat.py": "36758ad0327ed3e6b3ab9d39bad618221a3f0385e4c5fabfffe9df6ee9eabf3a",
+    "src/chagent/context/manager.py": "12059deb41eb47ac4c5e5c09d706606c0eaa08b3909e31e3cd3397df53e0a8a7",
+    "src/chagent/tools/scheduler.py": "bc60f47f3d0a56dc01f51a939b357ad07bbf54de30b2e66927418ac77e7bae3a",
+    "src/chagent/tools/executor.py": "4294f0be7b2b92bb96dff201f78ddd886106d62b11e8522715cea6d74e856380",
+    "src/chagent/tools/filesystem.py": "54fc87b571ab5948235b8eafd92924849eb9168edaa199a851841d7b7a007972"
+  }
+}

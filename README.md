@@ -71,15 +71,18 @@ uv run --env-file .env python -m chagent.sessions summaries <会话UUID> --limit
 uv run --env-file .env python -m chagent.memory list
 ```
 
-网页右上角“长期记忆”管理已生效记忆与候选；聊天可发送 `/remember workspace project.database = 使用 PostgreSQL`。自动提取的模型推断只产生候选，审核后才注入新会话。
+网页右上角“长期记忆”管理已生效记忆与候选；聊天可发送 `/remember workspace project.database = 使用 PostgreSQL`。显式指令在运行完成事务内直接写入；自动提取改为入队后由后台 worker 完成，不再占用回答的等待时间——单次命令行在打印结果后处理队列，网页由进程内 worker 持续处理，关停时未完成的任务保留给下次启动。
+
+上下文构建按持久消息 ID 缓存投影，并按累计成本选择轮次，长历史不再重复序列化。设计、实测数据与边界见[关键路径优化](docs/关键路径优化.md)。
 
 ## 验证
 
 主链路性能基线、故障复现与分阶段改造方案见[主链路诊断与优化方案](docs/主链路诊断与优化方案.md)。诊断脚本使用独立临时 schema 和固定模型，不调用外部供应商。
-
 已配置供应商 Key 后的付费链路测试、用量和参考设计见[真实链路测试与 Claude 参考设计](docs/真实链路测试与Claude参考设计.md)。真实测试与默认回归分开运行。
 
 前两项运行时改造已完成：[结束控制与 RunState 验收](docs/结束控制与RunState验收.md)。运行结束原因同时保存在返回值、数据库和事件中；工具正常终止允许无最终模型回答；活动历史在提交成功后增量更新。
+
+第三步已完成：[工具批次调度与核心验收](docs/工具批次调度与核心验收.md)。明确可并发的工具有界并行，修改操作形成工作区屏障，结果按调用顺序提交，取消时区分未启动与结果未知。通过 `CHAGENT_MAX_TOOL_CONCURRENCY` 设置并发上限（默认 4）。
 
 ```sh
 CHAGENT_TEST_DATABASE_URL=postgresql:///chagent uv run python -m unittest discover -s tests -v

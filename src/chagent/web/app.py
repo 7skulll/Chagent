@@ -110,12 +110,21 @@ class WebRuntime:
         # Request disconnection must not cancel the durable agent task.
         return await asyncio.shield(started)
 
+    def start_worker(self) -> None:
+        """Background extraction starts only when the application is serving."""
+        if getattr(self.runner, "memory_worker", None) is not None:
+            self.runner.memory_worker.start()
+
     async def close(self):
         self.closing = True
         for task in self.tasks:
             if not task.cancelling():
                 task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
+        # Queued jobs survive shutdown: an interrupted job is returned to the
+        # queue and picked up by the next process.
+        if getattr(self.runner, "memory_worker", None) is not None:
+            await self.runner.memory_worker.stop()
 
 
 def runtime(request: Request) -> WebRuntime:
@@ -403,6 +412,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
     async def lifespan(app):
         if injected_runtime is not None:
             app.state.runtime = injected_runtime
+            injected_runtime.start_worker()
             try:
                 yield
             finally:
@@ -415,12 +425,17 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
             async with Database(configured) as database:
                 await migrate(database)
                 if selected is None:
-                    runner = create_demo_runner(database, allow_host_commands=configured.allow_host_commands, max_turns=configured.max_turns)
+                    runner = create_demo_runner(database, allow_host_commands=configured.allow_host_commands, max_turns=configured.max_turns,
+                                                max_tool_concurrency=configured.max_tool_concurrency,
+                                                memory_worker_concurrency=configured.memory_worker_concurrency)
                 else:
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
-                                           timeout=selected.run_timeout, max_turns=configured.max_turns)
+                                           timeout=selected.run_timeout, max_turns=configured.max_turns,
+                                           max_tool_concurrency=configured.max_tool_concurrency,
+                                           memory_worker_concurrency=configured.memory_worker_concurrency)
                 app.state.runtime = WebRuntime(runner, workspace)
+                app.state.runtime.start_worker()
                 try:
                     yield
                 finally:

@@ -38,11 +38,11 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_migrate_is_concurrent_and_idempotent(self):
         results = await asyncio.gather(migrate(self.database), migrate(self.database))
-        self.assertEqual(sorted(len(result) for result in results), [0, 7])
+        self.assertEqual(sorted(len(result) for result in results), [0, 9])
         self.assertEqual(await migrate(self.database), [])
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT count(*) AS total FROM schema_migrations")
-            self.assertEqual((await cursor.fetchone())["total"], 7)
+            self.assertEqual((await cursor.fetchone())["total"], 9)
 
     async def test_reject_modified_applied_migration(self):
         await migrate(self.database)
@@ -64,6 +64,26 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await connection.execute("UPDATE runs SET end_reason = 'model_stop' WHERE status = 'failed'")
             with self.assertRaises(errors.CheckViolation):
                 await connection.execute("UPDATE runs SET status = 'completed' WHERE status = 'running'")
+
+    async def test_tool_scheduling_migration_preserves_legacy_order_and_constraints(self):
+        async with self.database.connection() as connection:
+            await connection.execute("""
+                CREATE TABLE tool_calls (
+                    id integer PRIMARY KEY, model_call_id integer NOT NULL, created_at integer NOT NULL,
+                    status text CONSTRAINT tool_calls_status_check CHECK(status IN ('running', 'completed')));
+                INSERT INTO tool_calls VALUES (9, 1, 20, 'completed'), (2, 1, 10, 'running'), (3, 2, 5, 'completed');
+            """)
+            await connection.execute(files("chagent.storage").joinpath("migrations/0008_tool_scheduling.sql").read_text())
+            cursor = await connection.execute("SELECT id, call_index FROM tool_calls ORDER BY id")
+            self.assertEqual([(row["id"], row["call_index"]) for row in await cursor.fetchall()], [(2, 0), (3, 0), (9, 1)])
+            await connection.execute("UPDATE tool_calls SET status = 'queued' WHERE id = 2")
+            await connection.execute("UPDATE tool_calls SET status = 'cancelled' WHERE id = 2")
+            with self.assertRaises(errors.UniqueViolation):
+                await connection.execute("UPDATE tool_calls SET call_index = 0 WHERE id = 9")
+            with self.assertRaises(errors.CheckViolation):
+                await connection.execute("UPDATE tool_calls SET call_index = -1 WHERE id = 9")
+            with self.assertRaises(errors.NotNullViolation):
+                await connection.execute("UPDATE tool_calls SET call_index = NULL WHERE id = 9")
 
     async def test_transaction_commit_rollback_and_cancel(self):
         await migrate(self.database)

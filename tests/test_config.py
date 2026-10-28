@@ -11,12 +11,14 @@ class SettingsTests(unittest.TestCase):
             "CHAGENT_DB_POOL_MAX_SIZE": "2",
             "CHAGENT_DB_TIMEOUT": "3.5",
             "CHAGENT_MAX_TURNS": "48",
+            "CHAGENT_MAX_TOOL_CONCURRENCY": "3",
         })
         self.assertEqual(settings.database_url, "postgresql:///custom_db")
         self.assertEqual(settings.db_pool_min_size, 0)
         self.assertEqual(settings.db_pool_max_size, 2)
         self.assertEqual(settings.db_timeout, 3.5)
         self.assertEqual(settings.max_turns, 48)
+        self.assertEqual(settings.max_tool_concurrency, 3)
 
     def test_credentials_are_not_in_repr_or_validation_errors(self):
         secret = "do-not-expose-this"
@@ -38,6 +40,10 @@ class SettingsTests(unittest.TestCase):
             {"db_timeout": float("inf")},
             {"max_turns": 0},
             {"max_turns": 129},
+            {"max_tool_concurrency": 0},
+            {"max_tool_concurrency": 33},
+            {"max_tool_concurrency": True},
+            {"max_tool_concurrency": 2.0},
         ):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 Settings(**options)
