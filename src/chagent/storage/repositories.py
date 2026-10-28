@@ -20,6 +20,10 @@ from chagent.storage.artifacts import ArtifactRepository, INLINE_BYTES
 from chagent.tools.base import AgentToolResult
 
 
+class RunOwnershipLost(RuntimeError):
+    """The current process no longer owns an active run."""
+
+
 class RunBusyError(RuntimeError):
     """The session already owns an active run."""
 
@@ -218,6 +222,68 @@ class RunRepository:
         self.database = database
         self.notifications = database.notifications
 
+    async def check_owner(self, connection, run_id: UUID) -> None:
+        token = self.database.run_owners.get(run_id)
+        cursor = await connection.execute(
+            "SELECT id FROM runs WHERE id = %s AND status = 'running' "
+            "AND owner_token = %s AND lease_expires_at > clock_timestamp() FOR UPDATE",
+            (run_id, token),
+        )
+        if await cursor.fetchone() is None:
+            raise RunOwnershipLost("Run ownership lost or lease expired")
+
+    async def heartbeat(self, run_id: UUID, lease_seconds: float = 30) -> None:
+        token = self.database.run_owners.get(run_id)
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "UPDATE runs SET lease_expires_at = clock_timestamp() + make_interval(secs => %s) "
+                "WHERE id = %s AND status = 'running' AND owner_token = %s "
+                "AND lease_expires_at > clock_timestamp() RETURNING id",
+                (lease_seconds, run_id, token),
+            )
+            if await cursor.fetchone() is None:
+                raise RunOwnershipLost("Run ownership lost or lease expired")
+
+    async def reap_expired(self, *, limit: int = 100) -> list[UUID]:
+        """Atomically interrupt expired owned runs; never infer legacy ownership."""
+        if not 1 <= limit <= 1000:
+            raise ValueError("Invalid recovery batch size")
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "SELECT id FROM runs WHERE status = 'running' AND owner_token IS NOT NULL "
+                "AND lease_expires_at <= clock_timestamp() "
+                "ORDER BY lease_expires_at, id LIMIT %s FOR UPDATE SKIP LOCKED", (limit,),
+            )
+            identities = [row["id"] for row in await cursor.fetchall()]
+            for run_id in identities:
+                await connection.execute(
+                    "UPDATE runs SET status = 'interrupted', end_reason = 'owner_lost', "
+                    "error = 'Run ownership lease expired', ended_at = now() WHERE id = %s", (run_id,),
+                )
+                cursor = await connection.execute(
+                    "UPDATE tool_calls SET status = 'unknown', ended_at = now() "
+                    "WHERE run_id = %s AND status = 'running' RETURNING call_id, name", (run_id,),
+                )
+                unknown = await cursor.fetchall()
+                cursor = await connection.execute(
+                    "UPDATE tool_calls SET status = 'cancelled', ended_at = now() "
+                    "WHERE run_id = %s AND status = 'queued' RETURNING call_id, name", (run_id,),
+                )
+                queued = await cursor.fetchall()
+                for kind, rows in (("tool_interrupted", unknown), ("tool_cancelled", queued)):
+                    for row in rows:
+                        await self._event(connection, run_id, kind, {"tool_call_id": row["call_id"], "name": row["name"]})
+                for table in ("model_calls", "compaction_calls"):
+                    await connection.execute(
+                        f"UPDATE {table} SET status = 'interrupted', ended_at = now() "
+                        "WHERE run_id = %s AND status = 'running'", (run_id,),
+                    )
+                await self._event(connection, run_id, "run_interrupted",
+                                  {"error": "Run ownership lease expired", "end_reason": "owner_lost"})
+        for run_id in identities:
+            self.notifications.notify(run_id)
+        return identities
+
     async def _message(
         self, connection: AsyncConnection[DictRow], session_id: UUID,
         run_id: UUID, message: Message,
@@ -243,7 +309,7 @@ class RunRepository:
         )
 
     async def begin(self, session_id: UUID, message: UserMessage) -> UUID:
-        run_id = uuid4()
+        run_id, owner = uuid4(), uuid4()
         try:
             async with self.database.transaction() as connection:
                 cursor = await connection.execute(
@@ -255,8 +321,9 @@ class RunRepository:
                 if session["archived_at"] is not None:
                     raise SessionArchivedError("Restore the archived session before running it")
                 await connection.execute(
-                    "INSERT INTO runs (id, session_id, status, started_at) VALUES (%s, %s, 'running', now())",
-                    (run_id, session_id),
+                    "INSERT INTO runs (id, session_id, status, started_at, owner_token, lease_expires_at) "
+                    "VALUES (%s, %s, 'running', now(), %s, clock_timestamp() + interval '30 seconds')",
+                    (run_id, session_id, owner),
                 )
                 await self._message(connection, session_id, run_id, message)
                 await self._event(connection, run_id, "run_started", {"session_id": str(session_id)})
@@ -265,17 +332,25 @@ class RunRepository:
             if error.diag.constraint_name == "runs_one_active_per_session_idx":
                 raise RunBusyError("Session already has an active run") from None
             raise
+        self.database.run_owners[run_id] = owner
         self.notifications.notify(run_id)
         return run_id
 
+    async def audit_event(self, run_id: UUID, kind: str, payload: JsonObject) -> None:
+        async with self.database.transaction() as connection:
+            await self._event(connection, run_id, kind, payload)
+        self.notifications.notify(run_id)
+
     async def event(self, run_id: UUID, kind: str, payload: JsonObject) -> None:
         async with self.database.transaction() as connection:
+            await self.check_owner(connection, run_id)
             await self._event(connection, run_id, kind, payload)
         self.notifications.notify(run_id)
 
     async def start_model_call(self, run_id: UUID, iteration: int, built: BuiltContext) -> UUID:
         call_id = uuid4()
         async with self.database.transaction() as connection:
+            await self.check_owner(connection, run_id)
             await connection.execute(
                 "INSERT INTO model_calls (id, run_id, iteration, request, context_snapshot) "
                 "VALUES (%s, %s, %s, %s, %s)",
@@ -293,6 +368,7 @@ class RunRepository:
             "cancelled" if message.stop_reason == "aborted" else "completed"
         )
         async with self.database.transaction() as connection:
+            await self.check_owner(connection, run_id)
             await connection.execute(
                 "UPDATE model_calls SET status = %s, response = %s, ended_at = now() "
                 "WHERE id = %s AND run_id = %s", (status, Jsonb(payload), model_call_id, run_id),
@@ -307,6 +383,7 @@ class RunRepository:
     async def queue_tool_calls(self, run_id: UUID, model_call_id: UUID, calls: list[ToolCall]) -> list[UUID]:
         identities = [uuid4() for _ in calls]
         async with self.database.transaction() as connection:
+            await self.check_owner(connection, run_id)
             for index, (identity, call) in enumerate(zip(identities, calls)):
                 await connection.execute(
                     "INSERT INTO tool_calls (id, run_id, model_call_id, call_id, name, arguments, status, call_index) "
@@ -318,6 +395,7 @@ class RunRepository:
 
     async def start_tool_call(self, run_id: UUID, model_call_id: UUID, call: ToolCall, *, record_id: UUID) -> UUID:
         async with self.database.transaction() as connection:
+            await self.check_owner(connection, run_id)
             cursor = await connection.execute(
                 "UPDATE tool_calls SET status = 'running' WHERE id = %s AND run_id = %s "
                 "AND model_call_id = %s AND call_id = %s AND status = 'queued' RETURNING id",
@@ -335,6 +413,7 @@ class RunRepository:
         result: AgentToolResult, message: ToolResultMessage,
     ) -> StoredMessage:
         async with self.database.transaction() as connection:
+            await self.check_owner(connection, run_id)
             text = "\n".join(block.text for block in message.content if hasattr(block, "text"))
             if len(text.encode("utf-8")) > INLINE_BYTES:
                 details = result.details if isinstance(result.details, dict) else {}
@@ -361,6 +440,7 @@ class RunRepository:
                      end_reason: RunEndReason | None = None, on_completed=None) -> None:
         end_reason = terminal_reason(status, end_reason)
         async with self.database.transaction() as connection:
+            await self.check_owner(connection, run_id)
             cursor = await connection.execute(
                 "UPDATE runs SET status = %s, error = %s, end_reason = %s, ended_at = now() "
                 "WHERE id = %s AND status = 'running' RETURNING id", (status, error, end_reason, run_id),

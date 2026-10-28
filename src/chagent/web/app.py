@@ -66,6 +66,7 @@ class WebRuntime:
         self.tasks: set[asyncio.Task] = set()
         self.closing = False
         self._workspace_id = None
+        self._recovery_task: asyncio.Task | None = None
 
     async def workspace_id(self):
         if self._workspace_id is None:
@@ -114,13 +115,30 @@ class WebRuntime:
         # Request disconnection must not cancel the durable agent task.
         return await asyncio.shield(started)
 
+    async def _recover_runs(self) -> None:
+        while True:
+            try:
+                while await self.runner.runs.reap_expired():
+                    pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning("Run recovery failed (%s)", type(error).__name__)
+            await asyncio.sleep(5)
+
     def start_worker(self) -> None:
-        """Background extraction starts only when the application is serving."""
+        """Start recovery and extraction while the application is serving."""
+        if self._recovery_task is None or self._recovery_task.done():
+            self._recovery_task = asyncio.create_task(self._recover_runs(), name="run-recovery")
         if getattr(self.runner, "memory_worker", None) is not None:
             self.runner.memory_worker.start()
 
     async def close(self):
         self.closing = True
+        if self._recovery_task is not None:
+            self._recovery_task.cancel()
+            await asyncio.gather(self._recovery_task, return_exceptions=True)
+            self._recovery_task = None
         for task in self.tasks:
             if not task.cancelling():
                 task.cancel()

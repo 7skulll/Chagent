@@ -10,7 +10,7 @@ import asyncio
 import logging
 
 from chagent.memory.service import MemoryService
-from chagent.storage.memory_jobs import MemoryJob, MemoryJobRepository
+from chagent.storage.memory_jobs import MemoryJob, MemoryJobClaimLost, MemoryJobRepository
 
 
 logger = logging.getLogger(__name__)
@@ -21,8 +21,10 @@ class MemoryWorker:
 
     A lease makes an interrupted worker recoverable: once it expires another
     process reaps the job — counting the dead attempt — and may claim it again.
-    Extraction itself is never replayed after a candidate was committed,
-    because candidates and the job's terminal state commit together.
+    Every claim carries a token, so a worker that lost its lease can neither
+    complete, fail nor requeue the row a successor now owns. Extraction itself
+    is never replayed after a candidate was committed, because candidates and
+    the job's terminal state commit together.
     """
 
     def __init__(self, jobs: MemoryJobRepository, service: MemoryService, agent, *,
@@ -64,7 +66,7 @@ class MemoryWorker:
         """Reap dead leases, then claim up to ``concurrency`` jobs and process them."""
         for expired in await self.jobs.reap_expired():
             if expired["status"] == "failed":
-                await self._quietly(self.service.runs.event, expired["run_id"], "memory_job_failed",
+                await self._quietly(self.service.runs.audit_event, expired["run_id"], "memory_job_failed",
                                     {"job_id": str(expired["id"]), "reason": "LeaseExpired",
                                      "status": "failed", "attempt": expired["attempts"],
                                      "max_attempts": expired["max_attempts"]})
@@ -102,19 +104,26 @@ class MemoryWorker:
             proposals = await self.service.run_job(job, self.agent.model, self.agent.client)
             # Candidates and the completed job share one transaction: a job is
             # never marked done while its candidates are missing, and a retry
-            # never duplicates them.
+            # never duplicates them. ``complete`` re-checks the claim token, so
+            # an attempt whose lease was recycled rolls the candidates back
+            # instead of writing over the attempt that owns the job now.
             async with self.service.repository.database.transaction() as connection:
                 if proposals:
                     await self.service.commit(connection, job.session_id, job.run_id, proposals)
-                await self.jobs.complete(job.id, connection=connection)
+                await self.jobs.complete(job.id, job.claim_token, connection=connection)
             self.service.runs.notifications.notify(job.run_id)
+        except MemoryJobClaimLost:
+            # The successor attempt owns the outcome; reporting here would
+            # mislabel a job that is still alive as failed.
+            return
         except asyncio.CancelledError:
-            await self._quietly(self.jobs.requeue, job.id, reason="worker_stopped")
+            await self._quietly(self.jobs.requeue, job.id, job.claim_token, reason="worker_stopped")
             raise
         except Exception as error:
             reason = type(error).__name__
-            status = await self._quietly(self.jobs.fail, job.id, error=reason, retry_delay=self.retry_delay)
-            await self._quietly(self.service.runs.event, job.run_id, "memory_job_failed",
+            status = await self._quietly(self.jobs.fail, job.id, job.claim_token, error=reason,
+                                         retry_delay=self.retry_delay)
+            await self._quietly(self.service.runs.audit_event, job.run_id, "memory_job_failed",
                                 {"job_id": str(job.id), "reason": reason, "status": status,
                                  "attempt": job.attempts + 1, "max_attempts": job.max_attempts})
 
@@ -123,6 +132,8 @@ class MemoryWorker:
         """Best-effort bookkeeping: it must not mask the original outcome."""
         try:
             return await action(*args, **kwargs)
+        except MemoryJobClaimLost:
+            return None
         except asyncio.CancelledError:
             raise
         except Exception as error:

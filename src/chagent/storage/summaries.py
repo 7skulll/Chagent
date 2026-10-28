@@ -15,6 +15,7 @@ from chagent.domain.usage import Usage, UsageCost
 from chagent.models.base import ModelRequest
 from chagent.sessions.errors import StateConflictError
 from chagent.storage.database import Database
+from chagent.storage.repositories import RunRepository
 
 
 class SummaryRepository:
@@ -58,6 +59,7 @@ class SummaryRepository:
 
     async def save(self, summary: SessionSummary, run_id: UUID, *, completed_event: JsonObject | None = None) -> SessionSummary:
         async with self.database.transaction() as connection:
+            await RunRepository(self.database).check_owner(connection, run_id)
             await connection.execute("SELECT id FROM sessions WHERE id = %s FOR UPDATE", (summary.session_id,))
             cursor = await connection.execute(
                 "SELECT id, revision, covered_through_sequence, source_run_id FROM session_summaries s "
@@ -134,7 +136,8 @@ class SummaryRepository:
 
     async def start_call(self, compaction_id: UUID, run_id: UUID, iteration: int, request: ModelRequest) -> UUID:
         identity = uuid4()
-        async with self.database.connection() as connection:
+        async with self.database.transaction() as connection:
+            await RunRepository(self.database).check_owner(connection, run_id)
             await connection.execute(
                 "INSERT INTO compaction_calls (id, compaction_id, run_id, iteration, request) VALUES (%s, %s, %s, %s, %s)",
                 (identity, compaction_id, run_id, iteration, Jsonb(asdict(request))),
@@ -145,7 +148,12 @@ class SummaryRepository:
                           duration_ms: int, error: str | None = None):
         if status not in {"completed", "failed", "cancelled"}:
             raise ValueError("Invalid compaction call status")
-        async with self.database.connection() as connection:
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute("SELECT run_id FROM compaction_calls WHERE id = %s", (identity,))
+            row = await cursor.fetchone()
+            if row is None:
+                raise StateConflictError("Compaction call missing")
+            await RunRepository(self.database).check_owner(connection, row["run_id"])
             await connection.execute(
                 "UPDATE compaction_calls SET status = %s, response = %s, duration_ms = %s, error = %s, ended_at = now() "
                 "WHERE id = %s AND status = 'running'",

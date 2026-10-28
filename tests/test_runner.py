@@ -167,6 +167,43 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await cursor.fetchone())["status"], "unknown")
         await create_demo_runner(self.database).run(self.session, "取消后继续")
 
+    async def test_cancellation_after_lease_loss_is_a_classified_failure(self):
+        """A cancel that cannot prove ownership must not escape as a raw
+        RunOwnershipLost, and must not claim a 'cancelled' terminal state."""
+        started = asyncio.Event()
+
+        class BlockingClient:
+            async def stream(self, request):
+                started.set()
+                yield StartEvent(partial=AssistantMessage([], "fake", "test", "test", 1, "pending"))
+                await asyncio.Event().wait()
+
+        self.runner.client = BlockingClient()
+        task = asyncio.create_task(self.runner.run(self.session, "等待取消"))
+
+        async def cleanup():
+            task.cancel()
+            with suppress(asyncio.CancelledError, RunFailedError):
+                await task
+
+        self.addAsyncCleanup(cleanup)
+        await asyncio.wait_for(started.wait(), timeout=5)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute("SELECT id FROM runs WHERE session_id = %s", (self.session,))
+            run_id = (await cursor.fetchone())["id"]
+            await connection.execute(
+                "UPDATE runs SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE id = %s", (run_id,))
+        self.assertTrue(self.runner.cancel(run_id))
+        with self.assertRaises(RunFailedError) as raised:
+            await task
+        self.assertEqual(raised.exception.end_reason, "storage_error")
+        runs = RunRepository(self.database)
+        # The owner cannot record an outcome it cannot prove: the row stays
+        # running and the recovery scan closes it as interrupted.
+        self.assertEqual((await runs.get(run_id))["status"], "running")
+        self.assertEqual(await runs.reap_expired(), [run_id])
+        self.assertEqual((await runs.get(run_id))["status"], "interrupted")
+
     async def test_iteration_limit_persists_failure(self):
         self.runner.max_turns = 1
         with self.assertRaisesRegex(RunFailedError, "Maximum model turns") as raised:

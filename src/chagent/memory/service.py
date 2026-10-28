@@ -243,7 +243,7 @@ class MemoryService:
                 "request = EXCLUDED.request, response = NULL, error = NULL, duration_ms = NULL, "
                 "created_at = now(), ended_at = NULL",
                 (identity, job.run_id, PROMPT_VERSION, Jsonb(asdict(request))))
-        await self.runs.event(job.run_id, "memory_extraction_started", {"extraction_id": str(identity)})
+        await self.runs.audit_event(job.run_id, "memory_extraction_started", {"extraction_id": str(identity)})
         try:
             try:
                 async with asyncio.timeout(self.policy.timeout):
@@ -283,7 +283,7 @@ class MemoryService:
                                           response, started, type(error).__name__)
             if not isinstance(error, asyncio.CancelledError):
                 # Reason only: provider messages could carry echoed credentials.
-                await self.runs.event(job.run_id, "memory_extraction_failed", {"reason": type(error).__name__})
+                await self.runs.audit_event(job.run_id, "memory_extraction_failed", {"reason": type(error).__name__})
             raise
 
     async def _finish_extraction(self, identity, status, response, started, error=None):

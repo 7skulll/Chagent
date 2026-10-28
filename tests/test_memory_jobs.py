@@ -20,7 +20,7 @@ from chagent.models.events import DoneEvent, StartEvent
 from chagent.models.fake import FakeModelClient
 from chagent.storage.database import Database
 from chagent.storage.memories import MemoryRepository
-from chagent.storage.memory_jobs import MemoryJobRepository
+from chagent.storage.memory_jobs import MemoryJobClaimLost, MemoryJobRepository
 from chagent.storage.migrate import migrate
 
 
@@ -63,6 +63,13 @@ class MemoryJobTests(unittest.IsolatedAsyncioTestCase):
 
     async def drop_schema(self):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
+
+    async def _expire_and_reclaim(self):
+        """Age out the current lease and let a successor claim the same job."""
+        async with self.database.connection() as connection:
+            await connection.execute("UPDATE memory_jobs SET lease_expires_at = now() - interval '1 second'")
+        await self.jobs.reap_expired()
+        return await self.jobs.claim(lease_seconds=30)
 
     async def test_completed_run_enqueues_job_without_waiting_for_extraction(self):
         self.runner.client = SlowExtractClient(delay=2.0)
@@ -146,13 +153,68 @@ class MemoryJobTests(unittest.IsolatedAsyncioTestCase):
         # The answer is untouched by a failed extraction.
         self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
 
+    async def test_stale_attempt_cannot_write_after_reclaim(self):
+        """A lease says when work may be retaken; only the token says who owns it."""
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        first = await self.jobs.claim(lease_seconds=30)
+        second = await self._expire_and_reclaim()
+        self.assertEqual(second.id, first.id)
+        self.assertNotEqual(first.claim_token, second.claim_token)
+
+        with self.assertRaises(MemoryJobClaimLost):
+            await self.jobs.complete(first.id, first.claim_token)
+        with self.assertRaises(MemoryJobClaimLost):
+            await self.jobs.requeue(first.id, first.claim_token)
+        with self.assertRaises(MemoryJobClaimLost):
+            await self.jobs.fail(first.id, first.claim_token, error="RuntimeError")
+
+        job = await self.jobs.for_run(result.run_id)
+        self.assertEqual((job["status"], job["attempts"], job["claim_token"]),
+                         ("running", 1, second.claim_token))
+        await self.jobs.complete(second.id, second.claim_token)
+        self.assertEqual((await self.jobs.for_run(result.run_id))["status"], "completed")
+
+    async def test_stale_completion_rolls_back_its_candidates(self):
+        """Candidates and the terminal state share a transaction, so a lost
+        claim must discard the candidates rather than let them commit alone."""
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        first = await self.jobs.claim(lease_seconds=30)
+        await self._expire_and_reclaim()
+        with self.assertRaises(MemoryJobClaimLost):
+            async with self.database.transaction() as connection:
+                await connection.execute(
+                    "INSERT INTO memory_extractions (id, run_id, status, prompt_version, request) "
+                    "VALUES (%s, %s, 'running', 'stale-attempt', %s)", (uuid4(), result.run_id, Jsonb({})))
+                await self.jobs.complete(first.id, first.claim_token)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT count(*) AS total FROM memory_extractions WHERE run_id = %s AND prompt_version = 'stale-attempt'",
+                (result.run_id,))
+            self.assertEqual((await cursor.fetchone())["total"], 0)
+
+    async def test_worker_discards_an_attempt_whose_lease_was_reaped(self):
+        """The successor owns the job; the slow attempt must stay silent."""
+        self.runner.client = SlowExtractClient(delay=0.5)
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        attempt = asyncio.create_task(self.runner.memory_worker.run_once())
+        await asyncio.sleep(0.15)  # claimed and extracting, but not yet committing
+        successor = await self._expire_and_reclaim()
+        self.assertIsNotNone(successor)
+        await attempt
+        job = await self.jobs.for_run(result.run_id)
+        self.assertEqual((job["status"], job["claim_token"]), ("running", successor.claim_token))
+        events = [event["type"] for event in await self.runner.runs.events(result.run_id)]
+        self.assertNotIn("memory_job_failed", events, "a live successor must not be reported as failed")
+        await self.jobs.complete(successor.id, successor.claim_token)
+        self.assertEqual((await self.jobs.for_run(result.run_id))["status"], "completed")
+
     async def test_retry_stops_at_max_attempts(self):
         result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
-        job = await self.jobs.for_run(result.run_id)
         statuses = []
         for _ in range(3):
-            await self.jobs.claim(lease_seconds=30)
-            statuses.append(await self.jobs.fail(job["id"], error="RuntimeError", retry_delay=0))
+            claimed = await self.jobs.claim(lease_seconds=30)
+            statuses.append(await self.jobs.fail(claimed.id, claimed.claim_token,
+                                                 error="RuntimeError", retry_delay=0))
         self.assertEqual(statuses, ["queued", "queued", "failed"])
         self.assertEqual((await self.jobs.for_run(result.run_id))["attempts"], 3)
         self.assertIsNone(await self.jobs.claim(lease_seconds=30))

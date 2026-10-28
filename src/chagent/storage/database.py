@@ -22,6 +22,8 @@ class Database:
     def __init__(self, settings: Settings) -> None:
         self._timeout = settings.db_timeout
         self.notifications = RunNotifications()
+        # Tokens are process-local and are never reconstructed from database rows.
+        self.run_owners = {}
         self._pool = AsyncConnectionPool(
             conninfo=settings.database_url,
             min_size=settings.db_pool_min_size,

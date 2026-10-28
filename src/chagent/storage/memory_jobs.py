@@ -12,6 +12,10 @@ from uuid import UUID, uuid4
 from chagent.storage.database import Database
 
 
+class MemoryJobClaimLost(RuntimeError):
+    """Another attempt owns this job; the caller must not write its outcome."""
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryJob:
     id: UUID
@@ -20,6 +24,7 @@ class MemoryJob:
     source_message_id: UUID
     attempts: int
     max_attempts: int
+    claim_token: UUID
 
 
 class MemoryJobRepository:
@@ -59,7 +64,7 @@ class MemoryJobRepository:
             cursor = await connection.execute(
                 "UPDATE memory_jobs SET attempts = attempts + 1, last_error = 'LeaseExpired', "
                 "  status = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'queued' END, "
-                "  available_at = now(), lease_expires_at = NULL, "
+                "  available_at = now(), lease_expires_at = NULL, claim_token = NULL, "
                 "  ended_at = CASE WHEN attempts + 1 >= max_attempts THEN now() ELSE NULL END "
                 "WHERE status = 'running' AND lease_expires_at < now() "
                 "RETURNING id, run_id, status, attempts, max_attempts",
@@ -79,8 +84,11 @@ class MemoryJobRepository:
         """Take one queued job. Call ``reap_expired`` first to free dead leases.
 
         SKIP LOCKED keeps two workers from claiming the same row without
-        blocking on a job another process is already extracting.
+        blocking on a job another process is already extracting. The returned
+        token is the only proof of ownership for every later write: a lease
+        says when an attempt may be replaced, not who currently owns the row.
         """
+        token = uuid4()
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
                 "WITH candidate AS ("
@@ -90,34 +98,49 @@ class MemoryJobRepository:
                 ") "
                 "UPDATE memory_jobs j SET status = 'running', "
                 "  started_at = COALESCE(j.started_at, now()), "
-                "  lease_expires_at = now() + make_interval(secs => %s) "
+                "  lease_expires_at = now() + make_interval(secs => %s), "
+                "  claim_token = %s "
                 "FROM candidate WHERE j.id = candidate.id "
-                "RETURNING j.id, j.run_id, j.session_id, j.source_message_id, j.attempts, j.max_attempts",
-                (lease_seconds,),
+                "RETURNING j.id, j.run_id, j.session_id, j.source_message_id, j.attempts, "
+                "  j.max_attempts, j.claim_token",
+                (lease_seconds, token),
             )
             row = await cursor.fetchone()
         if row is None:
             return None
         return MemoryJob(row["id"], row["run_id"], row["session_id"], row["source_message_id"],
-                         row["attempts"], row["max_attempts"])
+                         row["attempts"], row["max_attempts"], row["claim_token"])
 
-    async def requeue(self, job_id: UUID, *, connection=None, reason: str | None = None) -> None:
+    async def requeue(self, job_id: UUID, claim_token: UUID, *, connection=None,
+                      reason: str | None = None) -> None:
         """Return a claimed job to the queue without consuming an attempt."""
         async with self._tx(connection) as conn:
-            await conn.execute(
-                "UPDATE memory_jobs SET status = 'queued', lease_expires_at = NULL, available_at = now(), "
-                "last_error = COALESCE(%s, last_error) WHERE id = %s AND status = 'running'",
-                (reason, job_id),
+            cursor = await conn.execute(
+                "UPDATE memory_jobs SET status = 'queued', lease_expires_at = NULL, claim_token = NULL, "
+                "available_at = now(), last_error = COALESCE(%s, last_error) "
+                "WHERE id = %s AND status = 'running' AND claim_token = %s RETURNING id",
+                (reason, job_id, claim_token),
             )
+            if await cursor.fetchone() is None:
+                raise MemoryJobClaimLost("Memory job is no longer owned by this attempt")
 
-    async def complete(self, job_id: UUID, *, connection=None) -> None:
+    async def complete(self, job_id: UUID, claim_token: UUID, *, connection=None) -> None:
+        """Finish a job only while this attempt still holds the claim.
+
+        Callers commit candidates in the same transaction, so raising here
+        discards them instead of letting a stale attempt add duplicates.
+        """
         async with self._tx(connection) as conn:
-            await conn.execute(
-                "UPDATE memory_jobs SET status = 'completed', lease_expires_at = NULL, ended_at = now() "
-                "WHERE id = %s AND status = 'running'", (job_id,),
+            cursor = await conn.execute(
+                "UPDATE memory_jobs SET status = 'completed', lease_expires_at = NULL, claim_token = NULL, "
+                "ended_at = now() WHERE id = %s AND status = 'running' AND claim_token = %s RETURNING id",
+                (job_id, claim_token),
             )
+            if await cursor.fetchone() is None:
+                raise MemoryJobClaimLost("Memory job is no longer owned by this attempt")
 
-    async def fail(self, job_id: UUID, *, error: str, retry_delay: float = 5.0, connection=None) -> str:
+    async def fail(self, job_id: UUID, claim_token: UUID, *, error: str, retry_delay: float = 5.0,
+                   connection=None) -> str:
         """Record a failure; retry until max_attempts, then stop.
 
         Returns the resulting status so callers can report it without guessing.
@@ -128,13 +151,15 @@ class MemoryJobRepository:
                 "  status = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'queued' END, "
                 "  available_at = CASE WHEN attempts + 1 >= max_attempts THEN available_at "
                 "                       ELSE now() + make_interval(secs => %s) END, "
-                "  lease_expires_at = NULL, "
+                "  lease_expires_at = NULL, claim_token = NULL, "
                 "  ended_at = CASE WHEN attempts + 1 >= max_attempts THEN now() ELSE NULL END "
-                "WHERE id = %s AND status = 'running' RETURNING status",
-                (error, retry_delay, job_id),
+                "WHERE id = %s AND status = 'running' AND claim_token = %s RETURNING status",
+                (error, retry_delay, job_id, claim_token),
             )
             row = await cursor.fetchone()
-        return row["status"] if row else "unknown"
+        if row is None:
+            raise MemoryJobClaimLost("Memory job is no longer owned by this attempt")
+        return row["status"]
 
     async def pending(self) -> int:
         """Jobs that can make progress now (a retry wait is not pending)."""

@@ -210,6 +210,22 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(task.get_name().startswith(("model-text-writer", "model-stream-"))
                              for task in asyncio.all_tasks() if not task.done()))
 
+    async def test_heartbeat_failure_stops_run_without_writing_terminal_state(self):
+        client = FixtureClient(block=True)
+        self.runner.client = client
+        self.runner.heartbeat_interval = .05
+        async def fail_heartbeat(_run_id):
+            raise ConnectionError("database unavailable")
+        self.runner.runs.heartbeat = fail_heartbeat
+        with self.assertRaises(RunFailedError) as caught:
+            await asyncio.wait_for(self.runner.run(self.session, "test"), 3)
+        self.assertEqual(caught.exception.end_reason, "storage_error")
+        self.assertTrue(client.closed.is_set())
+        row = await self.runner.runs.get(caught.exception.run_id)
+        self.assertEqual(row["status"], "running")
+        self.assertNotIn(caught.exception.run_id, self.database.run_owners)
+        self.assert_no_writers()
+
     async def test_burst_commit_order_exact_replay_and_background_events_cutoff(self):
         original = self.runner.runs.save_response
 
@@ -225,7 +241,7 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(deltas), 4)
         self.assertEqual([event["sequence"] for event in persisted], list(range(1, len(persisted) + 1)))
         terminal = persisted[-1]["sequence"]
-        await self.runner.runs.event(result.run_id, "memory_saved", {"items": []})
+        await self.runner.runs.audit_event(result.run_id, "memory_saved", {"items": []})
         blocks = await self.collect(await self.response(result.run_id))
         self.assertNotIn("memory_saved", [event["type"] for event in updates(blocks)])
         self.assertEqual(blocks[-1], "event: end\ndata: {}\n\n")

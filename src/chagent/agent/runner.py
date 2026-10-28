@@ -18,7 +18,7 @@ from chagent.domain.messages import AssistantMessage, ToolCall, UserMessage
 from chagent.domain.runs import RunEndReason, RunResult
 from chagent.models.base import Model, ModelClient, ModelRequest
 from chagent.models.events import ContentDeltaEvent, DoneEvent, ErrorEvent, StartEvent
-from chagent.storage.repositories import ConversationRepository, RunRepository
+from chagent.storage.repositories import ConversationRepository, RunRepository, RunOwnershipLost
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
@@ -49,6 +49,8 @@ def decide_next_step(results: list[AgentToolResult]) -> FinishDecision:
 
 
 class AgentRunner:
+    heartbeat_interval = 5.0
+
     def __init__(
         self, model: Model, client: ModelClient, context: ContextBuilder,
         tools: ToolExecutor, conversations: ConversationRepository, runs: RunRepository,
@@ -83,12 +85,31 @@ class AgentRunner:
     async def run(self, session_id: UUID, text: str, *, on_started: Callable[[UUID], None] | None = None) -> RunResult:
         if not text.strip():
             raise ValueError("Input must not be empty")
+        # Also recover on CLI entry and before a new web run is admitted.
+        while await self.runs.reap_expired():
+            pass
         run_id = await self.runs.begin(
             session_id, UserMessage(content=text, timestamp=time_ns() // 1_000_000),
         )
         task = asyncio.current_task()
         if task is not None:
             self._tasks[run_id] = task
+        heartbeat_error = None
+
+        async def heartbeat():
+            nonlocal heartbeat_error
+            try:
+                while True:
+                    await asyncio.sleep(self.heartbeat_interval)
+                    await self.runs.heartbeat(run_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                heartbeat_error = error
+                if task is not None:
+                    task.cancel()
+
+        heartbeat_task = asyncio.create_task(heartbeat(), name=f"run-heartbeat-{run_id}")
         try:
             if on_started is not None:
                 on_started(run_id)
@@ -106,9 +127,12 @@ class AgentRunner:
             if self.memory_worker is not None and result.message is not None:
                 self.memory_worker.wake()
         except asyncio.CancelledError:
-            if (await self.runs.get(run_id))["status"] == "running":
-                await self.runs.finish(run_id, "cancelled", "Run cancelled", end_reason="user_cancelled")
+            if heartbeat_error is not None:
+                raise RunFailedError(run_id, "Run heartbeat failed; ownership is uncertain", "storage_error") from heartbeat_error
+            await self._close_if_running(run_id, "cancelled", "Run cancelled", "user_cancelled")
             raise
+        except RunOwnershipLost as error:
+            raise RunFailedError(run_id, str(error), "storage_error") from error
         except Exception as error:
             reason = f"{type(error).__name__}: {error}"
             if isinstance(error, RunExecutionError):
@@ -121,19 +145,38 @@ class AgentRunner:
                 end_reason = "storage_error"
             else:
                 end_reason = "execution_error"
-            if (await self.runs.get(run_id))["status"] == "running":
-                status = "cancelled" if end_reason == "model_aborted" else "failed"
-                await self.runs.finish(run_id, status, reason, end_reason=end_reason)
+            status = "cancelled" if end_reason == "model_aborted" else "failed"
+            await self._close_if_running(run_id, status, reason, end_reason)
             raise RunFailedError(run_id, reason, end_reason) from error
         else:
             return result
         finally:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+            self.runs.database.run_owners.pop(run_id, None)
             self._tasks.pop(run_id, None)
             self._states.pop(run_id, None)
             if self.context_manager is not None:
                 self.context_manager.release(run_id)
             if self.memory_service is not None:
                 self.memory_service.release(run_id)
+
+    async def _close_if_running(self, run_id: UUID, status: str, reason: str, end_reason: RunEndReason) -> None:
+        """Close a run from an exception handler without leaking storage errors.
+
+        ``finish`` re-checks ownership, and an exception raised inside an
+        ``except`` block is not caught by a sibling ``except RunOwnershipLost``:
+        it would escape ``run`` as an unclassified exception. Ownership loss is
+        reported as a classified failure instead, and the row is left to the
+        reaper rather than falsely marked cancelled.
+        """
+        row = await self.runs.get(run_id)
+        if row is None or row["status"] != "running":
+            return
+        try:
+            await self.runs.finish(run_id, status, reason, end_reason=end_reason)
+        except RunOwnershipLost as error:
+            raise RunFailedError(run_id, str(error), "storage_error") from error
 
     async def _load_state(self, run_id: UUID, session_id: UUID) -> RunState:
         session = await self.conversations.get_session(session_id)
