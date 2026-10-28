@@ -12,6 +12,7 @@ from chagent.context.builder import BuiltContext
 from chagent.domain.codec import message_from_dict, message_to_dict
 from chagent.domain.json_types import JsonObject
 from chagent.domain.messages import AssistantMessage, Message, ToolCall, ToolResultMessage, UserMessage
+from chagent.domain.recovery import MAX_TARGET, SIDE_EFFECT_TOOLS, RecoveryFact
 from chagent.domain.runs import RunEndReason, RunStatus, StoredMessage, terminal_reason
 from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState
 from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError, StateConflictError
@@ -508,3 +509,60 @@ class RunRepository:
                 (session_id,),
             )
             return await cursor.fetchone()
+
+    async def recovery_facts(self, session_id: UUID, *, current_run: UUID,
+                             limit: int = 64) -> list[RecoveryFact]:
+        """Committed side effects from runs that ended without a normal stop.
+
+        Only failures after the latest completed run are read. Once the session
+        moved on successfully, older failures are history, not context: without
+        this boundary every continuation would re-inject the same stale facts.
+
+        A ``completed`` tool call has a result the model already saw. An
+        ``unknown`` one was started without a recorded outcome; it is reported as
+        unknown and never as success, and nothing here is ever replayed.
+        """
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "WITH boundary AS ("
+                "  SELECT max(ended_at) AS since FROM runs"
+                "  WHERE session_id = %s AND status = 'completed'"
+                ") "
+                "SELECT r.id AS run_id, r.status AS run_status, t.name, "
+                "  t.status AS tool_status, t.call_index, "
+                "  t.result->'details'->>'path' AS file_path, "
+                "  t.result->'details'->>'sha256' AS sha256, "
+                "  t.result->'details'->>'exit_code' AS exit_code, "
+                "  t.arguments->>'path' AS argument_path, "
+                "  t.arguments->>'cmd' AS command, "
+                "  a.id AS artifact_id "
+                "FROM runs r JOIN tool_calls t ON t.run_id = r.id "
+                "LEFT JOIN tool_artifacts a ON a.tool_record_id = t.id "
+                "WHERE r.session_id = %s AND r.id <> %s "
+                "  AND r.status IN ('failed', 'cancelled', 'interrupted') "
+                "  AND r.ended_at IS NOT NULL "
+                "  AND r.ended_at > COALESCE((SELECT since FROM boundary), '-infinity'::timestamptz) "
+                "  AND t.status IN ('completed', 'unknown') "
+                "  AND t.name = ANY(%s) "
+                "ORDER BY r.ended_at, t.call_index LIMIT %s",
+                (session_id, session_id, current_run, sorted(SIDE_EFFECT_TOOLS), limit),
+            )
+            rows = await cursor.fetchall()
+        facts = []
+        for row in rows:
+            target = row["file_path"] or row["argument_path"] or row["command"]
+            if not target:
+                continue
+            target = " ".join(str(target).split())
+            if len(target) > MAX_TARGET:
+                target = target[:MAX_TARGET - 1] + "…"
+            if row["name"] == "exec_command":
+                detail = f"exit {row['exit_code']}" if row["exit_code"] is not None else ""
+            else:
+                detail = f"sha256 {row['sha256'][:8]}" if row["sha256"] else ""
+            facts.append(RecoveryFact(
+                run_id=row["run_id"], run_status=row["run_status"], tool_name=row["name"],
+                target=target, confirmed=row["tool_status"] == "completed",
+                detail=detail, artifact_id=row["artifact_id"],
+            ))
+        return facts

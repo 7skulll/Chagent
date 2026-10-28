@@ -15,6 +15,7 @@ from chagent.context.builder import ContextBudgetError, ContextBuilder
 from chagent.context.manager import ContextManager
 from chagent.memory.service import MemoryService
 from chagent.domain.messages import AssistantMessage, ToolCall, UserMessage
+from chagent.domain.recovery import build_recovery_note
 from chagent.domain.runs import RunEndReason, RunResult
 from chagent.models.base import Model, ModelClient, ModelRequest
 from chagent.models.events import ContentDeltaEvent, DoneEvent, ErrorEvent, StartEvent
@@ -183,7 +184,15 @@ class AgentRunner:
         history = await self.conversations.messages(session_id, current_run=run_id, project_artifacts=True)
         task_state = await self.conversations.task_state(session_id)
         summary = await self.context_manager.summaries.latest(session_id, current_run=run_id) if self.context_manager else None
-        return RunState(run_id, session, history, task_state, summary)
+        note = build_recovery_note(await self.runs.recovery_facts(session_id, current_run=run_id))
+        if note is not None:
+            # Audit only: the note itself is rebuilt from structured records and
+            # never persisted as a message, so it cannot be replayed or paired
+            # with a tool call.
+            await self.runs.event(run_id, "recovery_projected", {
+                "fact_count": note.fact_count, "source_runs": list(note.run_ids),
+            })
+        return RunState(run_id, session, history, task_state, summary, recovery=note)
 
     async def _loop(self, state: RunState) -> RunResult:
         run_id, session_id = state.run_id, state.session.id
@@ -202,7 +211,8 @@ class AgentRunner:
                                                                 state.tools, state=state)
                 else:
                     built = await self.context.build(state.history, self.model, state.tools,
-                                                     task_state=state.task_state, current_run_id=run_id)
+                                                     task_state=state.task_state, current_run_id=run_id,
+                                                     recovery=state.recovery)
             except ContextBudgetError as error:
                 await self.runs.event(run_id, "context_rejected", {
                     "reason": str(error), "required_tokens": error.required_tokens,

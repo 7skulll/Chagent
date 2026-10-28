@@ -10,6 +10,7 @@ from chagent.context.projection import ProjectionCache
 from chagent.context.tokens import ByteTokenCounter, TokenCounter
 from chagent.domain.context import ContextPolicy, ContextSelection, ContextSnapshot
 from chagent.domain.messages import AssistantMessage, Message, SystemMessage, ToolCall, ToolResultMessage, UserMessage
+from chagent.domain.recovery import RecoveryNote
 from chagent.domain.runs import StoredMessage
 from chagent.domain.sessions import TaskState
 from chagent.domain.summaries import SessionSummary
@@ -57,6 +58,7 @@ class BasicContextBuilder:
         summary: SessionSummary | None = None,
         allow_over_budget: bool = False,
         cache: ProjectionCache | None = None,
+        recovery: RecoveryNote | None = None,
     ) -> BuiltContext:
         original = history
         if len({item.id for item in history}) != len(history):
@@ -90,6 +92,11 @@ class BasicContextBuilder:
                     "\n\nUser-maintained task state (current user input takes precedence):\n"
                     + json.dumps(state, ensure_ascii=False)
                 )
+        if recovery is not None:
+            # Host-generated reference data, counted as part of the fixed system
+            # cost: it never becomes a message that could be replayed or paired
+            # with a tool call.
+            instructions += "\n\n" + recovery.text
         system = SystemMessage(
             content=instructions, timestamp=time_ns() // 1_000_000,
             tools_added=deepcopy(tools),
@@ -187,6 +194,8 @@ class BasicContextBuilder:
                               and isinstance(item.message, ToolResultMessage) and item.message.artifact is not None],
                 summary_source_run_id=str(summary.source_run_id) if summary and summary.source_run_id else None,
                 protected_input_id=str(summary.protected_input_id) if summary and summary.protected_input_id else None,
+                recovery_fact_count=recovery.fact_count if recovery is not None else 0,
+                recovery_source_runs=list(recovery.run_ids) if recovery is not None else [],
             ),
         )
 

@@ -48,12 +48,13 @@ class ContextManager:
         history = state.history if state else await self.conversations.messages(session_id, current_run=run_id, project_artifacts=True)
         task_state = state.task_state if state else await self.conversations.task_state(session_id)
         previous = state.summary if state else await self.summaries.latest(session_id, current_run=run_id)
+        recovery = state.recovery if state is not None else None
         current_input = next(item for item in history if item.run_id == run_id and isinstance(item.message, UserMessage))
 
         async def build(summary):
             return await self.builder.build(history, model, tools, task_state=task_state,
                                             current_run_id=run_id, summary=summary, allow_over_budget=True,
-                                            cache=self._cache(run_id))
+                                            cache=self._cache(run_id), recovery=recovery)
 
         baseline = await build(previous)
         omissions = any(not item.selected and item.reason != "summarized" for item in baseline.snapshot.selections)

@@ -5,6 +5,7 @@ from typing import Literal
 from uuid import UUID
 
 from chagent.domain.messages import ImageContent, ToolResultMessage, UserMessage
+from chagent.domain.recovery import RecoveryNote
 from chagent.domain.runs import RunEndReason, StoredMessage
 from chagent.domain.sessions import Session, TaskState
 from chagent.domain.summaries import SessionSummary
@@ -29,6 +30,9 @@ class RunState:
     context_revision: int = 0
     tools: list[Tool] = field(default_factory=list)
     tool_revision: int = -1
+    # Facts from earlier runs that ended without a normal stop; loaded once per
+    # run so every turn sees the same note and no turn re-queries it.
+    recovery: RecoveryNote | None = None
 
     @property
     def current_input(self) -> StoredMessage:

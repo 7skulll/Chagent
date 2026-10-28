@@ -46,3 +46,5 @@ class ContextSnapshot:
     memory_references: list[dict] = field(default_factory=list)
     memory_token_estimate: int = 0
     memory_omitted: int = 0
+    recovery_fact_count: int = 0
+    recovery_source_runs: list[str] = field(default_factory=list)
