@@ -68,15 +68,17 @@ A 批事件优化已完成：[验收报告](docs/事件链路A批验收.md)。�
 
 B1 运行所有权已完成：[B1 实施与审计](docs/B1实施审计.md)。运行带 30 秒租约与心跳，失联后由扫描收敛为 `interrupted`；记忆任务领取令牌保证旧 worker 不能覆盖新尝试。
 
+B2 失败事实恢复已完成：[B2 实施与审计](docs/B2实施审计.md)。失败运行不回放原始消息，但已提交的写入与命令以宿主注记进入下一次上下文，`unknown` 明确标注为未确认。
+
 ```sh
 # 本机有 HTTP 代理时会拦截回环请求，测试前先放行
 NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   uv run python -m unittest discover -s tests -q
 ```
 
-数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **183 项通过**。
+数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **192 项通过**。
 
-真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`。结论与实测数据见[关键路径优化](docs/关键路径优化.md)、[事件链路 A 批验收](docs/事件链路A批验收.md)与[B1 实施与审计](docs/B1实施审计.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
+真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。结论与实测数据见[关键路径优化](docs/关键路径优化.md)、[事件链路 A 批验收](docs/事件链路A批验收.md)与[B1 实施与审计](docs/B1实施审计.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
 
 ## 文档
 
@@ -92,6 +94,8 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
 | 供应商与模型预算 | [模型配置](docs/模型配置.md) |
 | 关键路径优化（已实施，含实测数据） | [关键路径优化](docs/关键路径优化.md) |
 | 运行所有权、失联收敛与记忆任务令牌 | [B1 实施与审计](docs/B1实施审计.md) |
+| 失败运行的已确认事实恢复 | [B2 实施与审计](docs/B2实施审计.md) |
+| 写入路径实测与收敛方案（待实施） | [执行效率优化](docs/执行效率优化.md) |
 | 路线图、诊断基线、未实施项 | [下一阶段实施方案](docs/下一阶段实施方案.md) |
 | 沙箱、审批与事件通道（方案） | [执行边界设计](docs/执行边界设计.md) |
 
