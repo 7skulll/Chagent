@@ -1,0 +1,47 @@
+import asyncio
+import unittest
+
+from chagent.domain.messages import ToolCall
+from chagent.tools.echo import EchoTool
+from chagent.tools.executor import ToolExecutor
+from chagent.tools.registry import ToolRegistry
+
+
+class ToolTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.registry = ToolRegistry()
+        self.registry.register(EchoTool())
+        self.executor = ToolExecutor(self.registry)
+
+    async def test_unknown_and_invalid_calls_become_error_results(self):
+        for call in (
+            ToolCall("a", "missing", {}),
+            ToolCall("b", "echo", {"text": 7}),
+            ToolCall("c", "echo", {}),
+            ToolCall("d", "echo", {"text": "ok"}, arguments_error="Truncated JSON"),
+        ):
+            with self.subTest(call=call):
+                self.assertTrue((await self.executor.execute(call)).is_error)
+
+    async def test_timeout_and_cancellation(self):
+        class SlowEcho(EchoTool):
+            async def execute(self, *args, **kwargs):
+                await asyncio.Event().wait()
+
+        registry = ToolRegistry()
+        registry.register(SlowEcho())
+        executor = ToolExecutor(registry, timeout=0.01)
+        self.assertTrue((await executor.execute(ToolCall("a", "echo", {"text": "x"}))).is_error)
+        task = asyncio.create_task(ToolExecutor(registry).execute(ToolCall("b", "echo", {"text": "x"})))
+        await asyncio.sleep(0)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+    async def test_declarations_are_isolated_and_duplicates_rejected(self):
+        with self.assertRaises(ValueError):
+            self.registry.register(EchoTool())
+        self.registry.definitions()[0].parameters["properties"]["text"]["type"] = "number"
+        result = await self.executor.execute(ToolCall("a", "echo", {"text": "原样返回"}))
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.content[0].text, "原样返回")

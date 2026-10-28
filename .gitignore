@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Vendored upstream reference sources (not this project's code)
+/nanobot-main/
+/pi-main1.4.0/

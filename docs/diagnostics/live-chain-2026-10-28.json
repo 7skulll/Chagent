@@ -1,0 +1,23 @@
+{
+  "kind": "evidence_manifest",
+  "sources": [
+    "live-chain-2026-10-28-initial.json",
+    "live-chain-2026-10-28-web-retest.json",
+    "live-chain-2026-10-28-explicit-retest.json"
+  ],
+  "authenticated_provider_requests": 22,
+  "initial_authentication_rejections": 2,
+  "reported_tokens": {
+    "input": 8038,
+    "output": 1290,
+    "cache_read": 15872,
+    "cache_write": 0,
+    "total_tokens": 25200
+  },
+  "all_schemas_cleaned": true,
+  "web_retest_passed": true,
+  "explicit_memory_retest_passed": false,
+  "verdict": "Core flows exercised successfully; explicit memory command unnecessarily invokes filesystem tools. Not an all-green quality result.",
+  "initial_harness_correction": "Initial SSE check matched raw fragments; retest joins text_delta payloads before comparing.",
+  "monetary_cost": null
+}

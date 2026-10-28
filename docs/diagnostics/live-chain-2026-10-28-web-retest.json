@@ -1,0 +1,73 @@
+{
+  "recorded_at_utc": "2026-10-28T01:23:45.191887+00:00",
+  "configuration": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "api": "openai-chat",
+    "output_limit": 768,
+    "max_provider_requests": 1,
+    "key_source": "named provider key",
+    "case_selection": "web"
+  },
+  "environment": {
+    "python": "3.13.9",
+    "platform": "Darwin"
+  },
+  "limits": "single sample per scenario; synthetic data; no browser TTFT or comparative Pi/Codex benchmark",
+  "results": [
+    {
+      "name": "web_api_sse_replay",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "sse_terminal": true,
+        "sse_answer": true,
+        "durable_replay": true
+      },
+      "elapsed_ms": 1118.937,
+      "answer": "WEB_LIVE_OK",
+      "sse_delta_count": 4,
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": 930.079,
+          "consumer_wait_ms": 8.894,
+          "usage": {
+            "input": 138,
+            "output": 4,
+            "cache_read": 768,
+            "cache_write": 0,
+            "total_tokens": 910,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 1034.702
+        }
+      ]
+    }
+  ],
+  "schema_cleaned": true,
+  "total_provider_requests": 1,
+  "reported_tokens": {
+    "input": 138,
+    "output": 4,
+    "cache_read": 768,
+    "cache_write": 0,
+    "total_tokens": 910
+  },
+  "usage_missing_calls": 0,
+  "monetary_cost": null,
+  "monetary_cost_note": "No monetary price assumed; see provider-reported token usage.",
+  "passed": true,
+  "source_sha256": {
+    "src/chagent/agent/runner.py": "f7667abce50eb4b91b9c0c54abeab46a683ad273db0413b1db3c846055be8902",
+    "src/chagent/memory/service.py": "5d5d8a36c45bdd9ae2aab67346de0a6995df26a4e30f0f29b84dd05fd930b9ff",
+    "src/chagent/models/openai_chat.py": "36758ad0327ed3e6b3ab9d39bad618221a3f0385e4c5fabfffe9df6ee9eabf3a",
+    "src/chagent/context/manager.py": "d5faf417838c471780d6958fdbe9831591d558297e3585664ca4f4c8723143de"
+  }
+}

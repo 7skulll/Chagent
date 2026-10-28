@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chagent · 本地对话</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="mark">C</span><strong>Chagent</strong><span class="local">本地</span></div>
+    <button id="new-session" class="new-session">＋ 新建会话</button>
+    <div class="section-label">会话记录</div>
+    <nav id="sessions" aria-label="会话列表"></nav>
+    <button id="more-sessions" class="quiet" hidden>加载更多会话</button>
+    <div class="sidebar-footer"><span class="online-dot"></span> 数据保存在本机</div>
+  </aside>
+  <main>
+    <header><div><h1 id="session-title">开始一段对话</h1><div id="workspace" class="muted"></div></div><div class="header-actions"><button id="open-memory" class="quiet">长期记忆</button><span id="model" class="model"></span></div></header>
+    <div id="error" role="alert" hidden></div>
+    <details id="context-panel"><summary>上下文与会话摘要</summary><div id="context-info">选择会话后可查看。</div></details>
+    <section id="conversation" aria-label="聊天记录">
+      <button id="older" class="quiet" hidden>加载更早的消息</button>
+      <div id="messages"></div>
+      <div id="live" aria-live="polite"></div>
+      <div id="empty"><div class="empty-mark">C</div><h2>有什么想一起完成的？</h2><p>从一个问题开始，或让 Agent 使用工具完成任务。</p></div>
+    </section>
+    <footer>
+      <div class="status-line"><span id="status" role="status">就绪</span><button id="stop" class="quiet stop" hidden>■ 停止生成</button></div>
+      <form id="composer"><label for="input" class="sr-only">输入消息</label><textarea id="input" rows="2" placeholder="输入消息，Enter 发送，Shift + Enter 换行" maxlength="16000"></textarea><button id="send" type="submit">发送 ↑</button></form>
+      <div class="hint">本地工作区 · 工具操作会记录在会话中</div>
+    </footer>
+  </main>
+  <dialog id="memory-dialog" aria-labelledby="memory-heading">
+    <div class="memory-heading"><div><h2 id="memory-heading">长期记忆</h2><p>用户偏好跨工作区使用，项目事实仅用于当前工作区。</p></div><button id="close-memory" class="quiet" aria-label="关闭记忆">关闭 ×</button></div>
+    <div id="memory-notice" role="status"></div>
+    <div class="memory-toolbar"><label for="memory-filter">查看</label><select id="memory-filter"><option value="active">已生效</option><option value="candidate">待审核</option><option value="deleted">已删除</option><option value="rejected">已拒绝</option></select><button id="new-memory">＋ 添加记忆</button></div>
+    <form id="memory-editor" hidden>
+      <label for="memory-scope">作用范围</label><select id="memory-scope"><option value="workspace">当前工作区</option><option value="user">用户偏好（所有工作区）</option></select>
+      <label for="memory-key">记忆键</label><input id="memory-key" required maxlength="80" placeholder="例如 response.language 或 project.framework">
+      <label for="memory-content">内容</label><textarea id="memory-content" required maxlength="2000" rows="3"></textarea>
+      <label class="memory-pin"><input id="memory-pinned" type="checkbox"> 优先保留，即使本轮没有匹配关键词</label>
+      <div><button type="submit">保存</button><button type="button" id="cancel-memory-edit" class="quiet">取消编辑</button></div>
+    </form>
+    <div id="memory-list"></div><button id="more-memories" class="quiet" hidden>加载更多记忆</button>
+    <p class="memory-footnote">自动提取的候选审核后才生效。删除会停止后续检索，原始聊天与版本审计仍保留。</p>
+  </dialog>
+</body>
+</html>

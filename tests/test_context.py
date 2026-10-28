@@ -1,0 +1,96 @@
+from copy import deepcopy
+import unittest
+from uuid import uuid4
+
+from chagent.context.builder import BasicContextBuilder, ContextBudgetError, ContextIntegrityError
+from chagent.domain.context import ContextPolicy
+from chagent.domain.messages import AssistantMessage, SystemMessage, TextContent, ToolCall, ToolResultMessage, UserMessage
+from chagent.domain.runs import StoredMessage
+from chagent.domain.sessions import TaskState
+from chagent.domain.tools import Tool
+from chagent.models.base import Model
+
+
+class ContextTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.model = Model("test", "test", "fake", 100_000, 128)
+
+    def record(self, sequence, message, run_id=None):
+        return StoredMessage(uuid4(), sequence, message, run_id)
+
+    async def test_budget_selects_complete_recent_turn_and_preserves_tool_pair(self):
+        old_run, current_run = uuid4(), uuid4()
+        old = [self.record(1, UserMessage("old" * 2000, 1), old_run),
+               self.record(2, AssistantMessage([TextContent("old answer")], "fake", "test", "test", 2, "stop"), old_run)]
+        current = [self.record(3, UserMessage("current", 3), current_run),
+                   self.record(4, AssistantMessage([ToolCall("a", "echo", {"text": "x"})], "fake", "test", "test", 4, "toolUse"), current_run),
+                   self.record(5, ToolResultMessage("a", "echo", [TextContent("x")], False, 5), current_run)]
+        baseline = await BasicContextBuilder(policy=ContextPolicy(safety_tokens=0)).build(current, self.model, [])
+        model = Model("test", "test", "fake", baseline.snapshot.token_estimate + 128 + 10, 128)
+        built = await BasicContextBuilder(policy=ContextPolicy(safety_tokens=0)).build(old + current, model, [], current_run_id=current_run)
+        self.assertEqual(built.snapshot.source_message_ids, [str(item.id) for item in current])
+        self.assertEqual([item.reason for item in built.snapshot.selections[:2]], ["token_budget", "token_budget"])
+        self.assertLessEqual(built.snapshot.token_estimate, built.snapshot.input_budget)
+        self.assertEqual([message.role for message in built.request.messages], ["system", "user", "assistant", "toolResult"])
+
+    async def test_history_cap_keeps_current_run_and_pinned_system(self):
+        history = [self.record(1, SystemMessage("Keep this rule", 1)),
+                   self.record(2, UserMessage("previous", 2)),
+                   self.record(3, AssistantMessage([TextContent("answer")], "fake", "test", "test", 3, "stop")),
+                   self.record(4, UserMessage("now", 4))]
+        built = await BasicContextBuilder(policy=ContextPolicy(max_history_messages=2)).build(history, self.model, [])
+        self.assertEqual(built.snapshot.source_message_ids, [str(history[0].id), str(history[3].id)])
+        self.assertEqual(built.snapshot.selections[1].reason, "history_limit")
+
+    async def test_task_constraints_and_tools_count_against_budget(self):
+        history = [self.record(1, UserMessage("hello", 1))]
+        state = TaskState(goal="finish task", constraints=["不要修改数据库"], pending=["verify"], revision=4)
+        tools = [Tool("echo", "x" * 200, {"type": "object"})]
+        builder = BasicContextBuilder()
+        plain = await builder.build(history, self.model, [])
+        built = await builder.build(history, self.model, tools, task_state=state)
+        self.assertGreater(built.snapshot.token_estimate, plain.snapshot.token_estimate)
+        self.assertIn("不要修改数据库", built.request.messages[0].content)
+        self.assertEqual(built.snapshot.task_state_revision, 4)
+        with self.assertRaises(ContextBudgetError):
+            await builder.build(history, Model("test", "test", "fake", 300, 128), tools, task_state=state)
+
+    async def test_host_metadata_removed_without_mutating_original_history(self):
+        history = [self.record(1, UserMessage("x", 1)),
+                   self.record(2, AssistantMessage([ToolCall("a", "echo", {})], "fake", "test", "test", 2, "toolUse")),
+                   self.record(3, ToolResultMessage("a", "echo", [TextContent("result")], False, 3, details={"private_ui": "secret"}))]
+        original = deepcopy(history)
+        built = await BasicContextBuilder().build(history, self.model, [])
+        self.assertIsNone(built.request.messages[-1].details)
+        self.assertEqual(history, original)
+        built.request.messages[-1].content[0].text = "changed"
+        self.assertEqual(history[-1].message.content[0].text, "result")
+
+    async def test_required_input_is_not_silently_trimmed(self):
+        history = [self.record(1, UserMessage("约束" * 10_000, 1))]
+        with self.assertRaises(ContextBudgetError):
+            await BasicContextBuilder().build(history, Model("test", "test", "fake", 4096, 128), [])
+
+    async def test_reject_incomplete_or_mismatched_tool_history(self):
+        user = self.record(1, UserMessage("x", 1))
+        call = self.record(2, AssistantMessage([ToolCall("a", "echo", {})], "fake", "test", "test", 2, "toolUse"))
+        result = self.record(3, ToolResultMessage("a", "different", [], False, 3))
+        for history in ([user, call], [user, result], [user, call, result]):
+            with self.subTest(history=history), self.assertRaises(ContextIntegrityError):
+                await BasicContextBuilder().build(history, self.model, [])
+
+    async def test_current_run_is_preserved_even_when_it_exceeds_history_count_limit(self):
+        run_id = uuid4()
+        history = [self.record(1, UserMessage("x", 1), run_id),
+                   self.record(2, AssistantMessage([ToolCall("a", "echo", {})], "fake", "test", "test", 2, "toolUse"), run_id),
+                   self.record(3, ToolResultMessage("a", "echo", [], False, 3), run_id)]
+        built = await BasicContextBuilder(policy=ContextPolicy(max_history_messages=1)).build(history, self.model, [], current_run_id=run_id)
+        self.assertEqual(len(built.snapshot.source_message_ids), 3)
+
+    async def test_utf8_estimate_and_invalid_limits(self):
+        history = [self.record(1, UserMessage("你好", 1))]
+        built = await BasicContextBuilder().build(history, self.model, [])
+        self.assertEqual(built.snapshot.token_counter, "utf8_json_bytes_estimate")
+        self.assertEqual(built.snapshot.input_budget, 100_000 - 128 - 256)
+        with self.assertRaises(ContextBudgetError):
+            await BasicContextBuilder(policy=ContextPolicy(output_tokens=129)).build(history, self.model, [])

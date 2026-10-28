@@ -1,0 +1,288 @@
+"""Compaction correctness, failure isolation and restart recovery on PostgreSQL."""
+
+import asyncio
+from copy import deepcopy
+from dataclasses import replace
+import json
+import os
+from pathlib import Path
+import unittest
+from uuid import uuid4
+
+from psycopg import AsyncConnection, sql
+from psycopg.conninfo import make_conninfo
+
+from chagent.agent.runner import RunFailedError
+from chagent.bootstrap import create_demo_runner
+from chagent.config import Settings
+from chagent.context.compactor import serialize_turn
+from chagent.domain.messages import AssistantMessage, ImageContent, SystemMessage, TextContent, ThinkingContent, ToolCall, ToolResultMessage, UserMessage
+from chagent.domain.runs import StoredMessage
+from chagent.domain.sessions import TaskState
+from chagent.domain.summaries import CompactionPolicy
+from chagent.domain.usage import Usage
+from chagent.models.events import DoneEvent, StartEvent
+from chagent.models.fake import FakeModelClient
+from chagent.sessions.errors import StateConflictError
+from chagent.sessions.manager import SessionManager
+from chagent.storage.database import Database
+from chagent.storage.migrate import migrate
+from chagent.storage.summaries import SummaryRepository
+
+
+class RecordingClient(FakeModelClient):
+    def __init__(self, mode="success"):
+        super().__init__()
+        self.mode, self.requests = mode, []
+        self.entered = asyncio.Event()
+
+    async def stream(self, request):
+        self.requests.append(deepcopy(request))
+        if request.purpose != "summary":
+            async for event in super().stream(request):
+                yield event
+            return
+        self.entered.set()
+        if self.mode == "block":
+            await asyncio.Event().wait()
+        if self.mode == "exception":
+            raise RuntimeError("private-test-credential")
+        message = AssistantMessage([], request.model.api, request.model.provider, request.model.id, 1, "pending")
+        yield StartEvent(partial=message)
+        if self.mode == "incomplete":
+            return
+        message = deepcopy(message)
+        message.stop_reason = "length" if self.mode == "length" else "stop"
+        content = "Goal: continue project. Constraints: preserve user requirements. Progress: old turns finished. Pending: current input."
+        if self.mode == "empty":
+            content = " "
+        elif self.mode == "oversize":
+            content = "huge" * 5000
+        message.content = [TextContent(content)]
+        if self.mode == "tool":
+            message.content = [ToolCall("forbidden", "write_file", {"path": "no.txt", "content": "no"})]
+            message.stop_reason = "toolUse"
+        message.usage = Usage(10, 5, 0, 0, 15)
+        yield DoneEvent(reason=message.stop_reason, message=message)
+
+
+@unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")
+class CompactionTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.schema = "chagent_compaction_test_" + uuid4().hex
+        self.admin = await AsyncConnection.connect(os.environ["CHAGENT_TEST_DATABASE_URL"], autocommit=True)
+        self.addAsyncCleanup(self.admin.close)
+        await self.admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(self.schema)))
+        self.addAsyncCleanup(self.drop_schema)
+        self.database = Database(Settings(database_url=make_conninfo(
+            os.environ["CHAGENT_TEST_DATABASE_URL"], options=f"-c search_path={self.schema}",
+        )))
+        self.addAsyncCleanup(self.database.close)
+        await self.database.connect()
+        await migrate(self.database)
+        self.runner = create_demo_runner(self.database, compaction_policy=CompactionPolicy())
+        self.client = RecordingClient()
+        self.runner.client = self.client
+        self.summaries = SummaryRepository(self.database)
+        self.session = await self.runner.conversations.create_session(Path.cwd())
+
+    async def drop_schema(self):
+        await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
+
+    async def seed(self, count=4, size=900):
+        self.runner.model.context_window = 100_000
+        for index in range(count):
+            await self.runner.run(self.session, f"old turn {index}: " + "x" * size)
+        self.runner.model.context_window = 13_000
+        self.client.requests.clear()
+
+    async def calls(self, run_id):
+        async with self.database.connection() as connection:
+            cursor = await connection.execute("SELECT * FROM compaction_calls WHERE run_id = %s ORDER BY iteration", (run_id,))
+            return await cursor.fetchall()
+
+    async def test_checkpoint_keeps_originals_and_reloads_after_restart(self):
+        await self.seed()
+        original = await self.runner.conversations.messages(self.session)
+        await SessionManager(self.runner.conversations).update_task_state(
+            self.session, TaskState(goal="finish", constraints=["do not delete data"]), expected_revision=0,
+        )
+        result = await self.runner.run(self.session, "continue")
+        summary = await self.summaries.latest(self.session)
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary.revision, 1)
+        self.assertLess(summary.covered_through_sequence, (await self.runner.conversations.messages(self.session))[-4].sequence)
+        self.assertEqual((await self.runner.conversations.messages(self.session))[:len(original)], original)
+        events = await self.runner.runs.events(result.run_id)
+        kinds = [event["type"] for event in events]
+        self.assertIn("compaction_completed", kinds)
+        self.assertLess(kinds.index("compaction_completed"), kinds.index("model_started"))
+        self.assertEqual(kinds.count("compaction_started"), 1)
+        for request in self.client.requests:
+            if request.purpose == "summary":
+                self.assertTrue(all(not getattr(message, "tools_added", None) for message in request.messages))
+            else:
+                self.assertIn("do not delete data", request.messages[0].content)
+                self.assertIsInstance(request.messages[1], UserMessage)
+                self.assertIn(summary.content, request.messages[1].content)
+        snapshots = await SessionManager(self.runner.conversations).contexts(self.session)
+        self.assertEqual(snapshots[0]["snapshot"]["summary_id"], str(summary.id))
+        self.assertTrue(any(item["reason"] == "summarized" for item in snapshots[0]["snapshot"]["selections"]))
+        calls = await self.calls(result.run_id)
+        self.assertTrue(all(call["status"] == "completed" and call["duration_ms"] >= 0 for call in calls))
+        self.assertEqual(summary.usage.total_tokens, len(calls) * 15)
+        restored = create_demo_runner(self.database)
+        restored.model.context_window = 13_000
+        restored.client = RecordingClient()
+        await restored.run(self.session, "after restart")
+        latest = (await SessionManager(restored.conversations).contexts(self.session))[0]["snapshot"]
+        self.assertEqual(latest["summary_id"], str(summary.id))
+
+    async def test_incremental_checkpoint_uses_previous_summary_and_new_sources(self):
+        await self.seed()
+        await self.runner.run(self.session, "first compact")
+        previous = await self.summaries.latest(self.session)
+        await self.seed(count=3, size=1000)
+        await self.runner.run(self.session, "second compact")
+        summary = await self.summaries.latest(self.session)
+        self.assertEqual(summary.revision, 2)
+        self.assertEqual(summary.previous_summary_id, previous.id)
+        self.assertGreater(summary.covered_through_sequence, previous.covered_through_sequence)
+        self.assertFalse(set(summary.source_message_ids) & set(previous.source_message_ids))
+        request = next(request for request in self.client.requests if request.purpose == "summary")
+        self.assertEqual(json.loads(request.messages[1].content)["previous_summary"], previous.content)
+        self.assertEqual(len(await self.summaries.list(self.session)), 2)
+
+    async def test_multiple_bounded_summary_calls_create_one_checkpoint(self):
+        await self.seed(count=7, size=1200)
+        result = await self.runner.run(self.session, "compact a backlog")
+        summary = await self.summaries.latest(self.session)
+        self.assertIsNotNone(summary)
+        calls = await self.calls(result.run_id)
+        self.assertGreater(len(calls), 1)
+        self.assertEqual(len({call["compaction_id"] for call in calls}), 1)
+        self.assertEqual(len(await self.summaries.list(self.session)), 1)
+        requests = [request for request in self.client.requests if request.purpose == "summary"]
+        for request in requests:
+            self.assertLessEqual(self.runner.context.counter.count(request.messages) + request.max_tokens + 256, 13_000)
+        self.assertTrue(json.loads(requests[1].messages[1].content)["previous_summary"])
+
+    async def test_failed_summary_never_activates_and_credentials_are_not_logged(self):
+        for mode in ("empty", "length", "oversize", "tool", "incomplete", "exception"):
+            with self.subTest(mode=mode):
+                self.session = await self.runner.conversations.create_session(Path.cwd())
+                self.client.mode = "success"
+                await self.seed()
+                self.client.mode = mode
+                result = await self.runner.run(self.session, "fallback safely")
+                self.assertIsNone(await self.summaries.latest(self.session))
+                events = await self.runner.runs.events(result.run_id)
+                self.assertEqual(sum(event["type"] == "compaction_started" for event in events), 1)
+                self.assertIn("compaction_failed", [event["type"] for event in events])
+                self.assertNotIn("private-test-credential", json.dumps(events, default=str))
+                calls = await self.calls(result.run_id)
+                self.assertTrue(all(call["status"] == "failed" for call in calls))
+                self.assertNotIn("private-test-credential", json.dumps(calls, default=str))
+                self.assertEqual(result.message.stop_reason, "stop")
+
+    async def test_cancellation_does_not_activate_checkpoint(self):
+        await self.seed()
+        self.client.mode = "block"
+        self.client.entered.clear()
+        identity = None
+        def started(value):
+            nonlocal identity
+            identity = value
+        task = asyncio.create_task(self.runner.run(self.session, "cancel compact", on_started=started))
+        await asyncio.wait_for(self.client.entered.wait(), 5)
+        self.runner.cancel(identity)
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertIsNone(await self.summaries.latest(self.session))
+        self.assertEqual((await self.runner.runs.get(identity))["status"], "cancelled")
+        self.assertTrue(all(call["status"] == "cancelled" for call in await self.calls(identity)))
+        self.assertIn("compaction_cancelled", [event["type"] for event in await self.runner.runs.events(identity)])
+        self.client.mode = "success"
+        await self.runner.run(self.session, "continue after cancel")
+        self.assertIsNotNone(await self.summaries.latest(self.session))
+
+    async def test_current_run_stays_complete_and_stale_checkpoint_is_rejected(self):
+        await self.seed()
+        await self.runner.run(self.session, "compact")
+        summary = await self.summaries.latest(self.session)
+        run_id = await self.runner.runs.begin(self.session, UserMessage("new run", 1))
+        try:
+            with self.assertRaises(StateConflictError):
+                await self.summaries.save(replace(summary, id=uuid4(), compaction_id=uuid4()), run_id)
+        finally:
+            await self.runner.runs.finish(run_id, "cancelled")
+        self.runner.model.context_window = 1000
+        with self.assertRaises(RunFailedError) as error:
+            await self.runner.run(self.session, "current" * 500)
+        self.assertEqual(await self.calls(error.exception.run_id), [])
+        self.assertEqual((await self.summaries.latest(self.session)).id, summary.id)
+
+    async def test_failed_kept_run_does_not_break_summary_replay(self):
+        await self.seed()
+        # Failure occurs after summary commit; its kept input disappears from model replay.
+        original_stream = self.client.stream
+        async def fail_tasks(request):
+            if request.purpose == "task":
+                raise RuntimeError("task fails after compaction")
+            async for event in original_stream(request):
+                yield event
+        self.client.stream = fail_tasks
+        with self.assertRaises(RunFailedError):
+            await self.runner.run(self.session, "will fail")
+        summary = await self.summaries.latest(self.session)
+        self.assertIsNotNone(summary)
+        self.client.stream = original_stream
+        result = await self.runner.run(self.session, "recover with checkpoint")
+        self.assertEqual(result.message.stop_reason, "stop")
+
+    async def test_timeout_and_call_limit_leave_previous_checkpoint_active(self):
+        await self.seed()
+        await self.runner.run(self.session, "initial checkpoint")
+        previous = await self.summaries.latest(self.session)
+        await self.seed(count=7, size=1200)
+        manager = self.runner.context_manager
+        manager.policy = replace(manager.policy, max_calls=1)
+        manager.compactor.policy = manager.policy
+        result = await self.runner.run(self.session, "bounded work")
+        self.assertEqual((await self.summaries.latest(self.session)).id, previous.id)
+        self.assertEqual(len(await self.calls(result.run_id)), 1)
+        self.assertIn("compaction_failed", [event["type"] for event in await self.runner.runs.events(result.run_id)])
+        manager.policy = replace(manager.policy, max_calls=8, timeout=.02)
+        manager.compactor.policy = manager.policy
+        self.client.mode = "block"
+        result = await self.runner.run(self.session, "summary timeout")
+        self.assertEqual((await self.summaries.latest(self.session)).id, previous.id)
+        self.assertTrue(all(call["status"] == "cancelled" for call in await self.calls(result.run_id)))
+        self.assertIn("compaction_failed", [event["type"] for event in await self.runner.runs.events(result.run_id)])
+
+    async def test_single_oversized_old_turn_is_not_silently_truncated(self):
+        await self.seed(count=1, size=10_000)
+        result = await self.runner.run(self.session, "continue past huge old turn")
+        self.assertIsNone(await self.summaries.latest(self.session))
+        self.assertEqual(await self.calls(result.run_id), [])
+        events = await self.runner.runs.events(result.run_id)
+        self.assertTrue(any("One completed turn" in event["payload"].get("reason", "") for event in events))
+
+
+class CompactionUnitTests(unittest.TestCase):
+    def test_serialization_excludes_thinking_images_and_host_metadata(self):
+        turn = [StoredMessage(uuid4(), 1, UserMessage([TextContent("keep requirement"), ImageContent("private-image", "image/png")], 1)),
+                StoredMessage(uuid4(), 2, AssistantMessage([ThinkingContent("private-thinking")], "fake", "test", "test", 2, "stop")),
+                StoredMessage(uuid4(), 3, ToolResultMessage("tool", "read_file", [TextContent("x" * 3000)], False, 3, details={"secret": "host-only"}))]
+        result = serialize_turn(turn)
+        for value in ("private-thinking", "private-image", "host-only"):
+            self.assertNotIn(value, result)
+        self.assertIn("keep requirement", result)
+        self.assertIn("1000 characters omitted", result)
+
+    def test_policy_validation(self):
+        self.assertFalse(CompactionPolicy.from_env({"CHAGENT_COMPACTION_ENABLED": "false"}).enabled)
+        for values in ({"CHAGENT_COMPACTION_TRIGGER": "nan"}, {"CHAGENT_COMPACTION_TIMEOUT": "inf"},
+                       {"CHAGENT_COMPACTION_ENABLED": "yes"}, {"CHAGENT_COMPACTION_MAX_CALLS": "0"}):
+            with self.assertRaises(ValueError):
+                CompactionPolicy.from_env(values)

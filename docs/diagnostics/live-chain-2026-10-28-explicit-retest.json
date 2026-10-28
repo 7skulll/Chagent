@@ -1,0 +1,381 @@
+{
+  "recorded_at_utc": "2026-10-28T01:24:46.683558+00:00",
+  "configuration": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "api": "openai-chat",
+    "output_limit": 768,
+    "max_provider_requests": 6,
+    "key_source": "named provider key",
+    "case_selection": "explicit"
+  },
+  "environment": {
+    "python": "3.13.9",
+    "platform": "Darwin"
+  },
+  "limits": "single sample per scenario; synthetic data; no browser TTFT or comparative Pi/Codex benchmark",
+  "results": [
+    {
+      "name": "explicit_memory_nonsecret",
+      "passed": false,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "active_memory_saved": true,
+        "no_unnecessary_file_tools": false
+      },
+      "elapsed_ms": 5078.038,
+      "error_type": null,
+      "failure_reason": "",
+      "answer": "已记录该偏好。\n\n由于工作区原本为空（没有 `MEMORY.md` 或 `AGENTS.md`），我新建了 `MEMORY.md` 并写入：\n\n```\n# 项目长期记忆\n\n## 偏好设置\n- workspace.project.response_language = 简体中文：本项目默认使用简体中文回答。\n```\n\n今后在本项目中我将默认使用简体中文回复。如果你更希望把这类配置放在 `AGENTS.md` 或其他文件（如 `.cursor/rules`、`settings.json`）里，告诉我文件名，我可以改过去。",
+      "tool_calls": [
+        "list_dir",
+        "list_dir",
+        "read_file",
+        "read_file",
+        "write_file"
+      ],
+      "event_types": [
+        "run_started",
+        "model_started",
+        "model_completed",
+        "tool_started",
+        "tool_completed",
+        "model_started",
+        "model_completed",
+        "tool_started",
+        "tool_completed",
+        "model_started",
+        "model_completed",
+        "tool_started",
+        "tool_completed",
+        "tool_started",
+        "tool_completed",
+        "model_started",
+        "model_completed",
+        "tool_started",
+        "tool_completed",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "memory_saved",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": null,
+          "consumer_wait_ms": 0.021,
+          "usage": {
+            "input": 142,
+            "output": 36,
+            "cache_read": 768,
+            "cache_write": 0,
+            "total_tokens": 946,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "toolUse",
+          "response_model": "deepseek-flash",
+          "wall_ms": 1095.819
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 4,
+          "first_text_ms": null,
+          "consumer_wait_ms": 0.052,
+          "usage": {
+            "input": 207,
+            "output": 37,
+            "cache_read": 768,
+            "cache_write": 0,
+            "total_tokens": 1012,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "toolUse",
+          "response_model": "deepseek-flash",
+          "wall_ms": 876.336
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 6,
+          "first_text_ms": null,
+          "consumer_wait_ms": 0.023,
+          "usage": {
+            "input": 140,
+            "output": 69,
+            "cache_read": 896,
+            "cache_write": 0,
+            "total_tokens": 1105,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "toolUse",
+          "response_model": "deepseek-flash",
+          "wall_ms": 776.714
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 9,
+          "first_text_ms": null,
+          "consumer_wait_ms": 0.024,
+          "usage": {
+            "input": 149,
+            "output": 83,
+            "cache_read": 1024,
+            "cache_write": 0,
+            "total_tokens": 1256,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "toolUse",
+          "response_model": "deepseek-flash",
+          "wall_ms": 1162.867
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 11,
+          "first_text_ms": 390.712,
+          "consumer_wait_ms": 64.079,
+          "usage": {
+            "input": 164,
+            "output": 115,
+            "cache_read": 1152,
+            "cache_write": 0,
+            "total_tokens": 1431,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 1088.02
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 356,
+        "sql_by_phase": {
+          "begin": 6,
+          "other": 2,
+          "context_prepare": 15,
+          "memory_recall": 15,
+          "start_model_call": 15,
+          "save_response": 20,
+          "start_tool_call": 15,
+          "save_tool_result": 20,
+          "text_delta": 230,
+          "memory_extract": 1,
+          "finish": 17
+        },
+        "sql_execute_ms_by_phase": {
+          "begin": 1.699,
+          "other": 0.347,
+          "context_prepare": 8.086,
+          "memory_recall": 8.35,
+          "start_model_call": 5.864,
+          "save_response": 12.463,
+          "start_tool_call": 8.189,
+          "save_tool_result": 5.584,
+          "text_delta": 31.039,
+          "memory_extract": 0.684,
+          "finish": 4.938
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 1.87
+          },
+          "context_prepare": {
+            "calls": 5,
+            "total_ms": 13.431
+          },
+          "memory_recall": {
+            "calls": 5,
+            "total_ms": 10.544
+          },
+          "start_model_call": {
+            "calls": 5,
+            "total_ms": 8.071
+          },
+          "model_stream": {
+            "calls": 5,
+            "total_ms": 4999.822
+          },
+          "save_response": {
+            "calls": 5,
+            "total_ms": 16.0
+          },
+          "start_tool_call": {
+            "calls": 5,
+            "total_ms": 10.135
+          },
+          "tool_execute": {
+            "calls": 5,
+            "total_ms": 2.503
+          },
+          "save_tool_result": {
+            "calls": 5,
+            "total_ms": 7.451
+          },
+          "text_delta": {
+            "calls": 115,
+            "total_ms": 63.739
+          },
+          "memory_extract": {
+            "calls": 1,
+            "total_ms": 1.305
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 5.605
+          }
+        }
+      }
+    }
+  ],
+  "schema_cleaned": true,
+  "total_provider_requests": 5,
+  "reported_tokens": {
+    "input": 802,
+    "output": 340,
+    "cache_read": 4608,
+    "cache_write": 0,
+    "total_tokens": 5750
+  },
+  "usage_missing_calls": 0,
+  "monetary_cost": null,
+  "monetary_cost_note": "No monetary price assumed; see provider-reported token usage.",
+  "passed": false,
+  "source_sha256": {
+    "src/chagent/agent/runner.py": "f7667abce50eb4b91b9c0c54abeab46a683ad273db0413b1db3c846055be8902",
+    "src/chagent/memory/service.py": "5d5d8a36c45bdd9ae2aab67346de0a6995df26a4e30f0f29b84dd05fd930b9ff",
+    "src/chagent/models/openai_chat.py": "36758ad0327ed3e6b3ab9d39bad618221a3f0385e4c5fabfffe9df6ee9eabf3a",
+    "src/chagent/context/manager.py": "d5faf417838c471780d6958fdbe9831591d558297e3585664ca4f4c8723143de"
+  }
+}
