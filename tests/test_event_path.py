@@ -207,7 +207,7 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
         return [block async for block in response.body_iterator]
 
     def assert_no_writers(self):
-        self.assertFalse(any(task.get_name().startswith(("model-text-writer", "model-stream-"))
+        self.assertFalse(any(task.get_name().startswith(("model-text-writer", "model-stream-", "run-event-flush-"))
                              for task in asyncio.all_tasks() if not task.done()))
 
     async def test_heartbeat_failure_stops_run_without_writing_terminal_state(self):
@@ -275,7 +275,7 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slow_storage_is_bounded_but_does_not_serially_block_provider(self):
         release, entered = asyncio.Event(), asyncio.Event()
-        original = self.runner.runs.event
+        original = self.runner.runs.emit
 
         async def slow(identity, kind, payload):
             if kind == "text_delta":
@@ -283,7 +283,7 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
                 await release.wait()
             return await original(identity, kind, payload)
 
-        self.runner.runs.event = slow
+        self.runner.runs.emit = slow
         task = asyncio.create_task(self.runner.run(self.session, "slow storage"))
         try:
             await asyncio.wait_for(entered.wait(), 2)
@@ -299,7 +299,7 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_waits_for_tail_commit_before_terminal_and_leaves_no_tasks(self):
         release, entered = asyncio.Event(), asyncio.Event()
-        original = self.runner.runs.event
+        original = self.runner.runs.emit
         self.runner.client = FixtureClient(block=True)
         identities = []
 
@@ -309,7 +309,7 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
                 await release.wait()
             return await original(identity, kind, payload)
 
-        self.runner.runs.event = slow
+        self.runner.runs.emit = slow
         task = asyncio.create_task(self.runner.run(self.session, "cancel", on_started=identities.append))
         try:
             await asyncio.wait_for(entered.wait(), 2)
@@ -427,7 +427,7 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancel_with_stuck_tail_has_bounded_cleanup_and_no_success(self):
         self.runner.client = FixtureClient(block=True)
         entered = asyncio.Event()
-        original = self.runner.runs.event
+        original = self.runner.runs.emit
         identities = []
 
         async def stuck(identity, kind, payload):
@@ -436,7 +436,7 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.Event().wait()
             return await original(identity, kind, payload)
 
-        self.runner.runs.event = stuck
+        self.runner.runs.emit = stuck
         task = asyncio.create_task(self.runner.run(self.session, "cancel stuck", on_started=identities.append))
         try:
             await asyncio.wait_for(entered.wait(), 1)

@@ -1,5 +1,7 @@
 """Concrete PostgreSQL operations for the minimal conversation/run lifecycle."""
 
+import asyncio
+import json
 from dataclasses import asdict
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -18,6 +20,7 @@ from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState
 from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError, StateConflictError
 from chagent.storage.database import Database
 from chagent.storage.artifacts import ArtifactRepository, INLINE_BYTES
+from chagent.storage.event_queue import EventItem, EventStream
 from chagent.tools.base import AgentToolResult
 
 
@@ -222,6 +225,9 @@ class RunRepository:
     def __init__(self, database: Database):
         self.database = database
         self.notifications = database.notifications
+        # Buffered high-frequency events, one stream per active run in this
+        # process. Streams are never reconstructed from rows.
+        self._streams: dict[UUID, EventStream] = {}
 
     async def check_owner(self, connection, run_id: UUID) -> None:
         token = self.database.run_owners.get(run_id)
@@ -282,6 +288,12 @@ class RunRepository:
                 await self._event(connection, run_id, "run_interrupted",
                                   {"error": "Run ownership lease expired", "end_reason": "owner_lost"})
         for run_id in identities:
+            stream = self._streams.pop(run_id, None)
+            if stream is not None:
+                # The buffered tail belongs to a run that just lost its owner;
+                # it must not be written after the interrupted event.
+                stream.discard()
+                await stream.close(flush=False)
             self.notifications.notify(run_id)
         return identities
 
@@ -296,18 +308,83 @@ class RunRepository:
         )
         return StoredMessage(identity, (await cursor.fetchone())["sequence"], message_from_dict(payload), run_id)
 
+    async def _insert_events(
+        self, connection: AsyncConnection[DictRow], run_id: UUID, items: list[EventItem],
+        *, locked: bool = False,
+    ) -> None:
+        if not locked:
+            # Lock the run so concurrent writers cannot allocate the same sequence.
+            await connection.execute("SELECT id FROM runs WHERE id = %s FOR UPDATE", (run_id,))
+        # MAX(sequence) reads the pre-statement snapshot, so one statement can
+        # number the whole batch with row_number() over the input order.
+        await connection.execute(
+            "INSERT INTO run_events (run_id, sequence, type, payload) "
+            "SELECT %s, (SELECT COALESCE(MAX(sequence), 0) FROM run_events WHERE run_id = %s) "
+            "  + row_number() OVER (ORDER BY t.ord), t.kind, t.payload::jsonb "
+            "FROM unnest(%s::text[], %s::text[]) WITH ORDINALITY AS t(kind, payload, ord)",
+            (run_id, run_id, [kind for kind, _ in items],
+             [json.dumps(payload, ensure_ascii=False) for _, payload in items]),
+        )
+
     async def _event(
         self, connection: AsyncConnection[DictRow], run_id: UUID,
         kind: str, payload: JsonObject,
     ) -> None:
-        # Lock the run so concurrent writers cannot allocate the same sequence.
-        await connection.execute("SELECT id FROM runs WHERE id = %s FOR UPDATE", (run_id,))
-        await connection.execute(
-            "INSERT INTO run_events (run_id, sequence, type, payload) "
-            "SELECT %s, COALESCE(MAX(sequence), 0) + 1, %s, %s "
-            "FROM run_events WHERE run_id = %s",
-            (run_id, kind, Jsonb(payload), run_id),
-        )
+        await self._insert_events(connection, run_id, [(kind, payload)])
+
+    def _stream(self, run_id: UUID) -> EventStream:
+        stream = self._streams.get(run_id)
+        if stream is None:
+            async def write(items: list[EventItem]) -> None:
+                async with self.database.transaction() as connection:
+                    # check_owner already holds the run row lock for this
+                    # transaction, so the insert must not take it again.
+                    await self.check_owner(connection, run_id)
+                    await self._insert_events(connection, run_id, items, locked=True)
+                self.notifications.notify(run_id)
+
+            stream = self._streams[run_id] = EventStream(run_id, write)
+        return stream
+
+    async def emit(self, run_id: UUID, kind: str, payload: JsonObject) -> None:
+        """Queue a high-frequency event; nothing is written until a flush."""
+        await self._stream(run_id).append(kind, payload)
+
+    async def flush_events(self, run_id: UUID) -> None:
+        """Commit buffered events, keeping them ordered before the next write."""
+        stream = self._streams.get(run_id)
+        if stream is not None:
+            await stream.flush()
+
+    def event_failure(self, run_id: UUID) -> asyncio.Future:
+        """Awaited alongside the model stream: raises if a batch write failed.
+
+        The stream is created here so a failure during the very first batch is
+        observed too, not only after the first delta was appended.
+        """
+        return asyncio.ensure_future(self._stream(run_id).failure())
+
+    async def close_events(self, run_id: UUID) -> None:
+        stream = self._streams.pop(run_id, None)
+        if stream is not None:
+            await stream.close()
+
+    async def _flush_before_terminal(self, run_id: UUID) -> None:
+        """Commit buffered events before the terminal event is written.
+
+        A batch rejected by the database would otherwise keep the run in
+        ``running`` forever: those events are lost either way, so the terminal
+        state still wins. Ownership loss is different and must propagate.
+        """
+        stream = self._streams.get(run_id)
+        if stream is None:
+            return
+        try:
+            await stream.flush()
+        except RunOwnershipLost:
+            raise
+        except Exception:
+            stream.discard()
 
     async def begin(self, session_id: UUID, message: UserMessage) -> UUID:
         run_id, owner = uuid4(), uuid4()
@@ -338,11 +415,13 @@ class RunRepository:
         return run_id
 
     async def audit_event(self, run_id: UUID, kind: str, payload: JsonObject) -> None:
+        await self.flush_events(run_id)
         async with self.database.transaction() as connection:
             await self._event(connection, run_id, kind, payload)
         self.notifications.notify(run_id)
 
     async def event(self, run_id: UUID, kind: str, payload: JsonObject) -> None:
+        await self.flush_events(run_id)
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             await self._event(connection, run_id, kind, payload)
@@ -350,6 +429,7 @@ class RunRepository:
 
     async def start_model_call(self, run_id: UUID, iteration: int, built: BuiltContext) -> UUID:
         call_id = uuid4()
+        await self.flush_events(run_id)
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             await connection.execute(
@@ -368,6 +448,7 @@ class RunRepository:
         status = "failed" if message.stop_reason == "error" else (
             "cancelled" if message.stop_reason == "aborted" else "completed"
         )
+        await self.flush_events(run_id)
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             await connection.execute(
@@ -383,6 +464,7 @@ class RunRepository:
 
     async def queue_tool_calls(self, run_id: UUID, model_call_id: UUID, calls: list[ToolCall]) -> list[UUID]:
         identities = [uuid4() for _ in calls]
+        await self.flush_events(run_id)
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             for index, (identity, call) in enumerate(zip(identities, calls)):
@@ -395,6 +477,7 @@ class RunRepository:
         return identities
 
     async def start_tool_call(self, run_id: UUID, model_call_id: UUID, call: ToolCall, *, record_id: UUID) -> UUID:
+        await self.flush_events(run_id)
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             cursor = await connection.execute(
@@ -413,6 +496,7 @@ class RunRepository:
         self, run_id: UUID, session_id: UUID, record_id: UUID,
         result: AgentToolResult, message: ToolResultMessage,
     ) -> StoredMessage:
+        await self.flush_events(run_id)
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             text = "\n".join(block.text for block in message.content if hasattr(block, "text"))
@@ -440,6 +524,7 @@ class RunRepository:
     async def finish(self, run_id: UUID, status: RunStatus, error: str | None = None, *,
                      end_reason: RunEndReason | None = None, on_completed=None) -> None:
         end_reason = terminal_reason(status, end_reason)
+        await self._flush_before_terminal(run_id)
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             cursor = await connection.execute(

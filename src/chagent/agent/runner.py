@@ -154,6 +154,12 @@ class AgentRunner:
         finally:
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
+            try:
+                # Stops the flush task and commits or drops the tail. A cancelled
+                # run may raise here; it must never mask the run's own outcome.
+                await self.runs.close_events(run_id)
+            except BaseException:
+                pass
             self.runs.database.run_owners.pop(run_id, None)
             self._tasks.pop(run_id, None)
             self._states.pop(run_id, None)
@@ -252,7 +258,10 @@ class AgentRunner:
 
     async def _response(self, run_id: UUID, request: ModelRequest) -> AssistantMessage:
         async def save(delta: str, count: int):
-            await self.runs.event(run_id, "text_delta", {"delta": delta, "count": count})
+            # Buffered: the provider stream is never gated by a commit. Order is
+            # kept because every other write to this run flushes the buffer
+            # first, and this response flushes before it returns.
+            await self.runs.emit(run_id, "text_delta", {"delta": delta, "count": count})
 
         writer = TextStreamWriter(save)
 
@@ -291,13 +300,23 @@ class AgentRunner:
                     await close()
 
         consumer = asyncio.create_task(consume(), name=f"model-stream-{run_id}")
+        failure = self.runs.event_failure(run_id)
+        waiters = {consumer, writer.task, failure}
         try:
-            done, _ = await asyncio.wait({consumer, writer.task}, return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
             if writer.task in done:
                 # A failed write interrupts a blocked provider, even when the
                 # producer has not filled the buffer or received another delta.
                 await writer.task
-            return await consumer
+            if failure in done:
+                # A rejected event batch must stop the run: output produced from
+                # here on could never be recorded.
+                await failure
+            message = await consumer
+            # One barrier per response: every delta of this answer is committed
+            # before model_completed, so replay never shows text after the end.
+            await self.runs.flush_events(run_id)
+            return message
         except BaseException:
             consumer.cancel()
             await asyncio.gather(consumer, return_exceptions=True)
@@ -309,3 +328,6 @@ class AgentRunner:
             except BaseException:
                 await writer.stop()
             raise
+        finally:
+            failure.cancel()
+            await asyncio.gather(failure, return_exceptions=True)
