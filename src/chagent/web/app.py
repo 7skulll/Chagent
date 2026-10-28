@@ -35,6 +35,8 @@ from chagent.domain.artifacts import artifact_text
 from chagent.domain.messages import ToolResultMessage
 from chagent.domain.memories import MemoryProposal
 from chagent.storage.memories import MemoryRepository
+from chagent.storage.memory_jobs import MemoryJobRepository
+from chagent.web.schemas import MemoryJobState
 from chagent.sessions.errors import StateConflictError
 from chagent.web.schemas import (AppInfo, ArtifactPage, Cancellation, CancelRequest, ContextView, ErrorResponse,
     MemoryCreate, MemoryDetail, MemoryEdit, MemoryPage, MemoryReview, MessagePage, RevisionRequest,
@@ -43,6 +45,8 @@ from chagent.domain.sessions import Session
 from chagent.domain.memories import Memory
 
 
+SSE_POLL_INTERVAL = 1.0
+TERMINAL_EVENTS = {"run_completed", "run_failed", "run_cancelled", "run_interrupted"}
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 logger = logging.getLogger(__name__)
 
@@ -278,6 +282,13 @@ async def cancel(run_id: UUID, current: Current, response: Response, value: Canc
     return {"accepted": accepted}
 
 
+@api.get("/runs/{run_id}/memory-job", response_model=MemoryJobState, tags=["长期记忆"])
+async def memory_job(run_id: UUID, current: Current):
+    await current.run(run_id)  # Same workspace isolation as the run/event endpoints.
+    jobs = MemoryJobRepository(current.runner.runs.database)
+    return {"job": await jobs.for_run(run_id)}
+
+
 @api.get("/runs/{run_id}/events", response_class=StreamingResponse, tags=["运行"],
          responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}})
 async def events(run_id: UUID, request: Request, current: Current, after: SequenceCursor = 0,
@@ -289,24 +300,35 @@ async def events(run_id: UUID, request: Request, current: Current, after: Sequen
     async def stream():
         sequence = after
         heartbeat = monotonic()
-        while True:
-            # Read status first: a terminal row guarantees its final event is committed.
-            run = await current.runner.runs.get(identity)
-            batch = await current.runner.runs.events(identity, sequence, limit=200)
-            for event in batch:
-                sequence = event["sequence"]
-                payload = json.dumps({"type": event["type"], "payload": event["payload"]}, ensure_ascii=False)
-                yield f"id: {sequence}\nevent: update\ndata: {payload}\n\n"
-            if run["status"] in TERMINAL and len(batch) < 200:
-                # Explicit stream end also handles a cursor already at the final event.
-                yield "event: end\ndata: {}\n\n"
-                return
-            if await request.is_disconnected():
-                return
-            if monotonic() - heartbeat > 15:
-                yield ": heartbeat\n\n"
-                heartbeat = monotonic()
-            await asyncio.sleep(0 if len(batch) == 200 else 0.15)
+        runs = current.runner.runs
+        with runs.notifications.subscribe(identity) as subscription:
+            while True:
+                # Capture before catchup, so commits between querying and waiting
+                # change the version and cannot be lost.
+                version = subscription.version
+                run = await runs.get(identity)
+                stop_at = await runs.terminal_sequence(identity) if run["status"] in TERMINAL else None
+                if stop_at is not None and sequence >= stop_at:
+                    yield "event: end\ndata: {}\n\n"
+                    return
+                batch = await runs.events(identity, sequence, limit=200)
+                for event in batch:
+                    sequence = event["sequence"]
+                    payload = json.dumps({"type": event["type"], "payload": event["payload"]}, ensure_ascii=False)
+                    yield f"id: {sequence}\nevent: update\ndata: {payload}\n\n"
+                    if event["type"] in TERMINAL_EVENTS:
+                        yield "event: end\ndata: {}\n\n"
+                        return
+                if run["status"] in TERMINAL and len(batch) < 200:
+                    yield "event: end\ndata: {}\n\n"
+                    return
+                if await request.is_disconnected():
+                    return
+                if monotonic() - heartbeat > 15:
+                    yield ": heartbeat\n\n"
+                    heartbeat = monotonic()
+                if len(batch) < 200:
+                    await subscription.wait(version, timeout=SSE_POLL_INTERVAL)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",

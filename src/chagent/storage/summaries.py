@@ -128,6 +128,8 @@ class SummaryRepository:
                     "SELECT %s, COALESCE(MAX(sequence), 0) + 1, 'compaction_completed', %s "
                     "FROM run_events WHERE run_id = %s", (run_id, Jsonb(completed_event), run_id),
                 )
+        if completed_event is not None:
+            self.database.notifications.notify(run_id)
         return summary
 
     async def start_call(self, compaction_id: UUID, run_id: UUID, iteration: int, request: ModelRequest) -> UUID:

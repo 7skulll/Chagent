@@ -10,6 +10,7 @@ from psycopg import Error as DatabaseError
 from psycopg_pool import PoolTimeout
 
 from chagent.agent.types import FinishDecision, RunState
+from chagent.agent.stream_writer import TextStreamWriter
 from chagent.context.builder import ContextBudgetError, ContextBuilder
 from chagent.context.manager import ContextManager
 from chagent.memory.service import MemoryService
@@ -197,27 +198,61 @@ class AgentRunner:
         raise RunExecutionError("Maximum model turns exceeded", "turn_limit")
 
     async def _response(self, run_id: UUID, request: ModelRequest) -> AssistantMessage:
-        started = False
-        final: AssistantMessage | None = None
-        async for event in self.client.stream(request):
-            if final is not None:
-                raise RunExecutionError("Model emitted an event after its terminal event", "model_protocol_error")
-            if isinstance(event, StartEvent):
-                if started:
-                    raise RunExecutionError("Model emitted duplicate start events", "model_protocol_error")
-                started = True
-            elif isinstance(event, ErrorEvent):
-                if event.error.stop_reason != event.reason:
-                    raise RunExecutionError("Inconsistent model error reason", "model_protocol_error")
-                final = event.error
-            elif not started:
-                raise RunExecutionError("Model emitted an update before start", "model_protocol_error")
-            elif isinstance(event, DoneEvent):
-                if event.message.stop_reason != event.reason:
-                    raise RunExecutionError("Inconsistent model completion reason", "model_protocol_error")
-                final = event.message
-            elif isinstance(event, ContentDeltaEvent) and event.type == "text_delta":
-                await self.runs.event(run_id, "text_delta", {"delta": event.delta})
-        if final is None:
-            raise RunExecutionError("Model stream ended without a terminal event", "model_protocol_error")
-        return final
+        async def save(delta: str, count: int):
+            await self.runs.event(run_id, "text_delta", {"delta": delta, "count": count})
+
+        writer = TextStreamWriter(save)
+
+        async def consume():
+            started = False
+            final: AssistantMessage | None = None
+            stream = self.client.stream(request)
+            try:
+                async for event in stream:
+                    if final is not None:
+                        raise RunExecutionError("Model emitted an event after its terminal event", "model_protocol_error")
+                    if not isinstance(event, ContentDeltaEvent) or event.type != "text_delta":
+                        await writer.flush()
+                    if isinstance(event, StartEvent):
+                        if started:
+                            raise RunExecutionError("Model emitted duplicate start events", "model_protocol_error")
+                        started = True
+                    elif isinstance(event, ErrorEvent):
+                        if event.error.stop_reason != event.reason:
+                            raise RunExecutionError("Inconsistent model error reason", "model_protocol_error")
+                        final = event.error
+                    elif not started:
+                        raise RunExecutionError("Model emitted an update before start", "model_protocol_error")
+                    elif isinstance(event, DoneEvent):
+                        if event.message.stop_reason != event.reason:
+                            raise RunExecutionError("Inconsistent model completion reason", "model_protocol_error")
+                        final = event.message
+                    elif isinstance(event, ContentDeltaEvent) and event.type == "text_delta":
+                        await writer.append(event.delta)
+                if final is None:
+                    raise RunExecutionError("Model stream ended without a terminal event", "model_protocol_error")
+                await writer.close()
+                return final
+            finally:
+                if close := getattr(stream, "aclose", None):
+                    await close()
+
+        consumer = asyncio.create_task(consume(), name=f"model-stream-{run_id}")
+        try:
+            done, _ = await asyncio.wait({consumer, writer.task}, return_when=asyncio.FIRST_COMPLETED)
+            if writer.task in done:
+                # A failed write interrupts a blocked provider, even when the
+                # producer has not filled the buffer or received another delta.
+                await writer.task
+            return await consumer
+        except BaseException:
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+            try:
+                # Best effort only: preserve the original cancel/model/storage
+                # error, and never let an unavailable DB retain this writer.
+                async with asyncio.timeout(2):
+                    await writer.close()
+            except BaseException:
+                await writer.stop()
+            raise

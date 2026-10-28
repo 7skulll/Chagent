@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
+from psycopg.types.json import Jsonb
 
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
@@ -88,7 +89,7 @@ class MemoryJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("memory_extraction_started", events)
         self.assertLess(events.index("run_completed"), events.index("memory_extraction_started"))
 
-    async def test_lease_expiry_allows_another_worker_to_claim_the_same_job(self):
+    async def test_expired_lease_is_reaped_and_costs_one_attempt(self):
         result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
         first = await self.jobs.claim(lease_seconds=60)
         self.assertIsNotNone(first)
@@ -96,10 +97,54 @@ class MemoryJobTests(unittest.IsolatedAsyncioTestCase):
         # A worker that died leaves the row 'running'; the lease is the only
         # signal that the work may be retaken, so a live lease blocks re-claiming.
         self.assertIsNone(await self.jobs.claim(lease_seconds=30))
+        self.assertEqual(await self.jobs.reap_expired(), [])
         async with self.database.connection() as connection:
             await connection.execute("UPDATE memory_jobs SET lease_expires_at = now() - interval '1 second'")
+        reaped = await self.jobs.reap_expired()
+        self.assertEqual([(row["id"], row["status"], row["attempts"]) for row in reaped],
+                         [(first.id, "queued", 1)])
         second = await self.jobs.claim(lease_seconds=30)
-        self.assertEqual((second.id, second.attempts), (first.id, 0))
+        self.assertEqual((second.id, second.attempts), (first.id, 1))
+
+    async def test_repeated_lease_expiry_stops_at_max_attempts(self):
+        """A job that keeps killing its process must not retry forever."""
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        async with self.database.connection() as connection:
+            await connection.execute(
+                "INSERT INTO memory_extractions (id, run_id, status, prompt_version, request) "
+                "VALUES (%s, %s, 'running', 'test', %s)", (uuid4(), result.run_id, Jsonb({})))
+        for attempt in (1, 2):
+            await self.jobs.claim(lease_seconds=30)
+            async with self.database.connection() as connection:
+                await connection.execute("UPDATE memory_jobs SET lease_expires_at = now() - interval '1 second'")
+            reaped = await self.jobs.reap_expired()
+            self.assertEqual([(row["status"], row["attempts"]) for row in reaped], [("queued", attempt)])
+        await self.jobs.claim(lease_seconds=30)
+        async with self.database.connection() as connection:
+            await connection.execute("UPDATE memory_jobs SET lease_expires_at = now() - interval '1 second'")
+        reaped = await self.jobs.reap_expired()
+        self.assertEqual([(row["status"], row["attempts"]) for row in reaped], [("failed", 3)])
+        self.assertEqual((await self.jobs.for_run(result.run_id))["status"], "failed")
+        self.assertIsNone(await self.jobs.claim(lease_seconds=30))
+        # The dead attempt's audit row must not stay 'running' forever.
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT status, error FROM memory_extractions WHERE run_id = %s", (result.run_id,))
+            self.assertEqual(dict(await cursor.fetchone()), {"status": "failed", "error": "LeaseExpired"})
+
+    async def test_worker_reports_a_crash_exhausted_job(self):
+        result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
+        await self.jobs.claim(lease_seconds=30)
+        async with self.database.connection() as connection:
+            await connection.execute(
+                "UPDATE memory_jobs SET attempts = max_attempts - 1, lease_expires_at = now() - interval '1 second'")
+        await self.runner.memory_worker.run_once()
+        self.assertEqual((await self.jobs.for_run(result.run_id))["status"], "failed")
+        events = await self.runner.runs.events(result.run_id)
+        reported = [event for event in events if event["type"] == "memory_job_failed"]
+        self.assertEqual([event["payload"]["reason"] for event in reported], ["LeaseExpired"])
+        # The answer is untouched by a failed extraction.
+        self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
 
     async def test_retry_stops_at_max_attempts(self):
         result = await self.runner.run(self.session, "我偏好中文，希望回答尽量简洁，并保留参考链接。")
@@ -144,6 +189,9 @@ class MemoryJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
         job = await self.jobs.for_run(result.run_id)
         self.assertEqual((job["status"], job["attempts"], job["last_error"]), ("queued", 1, "RuntimeError"))
+        # A retry waiting out its backoff is not drained, so the CLI must report
+        # it as still open instead of assuming the queue is empty.
+        self.assertEqual(await self.jobs.unfinished(), 1)
         events = [event["type"] for event in await self.runner.runs.events(result.run_id)]
         self.assertIn("memory_extraction_failed", events)
         self.assertIn("memory_job_failed", events)

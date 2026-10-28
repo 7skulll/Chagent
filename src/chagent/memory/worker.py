@@ -8,7 +8,6 @@ work outside the run, at the cost of memories becoming visible slightly later.
 
 import asyncio
 import logging
-from time import monotonic
 
 from chagent.memory.service import MemoryService
 from chagent.storage.memory_jobs import MemoryJob, MemoryJobRepository
@@ -20,10 +19,10 @@ logger = logging.getLogger(__name__)
 class MemoryWorker:
     """Claims jobs with a lease, extracts, and commits candidates atomically.
 
-    A lease makes an interrupted worker recoverable: another process may claim
-    the job once the lease expires. Extraction itself is never replayed after a
-    candidate was committed, because candidates and the job's terminal state
-    commit together.
+    A lease makes an interrupted worker recoverable: once it expires another
+    process reaps the job — counting the dead attempt — and may claim it again.
+    Extraction itself is never replayed after a candidate was committed,
+    because candidates and the job's terminal state commit together.
     """
 
     def __init__(self, jobs: MemoryJobRepository, service: MemoryService, agent, *,
@@ -62,7 +61,13 @@ class MemoryWorker:
     # -- processing -----------------------------------------------------
 
     async def run_once(self) -> int:
-        """Claim up to ``concurrency`` jobs and process them in parallel."""
+        """Reap dead leases, then claim up to ``concurrency`` jobs and process them."""
+        for expired in await self.jobs.reap_expired():
+            if expired["status"] == "failed":
+                await self._quietly(self.service.runs.event, expired["run_id"], "memory_job_failed",
+                                    {"job_id": str(expired["id"]), "reason": "LeaseExpired",
+                                     "status": "failed", "attempt": expired["attempts"],
+                                     "max_attempts": expired["max_attempts"]})
         claimed: list[MemoryJob] = []
         for _ in range(self.concurrency):
             job = await self.jobs.claim(lease_seconds=self.lease_seconds)
@@ -75,7 +80,12 @@ class MemoryWorker:
         return len(claimed)
 
     async def drain(self, timeout: float = 30.0) -> int:
-        """Process until the queue is empty; used by one-shot CLI runs and tests."""
+        """Process everything that can run now; used by one-shot CLI runs and tests.
+
+        A job waiting out its retry backoff is not "runnable now", so it is
+        returned to the queue rather than waited for. Callers that report the
+        outcome must check ``jobs.unfinished()`` instead of assuming success.
+        """
         processed = 0
         async with asyncio.timeout(timeout):
             while True:
@@ -97,6 +107,7 @@ class MemoryWorker:
                 if proposals:
                     await self.service.commit(connection, job.session_id, job.run_id, proposals)
                 await self.jobs.complete(job.id, connection=connection)
+            self.service.runs.notifications.notify(job.run_id)
         except asyncio.CancelledError:
             await self._quietly(self.jobs.requeue, job.id, reason="worker_stopped")
             raise
@@ -132,12 +143,3 @@ class MemoryWorker:
             except TimeoutError:
                 pass
             self._wakeup.clear()
-
-    async def wait_idle(self, timeout: float = 30.0) -> bool:
-        """Wait until nothing is queued or in flight; for graceful shutdown."""
-        deadline = monotonic() + timeout
-        while monotonic() < deadline:
-            if await self.jobs.pending() == 0:
-                return True
-            await asyncio.sleep(0.05)
-        return False

@@ -9,6 +9,7 @@ from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from chagent.config import Settings
+from chagent.events.notifications import RunNotifications
 
 
 class Database:
@@ -20,6 +21,7 @@ class Database:
 
     def __init__(self, settings: Settings) -> None:
         self._timeout = settings.db_timeout
+        self.notifications = RunNotifications()
         self._pool = AsyncConnectionPool(
             conninfo=settings.database_url,
             min_size=settings.db_pool_min_size,

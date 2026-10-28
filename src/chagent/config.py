@@ -42,6 +42,14 @@ class Settings:
         if isinstance(self.memory_worker_concurrency, bool) or not isinstance(self.memory_worker_concurrency, int) \
                 or not 1 <= self.memory_worker_concurrency <= 4:
             raise ValueError("CHAGENT_MEMORY_WORKER_CONCURRENCY must be an integer between 1 and 4")
+        # Each extracting worker holds a connection while it reads or writes. If
+        # they can occupy the whole pool, a concurrent run waits until it gives
+        # up on db_timeout and fails. A single-connection pool is exempt: there,
+        # runs and workers serialize by construction.
+        if self.memory_worker_concurrency > max(1, self.db_pool_max_size - 1):
+            raise ValueError(
+                "CHAGENT_MEMORY_WORKER_CONCURRENCY must leave one connection for runs "
+                "(at most CHAGENT_DB_POOL_MAX_SIZE - 1)")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":

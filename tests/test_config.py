@@ -44,9 +44,20 @@ class SettingsTests(unittest.TestCase):
             {"max_tool_concurrency": 33},
             {"max_tool_concurrency": True},
             {"max_tool_concurrency": 2.0},
+            {"memory_worker_concurrency": 0},
+            {"memory_worker_concurrency": 5},
+            {"memory_worker_concurrency": True},
+            # Workers must leave the run its own connection.
+            {"db_pool_max_size": 2, "memory_worker_concurrency": 2},
         ):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 Settings(**options)
+
+    def test_memory_worker_concurrency_fits_inside_the_pool(self):
+        settings = Settings.from_env({"CHAGENT_DB_POOL_MAX_SIZE": "4", "CHAGENT_MEMORY_WORKER_CONCURRENCY": "3"})
+        self.assertEqual(settings.memory_worker_concurrency, 3)
+        # A single-connection pool still allows one worker: they serialize anyway.
+        self.assertEqual(Settings(db_pool_max_size=1, memory_worker_concurrency=1).memory_worker_concurrency, 1)
 
     def test_host_commands_require_explicit_boolean_setting(self):
         self.assertFalse(Settings.from_env({}).allow_host_commands)

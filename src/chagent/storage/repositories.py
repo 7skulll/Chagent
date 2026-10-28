@@ -216,6 +216,7 @@ class ConversationRepository:
 class RunRepository:
     def __init__(self, database: Database):
         self.database = database
+        self.notifications = database.notifications
 
     async def _message(
         self, connection: AsyncConnection[DictRow], session_id: UUID,
@@ -264,11 +265,13 @@ class RunRepository:
             if error.diag.constraint_name == "runs_one_active_per_session_idx":
                 raise RunBusyError("Session already has an active run") from None
             raise
+        self.notifications.notify(run_id)
         return run_id
 
     async def event(self, run_id: UUID, kind: str, payload: JsonObject) -> None:
         async with self.database.transaction() as connection:
             await self._event(connection, run_id, kind, payload)
+        self.notifications.notify(run_id)
 
     async def start_model_call(self, run_id: UUID, iteration: int, built: BuiltContext) -> UUID:
         call_id = uuid4()
@@ -279,6 +282,7 @@ class RunRepository:
                 (call_id, run_id, iteration, Jsonb(asdict(built.request)), Jsonb(asdict(built.snapshot))),
             )
             await self._event(connection, run_id, "model_started", {"model_call_id": str(call_id)})
+        self.notifications.notify(run_id)
         return call_id
 
     async def save_response(
@@ -297,6 +301,7 @@ class RunRepository:
             await self._event(connection, run_id, "model_completed", {
                 "model_call_id": str(model_call_id), "stop_reason": message.stop_reason,
             })
+        self.notifications.notify(run_id)
         return record
 
     async def queue_tool_calls(self, run_id: UUID, model_call_id: UUID, calls: list[ToolCall]) -> list[UUID]:
@@ -308,6 +313,7 @@ class RunRepository:
                     "VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s)",
                     (identity, run_id, model_call_id, call.id, call.name, Jsonb(call.arguments), index))
                 await self._event(connection, run_id, "tool_queued", {"tool_call_id": call.id, "name": call.name})
+        self.notifications.notify(run_id)
         return identities
 
     async def start_tool_call(self, run_id: UUID, model_call_id: UUID, call: ToolCall, *, record_id: UUID) -> UUID:
@@ -321,6 +327,7 @@ class RunRepository:
             await self._event(connection, run_id, "tool_started", {
                 "tool_call_id": call.id, "name": call.name,
             })
+        self.notifications.notify(run_id)
         return record_id
 
     async def save_tool_result(
@@ -347,6 +354,7 @@ class RunRepository:
                 "outcome_unknown": result.outcome_unknown,
                 "artifact_id": message.artifact.id if message.artifact else None,
             })
+        self.notifications.notify(run_id)
         return record
 
     async def finish(self, run_id: UUID, status: RunStatus, error: str | None = None, *,
@@ -380,10 +388,8 @@ class RunRepository:
                 "UPDATE compaction_calls SET status = %s, ended_at = now() WHERE run_id = %s AND status = 'running'",
                 ("failed" if status == "completed" else status, run_id),
             )
-            await connection.execute(
-                "UPDATE memory_extractions SET status = %s, ended_at = now() WHERE run_id = %s AND status = 'running'",
-                ("failed" if status == "completed" else status, run_id),
-            )
+            # Extraction starts only after the run is terminal (queued in the
+            # transaction below), so this run never has an attempt in flight.
             if status == "completed" and on_completed is not None:
                 try:
                     async with connection.transaction():
@@ -391,6 +397,7 @@ class RunRepository:
                 except Exception as memory_error:
                     await self._event(connection, run_id, "memory_write_failed", {"reason": type(memory_error).__name__})
             await self._event(connection, run_id, "run_" + status, {"error": error, "end_reason": end_reason})
+        self.notifications.notify(run_id)
 
     async def get(self, run_id: UUID) -> DictRow | None:
         async with self.database.connection() as connection:
@@ -406,6 +413,13 @@ class RunRepository:
                 "WHERE run_id = %s AND sequence > %s ORDER BY sequence LIMIT %s", (run_id, after, limit),
             )
             return await cursor.fetchall()
+
+    async def terminal_sequence(self, run_id: UUID) -> int | None:
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT min(sequence) AS sequence FROM run_events WHERE run_id = %s "
+                "AND type IN ('run_completed', 'run_failed', 'run_cancelled', 'run_interrupted')", (run_id,))
+            return (await cursor.fetchone())["sequence"]
 
     async def latest(self, session_id: UUID) -> DictRow | None:
         async with self.database.connection() as connection:

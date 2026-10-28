@@ -110,12 +110,33 @@ async function openSession(id) {
     state.before = page.next_before; $("older").hidden = !state.before;
     $("empty").hidden = page.items.length > 0;
     if (active) connectRun(active.id, version);
-    else if (session.latest_run) showRunStatus(session.latest_run);
+    else if (session.latest_run) {
+      showRunStatus(session.latest_run);
+      watchMemoryJob(session.latest_run.id, version);
+    }
     if ($("context-panel").open) loadContext().catch(showError);
     scrollBottom();
   } finally {
     if (version === state.version) { state.loading = false; $("send").disabled = state.busy; }
   }
+}
+async function watchMemoryJob(runId, version) {
+  let row = null;
+  const started = Date.now();
+  const refresh = async () => {
+    if (version !== state.version) return;
+    try {
+      const {job} = await api(`/api/runs/${runId}/memory-job`);
+      if (version !== state.version || !job) return;
+      if (!row) { row = textNode("div", "", "tool-status"); $("live").append(row); }
+      const labels = {queued: "等待后台整理记忆", running: "正在后台整理记忆", completed: "后台记忆整理完成", failed: "后台记忆整理未完成，回答已保留"};
+      row.textContent = labels[job.status]; row.classList.toggle("failed", job.status === "failed");
+      if (["queued", "running"].includes(job.status) && Date.now() - started < 120000) setTimeout(refresh, 1000);
+    } catch {
+      if (version === state.version && row) row.textContent = "后台记忆状态暂时不可用";
+    }
+  };
+  await refresh();
 }
 function showRunStatus(run) {
   const labels = {completed: "已完成", failed: "运行失败", cancelled: "已停止", interrupted: "运行已中断"};

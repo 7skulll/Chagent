@@ -166,6 +166,9 @@ class MemoryService:
             explicit.source_message_ids = [str(source_id)]
             await self.commit(connection, session_id, run_id, [explicit])
             return
+        # A run that stopped because a tool asked for it has no assistant answer
+        # to judge the input against, so it is not queued; an explicit
+        # ``/remember`` above still writes deterministically.
         if not (self.policy.extract and has_answer and self.jobs is not None and worth_extracting(text)):
             return
         job_id = await self.jobs.enqueue(

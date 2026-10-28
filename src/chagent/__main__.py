@@ -64,12 +64,18 @@ async def _run(
         else:
             print("Tools requested a normal stop; no final model reply was generated.")
         # One-shot runs drain the queue so memories are available before exit;
-        # a pending job is kept and resumed by the next process.
+        # anything still open (a retry waiting out its backoff, or an attempt
+        # that outlived the drain deadline) is left for the next process. Say
+        # so instead of exiting as if the queue were empty.
         if runner.memory_worker is not None and result.message is not None:
+            worker = runner.memory_worker
             try:
-                await runner.memory_worker.drain(timeout=runner.memory_service.policy.timeout + 5)
+                await worker.drain(timeout=runner.memory_service.policy.timeout + 5)
             except TimeoutError:
-                print("Memory: extraction is still pending and will resume on the next run.")
+                pass
+            remaining = await worker.jobs.unfinished()
+            if remaining:
+                print(f"Memory: {remaining} extraction job(s) still open; they resume on the next run.")
         history = await runner.conversations.messages(session_id)
         events = await runner.runs.events(result.run_id)
         print(f"Persisted: {len(history)} messages; {len(events)} events in this run.")

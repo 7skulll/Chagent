@@ -15,7 +15,7 @@ from chagent.bootstrap import create_demo_runner
 from chagent.agent.runner import RunFailedError
 from chagent.config import Settings
 from chagent.domain.memories import MemoryPolicy, MemoryProposal
-from chagent.domain.messages import AssistantMessage, TextContent, UserMessage
+from chagent.domain.messages import AssistantMessage, TextContent
 from chagent.memory.service import explicit_memory, query_terms
 from chagent.models.events import DoneEvent, StartEvent
 from chagent.models.fake import FakeModelClient

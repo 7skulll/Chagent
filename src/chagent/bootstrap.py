@@ -55,8 +55,9 @@ def create_runner(
     registry = create_builtin_registry(allow_host_commands=allow_host_commands, artifacts=ArtifactRepository(database))
     builder = BasicContextBuilder(policy=context_policy, counter=token_counter)
     conversations, runs = ConversationRepository(database), RunRepository(database)
+    jobs = MemoryJobRepository(database)
     memory_service = MemoryService(MemoryRepository(database), conversations, runs, builder.counter,
-                                   policy=memory_policy, jobs=MemoryJobRepository(database))
+                                   policy=memory_policy, jobs=jobs)
     runner = AgentRunner(
         model=model, client=client, context=builder,
         tools=ToolExecutor(registry, allow_host_commands=allow_host_commands),
@@ -69,7 +70,7 @@ def create_runner(
     # One worker per runner: it reads model/client at call time, so a replaced
     # client (test doubles, provider switch) applies to extraction as well.
     runner.memory_worker = MemoryWorker(
-        MemoryJobRepository(database), memory_service, runner,
+        jobs, memory_service, runner,
         concurrency=memory_worker_concurrency,
         lease_seconds=max(60.0, memory_service.policy.timeout * 3),
         retry_delay=5.0,

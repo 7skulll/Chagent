@@ -21,6 +21,12 @@ PROJECTION_VERSION = 1
 
 @dataclass(frozen=True, slots=True)
 class Projection:
+    """A message's model-visible form plus its share of the input budget.
+
+    ``cost`` is only meaningful for counters that promise additivity; for any
+    other counter it is 0 and the builder re-renders to count exactly.
+    """
+
     message: Message
     cost: int
     counter: str
@@ -31,7 +37,7 @@ class ProjectionCache:
     """Bounded store of projected messages for one run.
 
     Every entry is a private copy, so a caller that mutates a request cannot
-    corrupt later builds. ``retain`` drops messages that left the history.
+    corrupt later builds.
     """
 
     def __init__(self, limit: int = 4096):
@@ -48,16 +54,14 @@ class ProjectionCache:
         if cached is not None and cached.counter == counter.name and cached.version == PROJECTION_VERSION:
             return cached
         message = self._visible(item.message)
-        projection = Projection(message, counter.count([message]), counter.name)
+        # Only additive counters consume a per-message cost; counting for the
+        # others would serialize every message for a number nobody reads.
+        cost = counter.count([message]) if getattr(counter, "additive", False) else 0
+        projection = Projection(message, cost, counter.name)
         if len(self._items) >= self.limit:
             self._items.clear()
         self._items[item.id] = projection
         return projection
-
-    def retain(self, identities: set[UUID]) -> None:
-        for identity in list(self._items):
-            if identity not in identities:
-                del self._items[identity]
 
     @staticmethod
     def _visible(message: Message) -> Message:

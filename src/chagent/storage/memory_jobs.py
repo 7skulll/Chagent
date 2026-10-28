@@ -47,8 +47,36 @@ class MemoryJobRepository:
         row = await cursor.fetchone()
         return row["id"] if row else None
 
+    async def reap_expired(self) -> list[dict]:
+        """Close out jobs whose worker lease expired, counting one attempt.
+
+        An expired lease means the process holding the row is gone: killed,
+        out of memory, or partitioned. ``fail`` never ran, so the attempt has to
+        be counted here — otherwise a job that keeps killing its process would
+        be requeued forever and ``max_attempts`` would only bound exceptions.
+        """
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                "UPDATE memory_jobs SET attempts = attempts + 1, last_error = 'LeaseExpired', "
+                "  status = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'queued' END, "
+                "  available_at = now(), lease_expires_at = NULL, "
+                "  ended_at = CASE WHEN attempts + 1 >= max_attempts THEN now() ELSE NULL END "
+                "WHERE status = 'running' AND lease_expires_at < now() "
+                "RETURNING id, run_id, status, attempts, max_attempts",
+            )
+            rows = await cursor.fetchall()
+            if rows:
+                # The dead attempt's audit row must not stay 'running' forever;
+                # a requeued job resets it when the next attempt starts.
+                await connection.execute(
+                    "UPDATE memory_extractions SET status = 'failed', error = 'LeaseExpired', ended_at = now() "
+                    "WHERE status = 'running' AND run_id = ANY(%s)",
+                    ([row["run_id"] for row in rows],),
+                )
+        return rows
+
     async def claim(self, *, lease_seconds: float) -> MemoryJob | None:
-        """Take one queued job, or one whose worker lease expired.
+        """Take one queued job. Call ``reap_expired`` first to free dead leases.
 
         SKIP LOCKED keeps two workers from claiming the same row without
         blocking on a job another process is already extracting.
@@ -57,8 +85,7 @@ class MemoryJobRepository:
             cursor = await connection.execute(
                 "WITH candidate AS ("
                 "  SELECT id FROM memory_jobs"
-                "  WHERE (status = 'queued' AND available_at <= now())"
-                "     OR (status = 'running' AND lease_expires_at < now())"
+                "  WHERE status = 'queued' AND available_at <= now()"
                 "  ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED"
                 ") "
                 "UPDATE memory_jobs j SET status = 'running', "

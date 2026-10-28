@@ -1,0 +1,233 @@
+{
+  "recorded_at_utc": "2026-10-28T08:05:38.411835+00:00",
+  "configuration": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "api": "openai-chat",
+    "output_limit": 768,
+    "max_provider_requests": 4,
+    "key_source": "named provider key",
+    "case_selection": "events"
+  },
+  "environment": {
+    "python": "3.13.9",
+    "platform": "Darwin"
+  },
+  "limits": "single sample per scenario; synthetic data; no browser TTFT or comparative Pi/Codex benchmark",
+  "results": [
+    {
+      "name": "real_text_stream_coalescing",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "exact_stream_reconstruction": true,
+        "nonempty_answer": true,
+        "one_provider_request": true,
+        "no_tools": true,
+        "not_more_text_transactions_than_deltas": true
+      },
+      "elapsed_ms": 2125.314,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "检查一份测试报告，可分六条说明如下。\n\n一、先核对报告基本信息。确认项目名称、版本号、测试环境、测试日期与人员齐全，避免张冠李戴或版本错配。\n\n二、检查测试范围与用例。看需求覆盖是否完整，用例数量、执行数、通过率是否有据，未执行项须说明原因。\n\n三、核对缺陷记录质量。缺陷应含编号、级别、复现步骤与状态；关注严重级别分布及遗留问题是否交代清楚。\n\n四、验证数据前后一致。用例总数、通过失败数、缺陷数应彼此吻合，与附录截图、日志相互印证无矛盾。\n\n五、审查结论是否客观。结论应与数据匹配，不宜夸大通过率；风险、限制与未覆盖范围须明确写出，避免误导决策。\n\n六、看改进建议可落地。建议应针对具体问题，明确责任人与时限，并可后续跟踪验证，而非空泛套话。",
+      "tool_calls": [],
+      "event_types": [
+        "run_started",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": 621.96,
+          "consumer_wait_ms": 1.748,
+          "text_deltas": 199,
+          "usage": {
+            "input": 281,
+            "output": 199,
+            "cache_read": 640,
+            "cache_write": 0,
+            "total_tokens": 1120,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 2117.201
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 110,
+        "sql_by_phase": {
+          "begin": 6,
+          "other": 4,
+          "start_model_call": 3,
+          "text_delta": 86,
+          "save_response": 4,
+          "finish": 7
+        },
+        "sql_execute_ms_by_phase": {
+          "begin": 1.701,
+          "other": 1.077,
+          "start_model_call": 1.193,
+          "text_delta": 16.783,
+          "save_response": 0.971,
+          "finish": 1.3
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 1.928
+          },
+          "context_prepare": {
+            "calls": 1,
+            "total_ms": 0.366
+          },
+          "memory_recall": {
+            "calls": 1,
+            "total_ms": 0.002
+          },
+          "start_model_call": {
+            "calls": 1,
+            "total_ms": 1.408
+          },
+          "text_delta": {
+            "calls": 43,
+            "total_ms": 35.551
+          },
+          "model_stream": {
+            "calls": 1,
+            "total_ms": 2117.36
+          },
+          "save_response": {
+            "calls": 1,
+            "total_ms": 1.252
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 0.003
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 1.619
+          }
+        }
+      },
+      "provider_text_deltas": 199,
+      "persisted_text_events": 43
+    },
+    {
+      "name": "web_api_sse_replay",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "sse_terminal": true,
+        "sse_answer": true,
+        "durable_replay": true,
+        "model_stop_reason": true
+      },
+      "elapsed_ms": 986.496,
+      "answer": "WEB_LIVE_OK",
+      "sse_delta_count": 2,
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": 853.042,
+          "consumer_wait_ms": 1.629,
+          "text_deltas": 4,
+          "usage": {
+            "input": 138,
+            "output": 4,
+            "cache_read": 768,
+            "cache_write": 0,
+            "total_tokens": 910,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 940.606
+        }
+      ]
+    }
+  ],
+  "schema_cleaned": true,
+  "total_provider_requests": 2,
+  "reported_tokens": {
+    "input": 419,
+    "output": 203,
+    "cache_read": 1408,
+    "cache_write": 0,
+    "total_tokens": 2030
+  },
+  "usage_missing_calls": 0,
+  "monetary_cost": null,
+  "monetary_cost_note": "No monetary price assumed; see provider-reported token usage.",
+  "passed": true,
+  "source_sha256": {
+    "src/chagent/agent/runner.py": "7a8ad3289442b6038a3674816511b9dfb23fa0811d2a5bce721153289b5b4086",
+    "src/chagent/memory/service.py": "551526ce07c80c8d8b0c9f1baa5010929d407cd9e656f47dc606c751578479b9",
+    "src/chagent/models/openai_chat.py": "36758ad0327ed3e6b3ab9d39bad618221a3f0385e4c5fabfffe9df6ee9eabf3a",
+    "src/chagent/context/manager.py": "a870fb8d466e00b55ea3242e807aa454d6ba429285d8bdddc65fafa5eac40c0f",
+    "src/chagent/tools/scheduler.py": "bc60f47f3d0a56dc01f51a939b357ad07bbf54de30b2e66927418ac77e7bae3a",
+    "src/chagent/tools/executor.py": "49ee105eebb8fe8bca922b93269f810f461fd8b00cae668a68edf890e6964cf9",
+    "src/chagent/tools/filesystem.py": "54fc87b571ab5948235b8eafd92924849eb9168edaa199a851841d7b7a007972",
+    "src/chagent/agent/stream_writer.py": "d832efba4535d0a9fb2a0b01d0177a222db7f4f3e428245db1849627bf7d6f23",
+    "src/chagent/events/notifications.py": "84cc07254e02f5eda0abda7612215894ea748c312b1dbdd88681ac9de0664555",
+    "src/chagent/web/app.py": "8396c365b7aa7d3bb56ad3a139538d6993517cd81ef6ec3545090912ef49f3f9"
+  }
+}

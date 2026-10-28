@@ -49,10 +49,12 @@ class MeasuredClient:
         started = perf_counter()
         record = {"purpose": request.purpose, "output_limit": request.max_tokens,
                   "messages": len(request.messages), "first_text_ms": None,
-                  "consumer_wait_ms": 0, "usage": None, "stop_reason": None}
+                  "consumer_wait_ms": 0, "text_deltas": 0, "usage": None, "stop_reason": None}
         self.calls.append(record)
         try:
             async for event in self.client.stream(request):
+                if isinstance(event, ContentDeltaEvent) and event.type == "text_delta":
+                    record["text_deltas"] += 1
                 if isinstance(event, ContentDeltaEvent) and event.type == "text_delta" and record["first_text_ms"] is None:
                     record["first_text_ms"] = round((perf_counter() - started) * 1000, 3)
                 if isinstance(event, (DoneEvent, ErrorEvent)):
@@ -350,6 +352,23 @@ class LiveSuite:
                              "provider_calls": self.client.calls[first:]})
         print(json.dumps({"case": "web_api_sse_replay", "checks": checks}, ensure_ascii=False), flush=True)
 
+    async def events_case(self):
+        first_call = len(self.client.calls)
+
+        async def verify(result, events, rows):
+            deltas = [event["payload"]["delta"] for event in events if event["type"] == "text_delta"]
+            raw = sum(call["text_deltas"] for call in self.client.calls[first_call:])
+            return {"exact_stream_reconstruction": "".join(deltas) == text(result.message),
+                    "nonempty_answer": len(text(result.message)) >= 100,
+                    "one_provider_request": len(self.client.calls) == first_call + 1,
+                    "no_tools": not any(event["type"] == "tool_started" for event in events),
+                    "not_more_text_transactions_than_deltas": 0 < len(deltas) <= raw}, {
+                    "provider_text_deltas": raw, "persisted_text_events": len(deltas)}
+
+        await self.run("real_text_stream_coalescing", self.runner(),
+                       "不要调用工具。用简体中文分六条说明如何检查一份测试报告，每条约四十字。只输出正文。", verify=verify)
+        await self.web_case()
+
     async def scheduling_case(self):
         runner = self.runner()
         values = [13, 29, 47]
@@ -449,6 +468,8 @@ async def main_async(args):
                                 await suite.execute()
                             elif args.case == "core":
                                 await suite.execute(core_only=True)
+                            elif args.case == "events":
+                                await suite.events_case()
                             elif args.case == "scheduling":
                                 await suite.scheduling_case()
                             elif args.case == "web":
@@ -470,14 +491,15 @@ async def main_async(args):
         report["usage_missing_calls"] = sum(call["usage"] is None for call in calls)
         report["monetary_cost"] = None
         report["monetary_cost_note"] = "No monetary price assumed; see provider-reported token usage."
-        expected = 9 if args.case == "all" else 6 if args.case == "core" else 1
+        expected = 9 if args.case == "all" else 6 if args.case == "core" else 2 if args.case == "events" else 1
         report["passed"] = len(report["results"]) == expected and all(case["passed"] for case in report["results"]) and "suite_error_type" not in report
         root = Path(__file__).resolve().parents[1]
         report["source_sha256"] = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
                                    for path in (root / "src/chagent/agent/runner.py", root / "src/chagent/memory/service.py",
                                                 root / "src/chagent/models/openai_chat.py", root / "src/chagent/context/manager.py",
                                                 root / "src/chagent/tools/scheduler.py", root / "src/chagent/tools/executor.py",
-                                                root / "src/chagent/tools/filesystem.py")}
+                                                root / "src/chagent/tools/filesystem.py", root / "src/chagent/agent/stream_writer.py",
+                                                root / "src/chagent/events/notifications.py", root / "src/chagent/web/app.py")}
         serialized = json.dumps(report, ensure_ascii=False, indent=2)
         assert selected.api_key not in serialized, "Refusing to save a credential-bearing report"
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -489,7 +511,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-calls", type=int, default=24)
-    parser.add_argument("--case", choices=("all", "core", "web", "explicit", "scheduling"), default="all")
+    parser.add_argument("--case", choices=("all", "core", "web", "explicit", "scheduling", "events"), default="all")
     args = parser.parse_args()
     if not 1 <= args.max_calls <= 30:
         parser.error("--max-calls must be between 1 and 30")

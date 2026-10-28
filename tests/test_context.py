@@ -27,10 +27,12 @@ class RecordingCounter:
         self.additive = additive
         self.calls = 0
         self.serialized = 0
+        self.lengths = []
 
     def count(self, messages):
         self.calls += 1
         self.serialized += len(messages)
+        self.lengths.append(len(messages))
         return sum(len(json.dumps(asdict(message), ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 8
                    for message in messages)
 
@@ -166,6 +168,19 @@ class CountingTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(counter.serialized - baseline, len(appended) + 8,
                              "a cached projection must not be recomputed for new turns")
         self.assertEqual(second.snapshot.message_count, first.snapshot.message_count + 1)
+
+    async def test_non_additive_counter_never_prices_single_messages(self):
+        """Only additive counters consume per-message costs, so the fallback must not compute one."""
+        history = self.history(30)
+        fallback = RecordingCounter(additive=False)
+        await BasicContextBuilder(counter=fallback).build(
+            history, self.model, [], current_run_id=history[-1].run_id)
+        self.assertNotIn(1, fallback.lengths,
+                         "a counter that cannot add must not serialize messages for an unread cost")
+        additive = RecordingCounter(additive=True)
+        await BasicContextBuilder(counter=additive).build(
+            history, self.model, [], current_run_id=history[-1].run_id)
+        self.assertIn(1, additive.lengths, "an additive counter projects each message once")
 
     async def test_cached_projection_does_not_leak_mutations_into_later_builds(self):
         history = self.history(3)

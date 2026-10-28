@@ -175,3 +175,17 @@ class MemoryPage(BaseModel):
 class MemoryDetail(BaseModel):
     memory: Memory
     conflict: Memory | None
+
+
+class MemoryJobView(BaseModel):
+    id: UUID
+    run_id: UUID
+    status: Literal["queued", "running", "completed", "failed"]
+    attempts: int
+    max_attempts: int
+    created_at: datetime
+    ended_at: datetime | None
+
+
+class MemoryJobState(BaseModel):
+    job: MemoryJobView | None
