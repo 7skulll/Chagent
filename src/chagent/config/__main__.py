@@ -58,6 +58,8 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
                                f"deny_read={len(configured) or len(DEFAULT_DENY_READ)} "
                                f"writable_tmp={str(settings.sandbox_writable_tmp).lower()}")
         sections["memory"] = f"worker_concurrency={settings.memory_worker_concurrency}"
+        sections["processes"] = (f"max_per_run={settings.max_processes} "
+                                 f"wall_timeout={settings.process_timeout:g}s")
         sections["database"] = (f"dbname={conninfo_to_dict(settings.database_url).get('dbname')} "
                                f"pool={settings.db_pool_min_size}..{settings.db_pool_max_size} "
                                f"timeout={settings.db_timeout:g}s")

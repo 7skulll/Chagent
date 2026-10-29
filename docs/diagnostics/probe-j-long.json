@@ -1,0 +1,187 @@
+{
+  "recorded_at_utc": "2026-10-29T10:36:41.972923+00:00",
+  "configuration": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "api": "openai-chat",
+    "case": "long",
+    "repeats": 1,
+    "max_provider_requests": 60
+  },
+  "environment": {
+    "python": "3.13.9",
+    "platform": "Darwin"
+  },
+  "results": [
+    {
+      "scenario": "long",
+      "repetition": 1,
+      "run_id": "9ac39047-0b68-41aa-ae64-20e0e6807c96",
+      "turns": 3,
+      "elapsed_s": 47.728,
+      "correct": true,
+      "checks": {
+        "expected_result_created": true,
+        "protected_files_unchanged": true,
+        "run_completed": true
+      },
+      "end_reason": "model_stop",
+      "error_type": null,
+      "tool_calls": 2,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [
+        {
+          "call_index": 0,
+          "name": "exec_command",
+          "arguments": {
+            "cmd": "python scripts/slow_job.py",
+            "workdir": "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-probe-long-y_vf0q17",
+            "timeout_ms": 30000,
+            "yield_time_ms": 30000
+          },
+          "status": "completed",
+          "repeated": false,
+          "blocked": false
+        },
+        {
+          "call_index": 0,
+          "name": "process",
+          "arguments": {
+            "since": 17,
+            "action": "read",
+            "wait_ms": 30000,
+            "process_id": "99d078b8"
+          },
+          "status": "completed",
+          "repeated": false,
+          "blocked": false
+        }
+      ],
+      "usage": {
+        "input": 2779,
+        "output": 403,
+        "cache_read": 5248,
+        "cache_write": 0
+      },
+      "target": {
+        "expected_before_persistent_shell": false,
+        "met": true
+      }
+    }
+  ],
+  "schema_cleaned": true,
+  "summary": {
+    "long": {
+      "runs": 1,
+      "correct_runs": 1,
+      "target_runs": 1,
+      "turns": [
+        3
+      ],
+      "turn_variation": 0,
+      "tool_calls": [
+        2
+      ],
+      "elapsed_s": [
+        47.728
+      ]
+    }
+  },
+  "total_provider_requests": 3,
+  "source_sha256": {
+    "src/chagent/bootstrap.py": "4f51a00c51638d809ac6a448babee366ca20eadaf07beb141bc1744b802ca54a",
+    "src/chagent/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/__main__.py": "2d336a3bb7458e40669dd8892a06b8a33e619863e9337fc389bbcd019c2fb989",
+    "src/chagent/tools/patch.py": "822163407f8ab2accf32b64b76491398717f861edbbe52e206b06cdb7b33cbdc",
+    "src/chagent/tools/command.py": "c6cbe976b6b9b2c8b6c8309814254a8663c5e81afaeac5202edb8889decc68b0",
+    "src/chagent/tools/approvals.py": "2c93bcd259c2464b372e53136ec55be8b82ebd6e95847bfca978be547b7a16a3",
+    "src/chagent/tools/registry.py": "b283d7068160936ab7ae6837d52bf2ffcf31bd1c3b1c1b83bcd72d767fd0ef27",
+    "src/chagent/tools/tests_runner.py": "457aa199adf5750ff6c04b7463ee49a8eb8846c43381ac3da936bda5b70bffc1",
+    "src/chagent/tools/filesystem.py": "c5b38ce2bab2308c1b225bdb2c83cb4183e4ec5f3b579aaf07134d064f3364ab",
+    "src/chagent/tools/policy.py": "9d0c3fd2d3f13c74c2e1ebbfa8b3d5313219054f915e233211b3d0e8ea9f6da2",
+    "src/chagent/tools/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/tools/edit_diff.py": "3200a1849053d56250198a923638b164b4faddc00a88cf92f5415c688893437b",
+    "src/chagent/tools/sandbox.py": "efbe3c92d9778041bd144ea4891f1e5191c7e26afd21f307476e4b0797a4bfbe",
+    "src/chagent/tools/processes.py": "ad62fe1dd35984a989bb10c811f293d5f8cd1196a67311f5a7a45409c58b0e74",
+    "src/chagent/tools/context.py": "ef348093aed62fd358082e44a21603c41c7c3d305c5a6eb4bbc0a0d915c6108e",
+    "src/chagent/tools/search.py": "53cff6674d288668ec1dc7a800a188453cb3998a1b01bfa15fa2300114cc2089",
+    "src/chagent/tools/builtin.py": "ca432979aaccbda8885394a7b54f598010954099568c3aaadc827f64e19db2d7",
+    "src/chagent/tools/scheduler.py": "a45faf1c6631d77e0f04eaad5ed630c09fb4370bfa93a95a864120758b7ab921",
+    "src/chagent/tools/artifacts.py": "27764551b5e388fecb53740fac144d8c57ee9b19e39cd4bac16996a1ae3a5a43",
+    "src/chagent/tools/progress.py": "23c77c09f8fdbc867506c88fa2ef231a744f742b46e3b13c9086b5b7d7dfa85f",
+    "src/chagent/tools/workspace.py": "3f6027dc233b205c866ed5ee9e71836384a856150eea44c49db3a186cff92570",
+    "src/chagent/tools/echo.py": "e7c8c0f5e8c8ccc8c5cff9a1b11fd18782da976433dbb69547772b9b28111d45",
+    "src/chagent/tools/base.py": "7b839ab19d8a383ba67df4888be61660391a899c6cf696d0de17b113c9c3004e",
+    "src/chagent/tools/executor.py": "d762a67799eff24c0896ba62e103e4bacc1f6bf6b36ec3235cb6ec4f126fe844",
+    "src/chagent/context/compactor.py": "5357e93ec475599d334414417ced34072257dd9b1d4b2a54728db8f3e7785bd7",
+    "src/chagent/context/segments.py": "74b080727934071160062e736c88512764b56bed3983fdd570640156cb5355b4",
+    "src/chagent/context/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/context/tokens.py": "6bffe93069f46ad449b5da98aaf8e152bda60de00a59bcb12b864f010e09a496",
+    "src/chagent/context/builder.py": "5af253765dc8c6cdbba3ee0ab1101a7625432c0d2107c9f32084031a9dfb2cd0",
+    "src/chagent/context/environment.py": "306c0e5f0a06b2dd6e8e2b0deb9c93a34c4d0b489126cbf4f4d88bb9039af322",
+    "src/chagent/context/projection.py": "4df3738d211e9e7f7772a397aa5770b7d834145cf8abe38e0ca8de03ba603d8d",
+    "src/chagent/context/manager.py": "263e36f10f3ac8189051971986e0f1f2c73a2ddba745ca75d2b90634a58314d9",
+    "src/chagent/memory/worker.py": "c13bce47416d4ca8d8d6dcc429f7241835e3ebd330aeed223a9eef48491eaecc",
+    "src/chagent/memory/service.py": "a90962a66fdf49741b5825389d26c1091f7f3f723127725a01b834a28d0dd8f9",
+    "src/chagent/memory/__init__.py": "c62409cf7fbb4e721755642059b8f8200b0f8968208cab9728b60e0618a098a0",
+    "src/chagent/memory/__main__.py": "c54e33ac6c10a17eebbafa6b6d1c363df94c5568e6cd998ec22c172c68f507b9",
+    "src/chagent/config/__init__.py": "f7317b4a1bb7edc3745cc2cc76707e13d549e2512de601e0c6d3a58481928ca6",
+    "src/chagent/config/dotenv.py": "1187adf27a6bfc52b71aba1db2ec7df4bd1b277190991d27ee57d2c0f35565a6",
+    "src/chagent/config/__main__.py": "ce04b3216060226dc038cde398ac53d9da354fe895aade4140109af4a86883b0",
+    "src/chagent/web/__init__.py": "6b6fb1d0e504ffdd57103bad62dfda2a7055140441322ebcb2f854ae5b708525",
+    "src/chagent/web/schemas.py": "623db792130bc0c42edaf4451b0b236c0480f41d71c2224db3b1c902d3124a03",
+    "src/chagent/web/app.py": "8b4541b05850fc51f61166e8ea13d34dfc24304176780476151f77e2d14f5af5",
+    "src/chagent/web/__main__.py": "af1ad248e68f7b32cdd45430ad3482f9d58b96203a4fac17c262b09969fb5177",
+    "src/chagent/agent/runner.py": "5eca01125c6f7c1f1f803849049c8c0399b51892bd96a3670b6c734eff6c716d",
+    "src/chagent/agent/stream_writer.py": "d832efba4535d0a9fb2a0b01d0177a222db7f4f3e428245db1849627bf7d6f23",
+    "src/chagent/agent/budget.py": "6e39eb7f3b6642887cb08c35dcddad8b734921b34378fa379c791691d5160d33",
+    "src/chagent/agent/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/agent/types.py": "0ae0d37cd824c07582ee06938f1a7e83372080ce6cf0e97710a9bdfe9901ef9c",
+    "src/chagent/models/fake.py": "8661246ea3cfdc11a9c034d1e34a212a47fd41641a1a0f91f98f71702910a274",
+    "src/chagent/models/transcript.py": "13a64eb5dae386b8039cb293f89680bc45183737f9d23ef1d1b980369ffa42a3",
+    "src/chagent/models/openai_chat.py": "36758ad0327ed3e6b3ab9d39bad618221a3f0385e4c5fabfffe9df6ee9eabf3a",
+    "src/chagent/models/events.py": "a294b11c08f8d362d4e44cf916b391e377d2fd0ffa7317fc0b39a90a531e1f63",
+    "src/chagent/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/models/factory.py": "a5505631864a58bba2ad440851a45e640aafd24365a1a47fd6a152223ca102e4",
+    "src/chagent/models/http.py": "95fdf205efc35d9e58fdf2cccde69af95cc56c45ae28f2d0fd9d3aaf6a264b4e",
+    "src/chagent/models/anthropic.py": "685b56df1511e544bba1c6825f00e391b320de8b2dc1e57c86610b67ff72a479",
+    "src/chagent/models/settings.py": "5007ee3e7fc4e5ed95a96357e473d72f959cbf9af934783027f898b941cbb5ea",
+    "src/chagent/models/__main__.py": "dbe94637c10fc06774a2d9feeb877e5a6d1d086949a5265e8f1dd60de0f7a9b9",
+    "src/chagent/models/base.py": "fab9901507af859bd3f32b9243c47a54c4e3d24fa20558d99b874f365c56dcb0",
+    "src/chagent/storage/memory_jobs.py": "7afcda21f8db0dba8a24fd9d01c626d42e14e78848083b1ef4c76788176ff435",
+    "src/chagent/storage/approvals.py": "244791517c3558618ab042a4419dba7484c7419177485c5d056ebe4f345688b0",
+    "src/chagent/storage/database.py": "b897462cc82311dbad5b1478a0261830c8c2d33f581ff8f74c16d07e8e0caf6a",
+    "src/chagent/storage/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/storage/event_queue.py": "7ebb6df772bec7cb5a1d86c82cd413351dbbe5c6fe58992910776c05f81f8a3c",
+    "src/chagent/storage/repositories.py": "568b607d30b2ef570bc2f039695f4203b11273b280be5bba707386d085ca260f",
+    "src/chagent/storage/memories.py": "0113a6e5ee8b9ab35f6992bdbd8a73a0e995cc9eeead8b5c349704b7eee8bbc9",
+    "src/chagent/storage/artifacts.py": "79504d479d4819c301a3420410833b071f6fc2361f0393a036d2d9bf4665c35e",
+    "src/chagent/storage/summaries.py": "662e051d331a51a2efe86973cf4c9b84bf7f5a7dbe71decdd6aae6ff8c8058d4",
+    "src/chagent/storage/migrate.py": "28cd73f736b009391e330378949845f9f616880ce9fc17580ed1104e4c76f9ad",
+    "src/chagent/storage/__main__.py": "a28493512729df2ab25bca7f659817b7361fbb59d4c5a7f823bfe642547af5d5",
+    "src/chagent/sessions/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/sessions/errors.py": "210443dc731464ec975eb4fa52226f2f9779775310b68b2195b1b6a848aa6ee5",
+    "src/chagent/sessions/__main__.py": "bf82035aaed6f629a25bbe11ecd062d866021742163de19b704271e0cd57f1f0",
+    "src/chagent/sessions/manager.py": "e624b6c5d0cf55703a900d8071e7f7cd5f145ee545a3d5107c8577dd2d3d71ef",
+    "src/chagent/diagnostics/behavior.py": "20aa714675d5d51703db311f50998eac60acd76ddc4ae5d4b1c8c21fbb807eb9",
+    "src/chagent/diagnostics/cache.py": "2b2952727b8a923dabee0c59ce3ba7272a92b1bb3e0eef76a4133d9a07226d71",
+    "src/chagent/diagnostics/__init__.py": "c5e7ce115fbe79a060b97fdfc01073bf6e5391b8eeaa0f1f4f833a5719b79f42",
+    "src/chagent/diagnostics/schema.py": "06fe05932c4c3ea3108f997b6c403ba5f1765a44423c96ac5b8e85dc7c6e7b1c",
+    "src/chagent/events/__init__.py": "57fe2a38bbe45bdc53c239a708cc23d4245b267221e777463a2044577942982d",
+    "src/chagent/events/notifications.py": "84cc07254e02f5eda0abda7612215894ea748c312b1dbdd88681ac9de0664555",
+    "src/chagent/domain/sessions.py": "0be62a9d22e7a5c891000225daa666833f8c65654b8b96ceb821903acae5cf99",
+    "src/chagent/domain/recovery.py": "745afe03fa04a2119106a40fa4992c3e464816be39ce5e4f806e36d0332c8b50",
+    "src/chagent/domain/json_types.py": "2c216daa15e0be5a8b46e818b90fd3333a8443280d639088413c3df24921999f",
+    "src/chagent/domain/tools.py": "ba801bb40bcf43c24aa2666e99fe89aad15afaa7954e6aa62749091f53ed5a7c",
+    "src/chagent/domain/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/domain/context.py": "2a64299454967e103fd81c558c8030ef1ae2ccd4f8e42c1b9d1386706ab4b1a8",
+    "src/chagent/domain/messages.py": "f6881f9fcf432bea3642949961058356fb1b76b9c33379585583c5bcec850a09",
+    "src/chagent/domain/memories.py": "f763c62b28be1a96c2263920bcdb22ee8cc64ef729ec95a441b098373f854c45",
+    "src/chagent/domain/artifacts.py": "4d38488321862f7903acbc96c93bc9ecd16efd0d94933431fc4fe61b1a881c7b",
+    "src/chagent/domain/codec.py": "2ad63405ca27d97c642ce5762478901a4cfcdb0e32a9c95a5802174d156f44c5",
+    "src/chagent/domain/runs.py": "b808f66cc8443b1b78eb421e4121c5f149ff740377cc13c5b4eb9e33df99c683",
+    "src/chagent/domain/summaries.py": "7b3a5df3e60002051c3bc7ba91852943d181de6407ac743241437f01ac2ce2dd",
+    "src/chagent/domain/usage.py": "1c28e3042920be9bb057b377375b11d509bef5e60424db9f1cbeaf344ce9481f"
+  }
+}

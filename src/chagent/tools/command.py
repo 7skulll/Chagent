@@ -1,4 +1,4 @@
-"""One-shot POSIX host commands; cwd is scoped and the child gets a profile."""
+"""One-shot POSIX host commands, or a session that outlives the call; cwd is scoped."""
 
 import asyncio
 from contextlib import suppress
@@ -9,30 +9,40 @@ from time import monotonic
 from chagent.domain.messages import JsonObject, TextContent
 from chagent.tools.base import AgentTool, AgentToolResult, AgentToolUpdateCallback
 from chagent.tools.context import ToolContext
+from chagent.tools.processes import PAGE_CHARS, ProcessManager
 from chagent.tools.sandbox import Sandbox
 from chagent.tools.workspace import WorkspaceFS
 
 
 class ExecCommandTool(AgentTool):
-    def __init__(self, sandbox: Sandbox | None = None):
+    def __init__(self, sandbox: Sandbox | None = None, processes: ProcessManager | None = None):
         self.sandbox = sandbox
+        # Session processes are opt-in per call (``yield_time_ms``); without a
+        # manager the one-shot behaviour is unchanged and a session request is
+        # refused rather than silently downgraded.
+        self.processes = processes
         confined = sandbox is not None and sandbox.enabled
         super().__init__(
             name="exec_command", label="Run command",
             description=(
-                "Run one non-interactive /bin/sh command on the host inside the platform sandbox: writes stay "
-                "in the workspace and the user's temp directory, network is off unless the host allowed it, and "
-                "configured credential paths are unreadable. No background sessions or stdin. Output is "
-                "bounded; exit status is reported."
+                "Run one /bin/sh command on the host inside the platform sandbox: writes stay in the "
+                "workspace and the user's temp directory, network is off unless the host allowed it, and "
+                "configured credential paths are unreadable. Output is bounded and exit status is "
+                "reported. Pass yield_time_ms to keep a longer command alive: the call then returns a "
+                "process_id and the output so far, and process() reads, feeds or stops it."
                 if confined else
-                "Run one non-interactive /bin/sh command on the host. This is not sandboxed. No background "
-                "sessions or stdin. Output is bounded; exit status is reported."
+                "Run one /bin/sh command on the host. This is not sandboxed. Output is bounded and exit "
+                "status is reported. Pass yield_time_ms to keep a longer command alive: the call then "
+                "returns a process_id and the output so far, and process() reads, feeds or stops it."
             ),
             parameters={
                 "type": "object", "properties": {
                     "cmd": {"type": "string", "minLength": 1, "maxLength": 32_768},
                     "workdir": {"type": "string", "minLength": 1},
+                    # One-shot invocation budget; ignored when yielding, where
+                    # CHAGENT_PROCESS_TIMEOUT bounds the whole process instead.
                     "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 30_000},
+                    "yield_time_ms": {"type": "integer", "minimum": 100, "maximum": 30_000},
                     "max_output_chars": {"type": "integer", "minimum": 1, "maximum": 64_000},
                 }, "required": ["cmd"], "additionalProperties": False,
             }, requires_workspace=True, requires_host_execution=True,
@@ -59,6 +69,9 @@ class ExecCommandTool(AgentTool):
         if self.sandbox is not None:
             argv, sandbox_record = await self.sandbox.wrap(argv, filesystem.root)
         started = monotonic()
+        if "yield_time_ms" in params:
+            return await self._session(params, context, cwd, argv, sandbox_record, started)
+
         # Shield spawn so cancellation cannot lose a successfully started child.
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
             *argv, cwd=cwd, stdin=asyncio.subprocess.DEVNULL,
@@ -139,3 +152,57 @@ class ExecCommandTool(AgentTool):
             content=[TextContent(f"Exit code: {process.returncode}\n{text}")], details=details,
             is_error=timed_out or process.returncode != 0, outcome_unknown=timed_out,
         )
+
+    async def _session(self, params, context, cwd, argv, sandbox_record, started) -> AgentToolResult:
+        """Start the command and return once ``yield_time_ms`` has passed.
+
+        The child is owned by the run, not by this invocation: leaving it alive
+        is the whole point, so nothing here kills the process group. Cancellation
+        of this call therefore only stops the wait; run end reclaims the child.
+        """
+        if self.processes is None:
+            raise ValueError("Session processes are unavailable: no process manager is configured")
+        if context.run_id is None:
+            raise PermissionError("Session processes belong to a run")
+        record = await self.processes.start(
+            run_id=context.run_id, command=params["cmd"], cwd=cwd, argv=argv,
+            sandbox=sandbox_record, window_chars=params.get("max_output_chars"),
+        )
+        with suppress(TimeoutError):
+            await asyncio.wait_for(record.finished.wait(), params["yield_time_ms"] / 1000)
+        text, missed = record.page(0)
+        truncated = len(text) > PAGE_CHARS
+        shown = text[:PAGE_CHARS]
+        # Where the shown page starts: the window's front when output was
+        # already dropped, otherwise zero. The model passes it back as ``since``.
+        offset = record.cursor - len(text) if text else record.window_start
+        next_cursor = offset + len(shown)
+        details = {
+            **record.snapshot(), "output": shown, "truncated": truncated,
+            "wall_time_seconds": monotonic() - started, "workdir": str(cwd),
+            **({"sandbox": sandbox_record} if sandbox_record else {}),
+        }
+        gap = f"[Output before cursor {missed} was dropped]\n" if missed is not None else ""
+        if record.running:
+            head = (f"Running in background: process_id={record.id}\n"
+                    f"Yielded after {params['yield_time_ms']}ms; the process keeps running.\n"
+                    f"Next: process(action='read', process_id='{record.id}', since={next_cursor}, "
+                    "wait_ms=30000) to collect more output, or action='write' to send stdin.\n")
+            return AgentToolResult(content=[TextContent(head + gap + shown)],
+                                   details=details)
+        if not truncated:
+            # Fully read already: keeping it would only count against the cap.
+            self.processes.forget(record)
+        head = f"Exit code: {record.exit_code}\n"
+        if record.timed_out:
+            head += "[Wall clock expired; process group terminated]\n"
+        if truncated:
+            # Kept alive only so the rest is reachable; a forgotten record would
+            # leave the model holding an id that can never be used.
+            head += (f"[{len(shown)} characters shown; read the rest with "
+                     f"process(action='read', process_id='{record.id}', since={next_cursor})]\n")
+        return AgentToolResult(
+            content=[TextContent(head + gap + shown)], details=details,
+            is_error=record.timed_out or record.exit_code != 0,
+        )
+

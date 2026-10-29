@@ -499,7 +499,9 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                                 max_tool_concurrency=configured.max_tool_concurrency,
                                                 memory_worker_concurrency=configured.memory_worker_concurrency,
                                                 sandbox=sandbox, approval_policy=approval,
-                                                approval_timeout=configured.approval_timeout)
+                                                approval_timeout=configured.approval_timeout,
+                                                process_wall_timeout=configured.process_timeout,
+                                                max_processes=configured.max_processes)
                 else:
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
@@ -507,7 +509,9 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            max_tool_concurrency=configured.max_tool_concurrency,
                                            memory_worker_concurrency=configured.memory_worker_concurrency,
                                            sandbox=sandbox, approval_policy=approval,
-                                           approval_timeout=configured.approval_timeout)
+                                           approval_timeout=configured.approval_timeout,
+                                           process_wall_timeout=configured.process_timeout,
+                                           max_processes=configured.max_processes)
                 app.state.runtime = WebRuntime(runner, workspace)
                 app.state.runtime.start_worker()
                 try:

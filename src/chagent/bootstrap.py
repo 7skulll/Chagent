@@ -17,6 +17,7 @@ from chagent.storage.summaries import SummaryRepository
 from chagent.storage.artifacts import ArtifactRepository
 from chagent.tools.builtin import create_builtin_registry
 from chagent.tools.executor import ToolExecutor
+from chagent.tools.processes import ProcessManager
 from chagent.tools.sandbox import Sandbox
 from chagent.domain.memories import MemoryPolicy
 from chagent.memory.service import MemoryService
@@ -40,6 +41,8 @@ def create_demo_runner(
     approval_timeout: float = 300.0,
     approval_decider=None,
     approval_remote: bool = True,
+    process_wall_timeout: float = 600.0,
+    max_processes: int = 4,
 ) -> AgentRunner:
     return create_runner(
         database, Model(id="fake-echo", provider="local-test", api="fake", context_window=8192, max_tokens=512),
@@ -51,6 +54,7 @@ def create_demo_runner(
         sandbox=sandbox,
         approval_policy=approval_policy, approval_timeout=approval_timeout,
         approval_decider=approval_decider, approval_remote=approval_remote,
+        process_wall_timeout=process_wall_timeout, max_processes=max_processes,
     )
 
 
@@ -68,9 +72,15 @@ def create_runner(
     approval_timeout: float = 300.0,
     approval_decider=None,
     approval_remote: bool = True,
+    process_wall_timeout: float = 600.0,
+    max_processes: int = 4,
 ) -> AgentRunner:
+    # One manager per runner: process ownership is per run, and the runner is
+    # the only object that knows when a run ends.
+    processes = ProcessManager(wall_timeout=process_wall_timeout, max_per_run=max_processes)
     registry = create_builtin_registry(allow_host_commands=allow_host_commands,
-                                       artifacts=ArtifactRepository(database), sandbox=sandbox)
+                                       artifacts=ArtifactRepository(database), sandbox=sandbox,
+                                       processes=processes)
     builder = BasicContextBuilder(policy=context_policy,
                                   counter=token_counter or select_counter(model))
     conversations, runs = ConversationRepository(database), RunRepository(database)
@@ -97,6 +107,7 @@ def create_runner(
     # One worker per runner: it reads model/client at call time, so a replaced
     # client (test doubles, provider switch) applies to extraction as well.
     runner.sandbox = sandbox
+    runner.processes = processes
     runner.memory_worker = MemoryWorker(
         jobs, memory_service, runner,
         concurrency=memory_worker_concurrency,

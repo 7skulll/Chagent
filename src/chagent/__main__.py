@@ -67,7 +67,9 @@ async def _run(
                                         memory_worker_concurrency=settings.memory_worker_concurrency,
                                         sandbox=sandbox, approval_policy=approval,
                                         approval_timeout=settings.approval_timeout,
-                                        approval_decider=local_approver(), approval_remote=False)
+                                        approval_decider=local_approver(), approval_remote=False,
+                                        process_wall_timeout=settings.process_timeout,
+                                        max_processes=settings.max_processes)
         else:
             assert client is not None
             runner = create_runner(database, model_settings.model(), client,
@@ -76,7 +78,9 @@ async def _run(
                                    memory_worker_concurrency=settings.memory_worker_concurrency,
                                    sandbox=sandbox, approval_policy=approval,
                                    approval_timeout=settings.approval_timeout,
-                                   approval_decider=local_approver(), approval_remote=False)
+                                   approval_decider=local_approver(), approval_remote=False,
+                                   process_wall_timeout=settings.process_timeout,
+                                   max_processes=settings.max_processes)
         if session_id is None:
             session = await SessionManager(runner.conversations).create(workspace, title="新会话")
             session_id = session.id

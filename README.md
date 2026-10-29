@@ -2,7 +2,7 @@
 
 本机单用户 Agent：命令行或本地网页输入，模型在 Python 进程内以「模型 → 工具 → 模型」循环推进任务，消息、请求、工具调用与事件都落在本机 PostgreSQL。支持 OpenAI、DeepSeek、Anthropic、通义千问及自定义兼容服务，也提供无需网络的固定响应模型。
 
-能力：会话与显式任务状态、上下文预算与自动摘要（可选真 tokenizer，缺省回退字节估算）、运行级环境快照、大工具输出产物化、用户／工作区长期记忆（`/remember` 由本地命令直接回答，不经过模型）、文件检索、一次调用多处编辑与多文件补丁、宿主命令与测试运行、重复调用拦截（无进展时以 `repeated_tool_call` 结束）、宿主命令审批（`CHAGENT_APPROVAL`，网页确认卡或 CLI 交互式提问）、网页流式对话与事件回放。
+能力：会话与显式任务状态、上下文预算与自动摘要（可选真 tokenizer，缺省回退字节估算）、运行级环境快照、大工具输出产物化、用户／工作区长期记忆（`/remember` 由本地命令直接回答，不经过模型）、文件检索、一次调用多处编辑与多文件补丁、宿主命令与测试运行、跨调用存活的长命令会话（`exec_command` 的 `yield_time_ms` + `process` 分次读／写 stdin／杀进程组）、重复调用拦截（无进展时以 `repeated_tool_call` 结束）、宿主命令审批（`CHAGENT_APPROVAL`，网页确认卡或 CLI 交互式提问）、网页流式对话与事件回放。
 
 整体设计与模块划分见[设计总览](docs/设计总览.md)。
 
@@ -43,6 +43,19 @@ uv run --env-file .env python -m chagent --tool read_file --arguments '{"path":"
 
 工作区默认当前目录，`--workspace /absolute/path` 只影响新会话；继续会话时保留其原工作区。工具接口、工作区边界与宿主命令开关见[基础工具设计](docs/基础工具设计.md)。
 
+## 长命令
+
+`exec_command` 一次调用最多等 30 秒；需要更久的命令（装依赖、构建、交互式调试）要显式让出：
+
+```text
+exec_command(cmd="pytest -q", yield_time_ms=20000)   →  process_id + 已经产生的输出
+process(action="read", process_id=..., since=0, wait_ms=30000)
+process(action="write", process_id=..., chars="y\n")  # 写 stdin
+process(action="stop", process_id=...)                # 杀进程组
+```
+
+`read` 用绝对游标，同一段输出不会被读两次，单次最多返回 20 000 字符；输出只保留最近 1 MiB，更早的部分被丢弃并明确报 gap。句柄只在启动它的进程与 run 内有效：重启后旧 id 一律「不存在」，run 结束（含取消、超时）会 `killpg` 回收该 run 的所有进程。守则是「不遗留、不接管、不猜 PID」。上限由 `CHAGENT_MAX_PROCESSES`（默认 4，每 run 活进程数）与 `CHAGENT_PROCESS_TIMEOUT`（默认 600 秒，单进程墙钟）控制。没有 PTY：`top`、`vim` 之类不可用。
+
 ## 网页对话
 
 ```sh
@@ -70,7 +83,7 @@ uv run --env-file .env python -m chagent.memory list
 
 ## 验证
 
-已交付批次的实现、实测、边界与回退方式统一记在[实施记录](docs/实施记录.md)：记忆提取移出运行与上下文投影缓存、A 批文本合并与提交后通知、B1 运行所有权与失联收敛、B2 失败事实恢复、F1 事件批量提交、F2 一个事务一道所有权门、P0 检索与补丁工具、P1 提示缓存不变量、M 轮次度量、G 一次调用多处编辑、H 运行级环境快照、G2 编辑失败路径的搜索预算与线程化、N `/remember` 本地短路、S 宿主机命令沙箱、M2 缓存归因与 `config show`、I 重复调用拦截、K 宿主命令审批。
+已交付批次的实现、实测、边界与回退方式统一记在[实施记录](docs/实施记录.md)：记忆提取移出运行与上下文投影缓存、A 批文本合并与提交后通知、B1 运行所有权与失联收敛、B2 失败事实恢复、F1 事件批量提交、F2 一个事务一道所有权门、P0 检索与补丁工具、P1 提示缓存不变量、M 轮次度量、G 一次调用多处编辑、H 运行级环境快照、G2 编辑失败路径的搜索预算与线程化、N `/remember` 本地短路、S 宿主机命令沙箱、M2 缓存归因与 `config show`、I 重复调用拦截、L 真 tokenizer 与保留式压缩、K 宿主命令审批、J 会话进程（`long` 场景 45 秒命令由必然失败变为 3 轮／2 次调用成功）。
 
 写路径两批合起来的效果：1.6 秒流式回答从 260 条 SQL／81 个事务降到 59／21，两轮加一次工具从 57 条降到 46 条，事务数与失权判定不变。
 
@@ -80,7 +93,7 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   uv run python -m unittest discover -s tests -q
 ```
 
-数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **368 项通过**。
+数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **383 项通过**。
 
 真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。链路报告为每个用例带上本地计算的 `cache{hit,reusable,breaks}`（不额外请求），失败时可用 `--keep-schema docs/diagnostics` 保留一次性 schema，再用 `report_prompt_cache.py --schema <名称>` 事后审计。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求；`scripts/report_token_estimates.py` 对同一批请求比较本地 token 估算与供应商实际用量。结论与实测数据见[实施记录](docs/实施记录.md)与[执行效率优化](docs/执行效率优化.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
 
@@ -108,6 +121,6 @@ uv run --env-file .env python scripts/probe_task.py --case all --repeats 2 \
 | 已交付批次的实现、实测、边界与回退 | [实施记录](docs/实施记录.md) |
 | 写入路径实测与收敛方案（F3 已决定不做） | [执行效率优化](docs/执行效率优化.md) |
 | 路线图、诊断基线、未实施项 | [下一阶段实施方案](docs/下一阶段实施方案.md) |
-| 沙箱、审批与事件通道（S 批已实施，K／J 待实施） | [执行边界设计](docs/执行边界设计.md) |
+| 沙箱、审批、会话进程与事件通道（S／K／J 均已实施） | [执行边界设计](docs/执行边界设计.md) |
 
 诊断与真实链路的原始结果归档在 [`docs/diagnostics/`](docs/diagnostics/)。

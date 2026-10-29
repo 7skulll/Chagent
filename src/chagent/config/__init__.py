@@ -29,6 +29,10 @@ class Settings:
     approval: str = "never"
     approval_allowlist: str = ""
     approval_timeout: float = 300.0
+    # Long-running host commands started with ``yield_time_ms``: how many one
+    # run may hold at once, and the wall clock that bounds each of them.
+    max_processes: int = 4
+    process_timeout: float = 600.0
 
     def __post_init__(self) -> None:
         if not self.database_url.strip():
@@ -60,6 +64,11 @@ class Settings:
             raise ValueError("CHAGENT_APPROVAL must be never, on-request or untrusted")
         if not math.isfinite(self.approval_timeout) or self.approval_timeout <= 0:
             raise ValueError("CHAGENT_APPROVAL_TIMEOUT must be finite and positive")
+        if isinstance(self.max_processes, bool) or not isinstance(self.max_processes, int) \
+                or not 1 <= self.max_processes <= 16:
+            raise ValueError("CHAGENT_MAX_PROCESSES must be an integer between 1 and 16")
+        if not math.isfinite(self.process_timeout) or self.process_timeout <= 0:
+            raise ValueError("CHAGENT_PROCESS_TIMEOUT must be finite and positive")
         # Each extracting worker holds a connection while it reads or writes. If
         # they can occupy the whole pool, a concurrent run waits until it gives
         # up on db_timeout and fails. A single-connection pool is exempt: there,
@@ -97,4 +106,6 @@ class Settings:
             approval=values.get("CHAGENT_APPROVAL", "never").strip().lower(),
             approval_allowlist=values.get("CHAGENT_APPROVAL_ALLOWLIST", ""),
             approval_timeout=float(values.get("CHAGENT_APPROVAL_TIMEOUT", "300")),
+            max_processes=int(values.get("CHAGENT_MAX_PROCESSES", "4")),
+            process_timeout=float(values.get("CHAGENT_PROCESS_TIMEOUT", "600")),
         )

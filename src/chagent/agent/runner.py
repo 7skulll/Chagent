@@ -82,6 +82,8 @@ class AgentRunner:
         self._states: dict[UUID, RunState] = {}
         # Set by bootstrap; absent in tests that drive the loop directly.
         self.sandbox = None
+        # Session processes outlive their invocation, never their run.
+        self.processes = None
 
     def cancel(self, run_id: UUID) -> bool:
         task = self._tasks.get(run_id)
@@ -169,6 +171,15 @@ class AgentRunner:
             budget.stop()
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
+            if self.processes is not None:
+                try:
+                    # A session process deliberately outlives its tool call, so
+                    # nothing else would reap it: the run's end is the only
+                    # promise the child gets. A cancelled run must still do this
+                    # before its terminal state is written.
+                    await self.processes.terminate_run(run_id)
+                except BaseException:
+                    pass
             try:
                 # Stops the flush task and commits or drops the tail. A cancelled
                 # run may raise here; it must never mask the run's own outcome.
