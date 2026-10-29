@@ -155,7 +155,7 @@ class LiveSuite:
                     "WHERE run_id = %s ORDER BY iteration", (identities[0],))
                 model_rows = await cursor.fetchall()
                 cursor = await connection.execute(
-                    "SELECT name, arguments, status, call_index FROM tool_calls "
+                    "SELECT name, arguments, status, call_index, result FROM tool_calls "
                     "WHERE run_id = %s ORDER BY created_at, call_index", (identities[0],))
                 tool_rows = await cursor.fetchall()
         tool_metrics = summarize_tool_calls(tool_rows)
@@ -385,7 +385,7 @@ class LiveSuite:
                   "model_stop_reason": status.json()["end_reason"] == "model_stop"}
         async with self.database.connection() as connection:
             cursor = await connection.execute(
-                "SELECT name, arguments, status, call_index FROM tool_calls "
+                "SELECT name, arguments, status, call_index, result FROM tool_calls "
                 "WHERE run_id = %s ORDER BY created_at, call_index", (run_id,))
             tool_rows = await cursor.fetchall()
         provider_calls = self.client.calls[first:]

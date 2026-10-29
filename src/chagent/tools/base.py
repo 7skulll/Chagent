@@ -51,6 +51,10 @@ class AgentTool(Tool, ABC):
     execution_mode: ToolExecutionMode = "sequential"
     requires_workspace: bool = False
     requires_host_execution: bool = False
+    # A successful call means the workspace changed, so earlier identical calls
+    # are no longer the same attempt (see tools/progress.py). Declared by the
+    # tool, never inferred from its name.
+    mutates_workspace: bool = False
 
     @abstractmethod
     async def execute(

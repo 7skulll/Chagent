@@ -280,7 +280,7 @@ async def run_one(name: str, repetition: int, database: Database, selected: Mode
         if run_id:
             async with database.connection() as connection:
                 cursor = await connection.execute(
-                    "SELECT name, arguments, status, call_index FROM tool_calls "
+                    "SELECT name, arguments, status, call_index, result FROM tool_calls "
                     "WHERE run_id = %s ORDER BY created_at, call_index", (run_id,))
                 tool_rows = await cursor.fetchall()
         checks = await asyncio.to_thread(verify_fixture, name, root, protected)

@@ -14,12 +14,16 @@ from chagent.storage.repositories import RunRepository
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
 from chagent.tools.executor import ToolExecutor
+from chagent.tools.progress import ProgressGuard, Decision
 
 
 @dataclass(slots=True)
 class ToolBatchResult:
     results: list[AgentToolResult]
     messages: list[ToolResultMessage]
+    # A refused repeat means the attempt is going in circles; the runner ends
+    # the run with ``repeated_tool_call`` instead of continuing to max_turns.
+    stalled: bool = False
 
 
 @dataclass(slots=True)
@@ -62,13 +66,18 @@ class _WorkspaceGate:
 
 
 class ToolScheduler:
-    def __init__(self, runs: RunRepository, *, max_concurrency: int = 4):
+    def __init__(self, runs: RunRepository, *, max_concurrency: int = 4,
+                 progress: ProgressGuard | None = None):
         if isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or not 1 <= max_concurrency <= 32:
             raise ValueError("Tool concurrency must be an integer between 1 and 32")
         self.runs, self.max_concurrency = runs, max_concurrency
+        self.progress = progress if progress is not None else ProgressGuard()
         # Shared across concurrent sessions owned by this runner.
         self._slots = asyncio.Semaphore(max_concurrency)
         self._gates: dict[Path, _WorkspaceGate] = {}
+
+    def release(self, run_id: UUID) -> None:
+        self.progress.release(run_id)
 
     def _groups(self, calls, executor):
         groups = []
@@ -91,6 +100,7 @@ class ToolScheduler:
         outcomes: dict[int, ToolOutcome] = {}
         committed: dict[int, StoredMessage] = {}
         attempted: set[int] = set()
+        stalled = False
         workers: list[asyncio.Task] = []
         commit_task = None
         failure = asyncio.get_running_loop().create_future()
@@ -141,6 +151,7 @@ class ToolScheduler:
             started = monotonic_ns()
             try:
                 result = await executor.execute(call, context=context, signal=signal, on_update=on_update)
+                self.progress.completed(context.run_id, call, executor.registry.get(call.name), result)
                 outcomes[index] = ToolOutcome(result, ToolResultMessage(
                     tool_call_id=call.id, tool_name=call.name, content=result.content,
                     is_error=result.is_error, timestamp=time_ns() // 1_000_000,
@@ -167,6 +178,7 @@ class ToolScheduler:
             window = asyncio.Semaphore(width)
 
             async def worker():
+                nonlocal stalled
                 try:
                     for index in iterator:
                         await window.acquire()
@@ -174,6 +186,19 @@ class ToolScheduler:
                             if signal.is_set():
                                 return
                             call = calls[index]
+                            decision: Decision = self.progress.check(
+                                context.run_id, call, executor.registry.get(call.name))
+                            if not decision.execute:
+                                # Never executed: no tool_started event, and the
+                                # result is committed through the same path as a
+                                # normal tool error so the transcript stays whole.
+                                stalled = stalled or decision.stop
+                                outcomes[index] = ToolOutcome(decision.result, ToolResultMessage(
+                                    tool_call_id=call.id, tool_name=call.name,
+                                    content=decision.result.content, is_error=True,
+                                    timestamp=time_ns() // 1_000_000, details=decision.result.details))
+                                ready[index].set_result(None)
+                                continue
                             await self.runs.start_tool_call(context.run_id, model_call_id, call,
                                                             record_id=identities[index])
                             await execute_one(index)
@@ -225,4 +250,4 @@ class ToolScheduler:
                 del self._gates[workspace]
 
         return ToolBatchResult([outcomes[i].result for i in range(len(calls))],
-                               [committed[i].message for i in range(len(calls))])
+                               [committed[i].message for i in range(len(calls))], stalled)

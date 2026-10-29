@@ -33,6 +33,7 @@ class FileTool(AgentTool):
             parameters={"type": "object", "properties": properties, "required": required, "additionalProperties": False},
             requires_workspace=True, replay="safe" if read_only else "never",
             execution_mode="parallel" if read_only else "sequential",
+            mutates_workspace=not read_only,
         )
         self.read_only = read_only
 

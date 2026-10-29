@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import suppress
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ import httpx
 from chagent.agent.runner import RunFailedError
 from chagent.bootstrap import create_demo_runner, create_runner
 from chagent.config import Settings
-from chagent.domain.messages import AssistantMessage, ToolResultMessage
+from chagent.domain.messages import AssistantMessage, ToolCall, ToolResultMessage
 from chagent.models.events import DoneEvent, ErrorEvent, StartEvent
 from chagent.models.fake import FakeModelClient
 from chagent.models.factory import create_model_client
@@ -170,6 +171,44 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             async with self.database.connection() as connection:
                 cursor = await connection.execute("SELECT count(*) AS total FROM tool_calls WHERE run_id = %s", (raised.exception.run_id,))
                 self.assertEqual((await cursor.fetchone())["total"], 0)
+
+    async def test_repeated_identical_tool_calls_end_the_run(self):
+        class RepeatingClient:
+            """Same call every turn, whatever the last tool result said."""
+
+            def __init__(self, name, arguments):
+                self.name, self.arguments, self.calls = name, arguments, 0
+
+            async def stream(self, request):
+                self.calls += 1
+                partial = AssistantMessage([], request.model.api, request.model.provider,
+                                           request.model.id, 0, "pending")
+                yield StartEvent(partial=partial)
+                final = deepcopy(partial)
+                final.content = [ToolCall(f"call-{self.calls}", self.name, deepcopy(self.arguments))]
+                final.stop_reason = "toolUse"
+                yield DoneEvent(reason="toolUse", message=final)
+
+        self.runner.client = RepeatingClient("echo", {"text": "same"})
+        self.runner.max_turns = 12
+        self.runner.model.context_window = 16384
+        with self.assertRaises(RunFailedError) as raised:
+            await self.runner.run(self.session, "开始")
+        self.assertEqual(raised.exception.end_reason, "repeated_tool_call", str(raised.exception))
+        run = await self.runner.runs.get(raised.exception.run_id)
+        self.assertEqual((run["status"], run["end_reason"]), ("failed", "repeated_tool_call"))
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT status, count(*) AS total FROM tool_calls WHERE run_id = %s GROUP BY status",
+                (raised.exception.run_id,))
+            statuses = {row["status"]: row["total"] for row in await cursor.fetchall()}
+            cursor = await connection.execute(
+                "SELECT count(*) AS total FROM model_calls WHERE run_id = %s", (raised.exception.run_id,))
+            turns = (await cursor.fetchone())["total"]
+        # Two calls run, the third and fourth are refused, then the run stops.
+        self.assertEqual(statuses, {"completed": 2, "failed": 2})
+        self.assertEqual(turns, 4)
+        self.assertLess(turns, self.runner.max_turns)
 
     async def test_cancellation_and_concurrent_submission(self):
         class BlockingEcho(EchoTool):

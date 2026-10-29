@@ -172,6 +172,7 @@ class AgentRunner:
             self._states.pop(run_id, None)
             if self.context_manager is not None:
                 self.context_manager.release(run_id)
+            self.scheduler.release(run_id)
             if self.memory_service is not None:
                 self.memory_service.release(run_id)
 
@@ -294,6 +295,10 @@ class AgentRunner:
                 raise RunExecutionError("Duplicate tool call IDs in one response", "model_protocol_error")
             batch = await self.scheduler.execute_batch(calls, context=tool_context, model_call_id=model_call_id,
                                                         executor=self.tools, on_committed=state.append_committed)
+            if batch.stalled:
+                # The model was already told the call is unchanged; repeating it
+                # again converts a stalled attempt into an explicit ending.
+                raise RunExecutionError("Repeated tool calls made no progress", "repeated_tool_call")
             decision = decide_next_step(batch.results)
             if decision.action == "complete":
                 return RunResult(run_id, session_id, None, decision.reason, batch.messages)
