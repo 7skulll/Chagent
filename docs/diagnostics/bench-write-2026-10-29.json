@@ -1,0 +1,20 @@
+{
+  "measured_at": "2026-10-29T00:40:12.054858+00:00",
+  "repeats": 5,
+  "tool_turn": {
+    "sql": 46,
+    "transactions": 11,
+    "events": 10,
+    "text_delta": 1,
+    "wal_bytes": 20896,
+    "wall_ms": 11.0
+  },
+  "stream": {
+    "sql": 59,
+    "transactions": 21,
+    "events": 80,
+    "text_delta": 76,
+    "wal_bytes": 33312,
+    "wall_ms": 1622.0
+  }
+}

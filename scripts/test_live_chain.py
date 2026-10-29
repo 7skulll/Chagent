@@ -24,6 +24,7 @@ from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
 
 from diagnose_main_path import Metrics, ObservedDatabase, instrument
+from run_metrics import summarize_tool_calls
 from chagent.bootstrap import create_runner
 from chagent.config import Settings
 from chagent.domain.memories import MemoryPolicy
@@ -136,10 +137,16 @@ class LiveSuite:
         events = await runner.runs.events(identities[0]) if identities else []
         persisted_run = await runner.runs.get(identities[0]) if identities else None
         model_rows = []
+        tool_rows = []
         if identities:
             async with self.database.connection() as connection:
                 cursor = await connection.execute("SELECT request, context_snapshot FROM model_calls WHERE run_id = %s ORDER BY iteration", (identities[0],))
                 model_rows = await cursor.fetchall()
+                cursor = await connection.execute(
+                    "SELECT name, arguments, status, call_index FROM tool_calls "
+                    "WHERE run_id = %s ORDER BY created_at, call_index", (identities[0],))
+                tool_rows = await cursor.fetchall()
+        tool_metrics = summarize_tool_calls(tool_rows)
         types = [event["type"] for event in events]
         terminal = types.index("run_completed") if "run_completed" in types else None
         # Extraction events append to the same stream after the terminal event,
@@ -159,12 +166,16 @@ class LiveSuite:
                   "failure_reason": (persisted_run["error"] or "").replace(self.selected.api_key, "[redacted]") if persisted_run else None,
                   "end_reason": result.end_reason if result else None,
                   "answer": text(result.message)[:1500] if result else None,
-                  "tool_calls": [event["payload"].get("name") for event in events if event["type"] == "tool_started"],
+                  "model_calls": len(model_rows), **tool_metrics,
                   "event_types": [event["type"] for event in events],
                   "provider_calls": self.client.calls[first_call:], "metrics": metrics, **extra}
         self.results.append(record)
-        print(json.dumps({"case": name, "passed": record["passed"], "elapsed_ms": record["elapsed_ms"],
-                          "requests": len(record["provider_calls"]), "checks": checks}, ensure_ascii=False), flush=True)
+        summary = {"case": name, "passed": record["passed"], "elapsed_ms": record["elapsed_ms"],
+                   "model_calls": record["model_calls"], "tool_calls": record["tool_calls"],
+                   "repeated_tool_calls": record["repeated_tool_calls"], "checks": checks}
+        if not record["passed"]:
+            summary["tool_sequence"] = record["tool_sequence"]
+        print(json.dumps(summary, ensure_ascii=False), flush=True)
         return result, session, record
 
     async def execute(self, *, core_only=False):
@@ -346,11 +357,24 @@ class LiveSuite:
         checks = {"run_completed": status.json()["status"] == "completed", "sse_terminal": "event: end" in stream.text,
                   "sse_answer": answer.strip() == "WEB_LIVE_OK", "durable_replay": stream.text == replay.text,
                   "model_stop_reason": status.json()["end_reason"] == "model_stop"}
-        self.results.append({"name": "web_api_sse_replay", "passed": all(checks.values()), "checks": checks,
-                             "elapsed_ms": round((perf_counter() - started) * 1000, 3),
-                             "answer": answer, "sse_delta_count": len(deltas),
-                             "provider_calls": self.client.calls[first:]})
-        print(json.dumps({"case": "web_api_sse_replay", "checks": checks}, ensure_ascii=False), flush=True)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT name, arguments, status, call_index FROM tool_calls "
+                "WHERE run_id = %s ORDER BY created_at, call_index", (run_id,))
+            tool_rows = await cursor.fetchall()
+        provider_calls = self.client.calls[first:]
+        record = {"name": "web_api_sse_replay", "passed": all(checks.values()), "checks": checks,
+                  "elapsed_ms": round((perf_counter() - started) * 1000, 3),
+                  "answer": answer, "sse_delta_count": len(deltas),
+                  "model_calls": len(provider_calls), **summarize_tool_calls(tool_rows),
+                  "provider_calls": provider_calls}
+        self.results.append(record)
+        summary = {"case": record["name"], "passed": record["passed"],
+                   "model_calls": record["model_calls"], "tool_calls": record["tool_calls"],
+                   "repeated_tool_calls": record["repeated_tool_calls"], "checks": checks}
+        if not record["passed"]:
+            summary["tool_sequence"] = record["tool_sequence"]
+        print(json.dumps(summary, ensure_ascii=False), flush=True)
 
     async def events_case(self):
         first_call = len(self.client.calls)
@@ -486,6 +510,9 @@ async def main_async(args):
         await admin.close()
         calls = observed.calls if observed else []
         report["total_provider_requests"] = len(calls)
+        report["total_model_calls"] = sum(case.get("model_calls", 0) for case in report["results"])
+        report["total_tool_calls"] = sum(case.get("tool_calls", 0) for case in report["results"])
+        report["total_repeated_tool_calls"] = sum(case.get("repeated_tool_calls", 0) for case in report["results"])
         report["reported_tokens"] = {key: sum((call["usage"] or {}).get(key, 0) for call in calls)
                                       for key in ("input", "output", "cache_read", "cache_write", "total_tokens")}
         report["usage_missing_calls"] = sum(call["usage"] is None for call in calls)

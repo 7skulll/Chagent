@@ -3,7 +3,6 @@
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 import json
-from time import time_ns
 from typing import Protocol
 
 from chagent.context.projection import ProjectionCache
@@ -97,8 +96,15 @@ class BasicContextBuilder:
             # cost: it never becomes a message that could be replayed or paired
             # with a tool call.
             instructions += "\n\n" + recovery.text
+        # The leading message decides the whole provider prompt cache: it has to
+        # be byte-identical between the turns of one run. Task state and the
+        # recovery note qualify because the runner loads both once per run and
+        # never mutates them mid-run. Anything that changes per turn belongs in
+        # a message, not here. The timestamp is fixed for the same reason: this
+        # message is not an event, and letting it drift would make two otherwise
+        # identical requests compare unequal.
         system = SystemMessage(
-            content=instructions, timestamp=time_ns() // 1_000_000,
+            content=instructions, timestamp=0,
             tools_added=deepcopy(tools),
         )
 

@@ -2,7 +2,7 @@
 
 本机单用户 Agent：命令行或本地网页输入，模型在 Python 进程内以「模型 → 工具 → 模型」循环推进任务，消息、请求、工具调用与事件都落在本机 PostgreSQL。支持 OpenAI、DeepSeek、Anthropic、通义千问及自定义兼容服务，也提供无需网络的固定响应模型。
 
-能力：会话与显式任务状态、上下文预算与自动摘要、大工具输出产物化、用户／工作区长期记忆、基础文件与宿主命令工具、网页流式对话与事件回放。
+能力：会话与显式任务状态、上下文预算与自动摘要、大工具输出产物化、用户／工作区长期记忆、文件检索与多文件补丁工具、宿主命令与测试运行、网页流式对话与事件回放。
 
 整体设计与模块划分见[设计总览](docs/设计总览.md)。
 
@@ -74,9 +74,18 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   uv run python -m unittest discover -s tests -q
 ```
 
-数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **208 项通过**。
+数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **246 项通过**。
 
-真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。结论与实测数据见[实施记录](docs/实施记录.md)与[执行效率优化](docs/执行效率优化.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
+真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求。结论与实测数据见[实施记录](docs/实施记录.md)与[执行效率优化](docs/执行效率优化.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
+
+四场景任务探针用固定临时仓库与一次性 schema 运行真实供应商，报告轮次、工具调用、重复调用、墙钟与正确性；`--repeats 2` 用来检查轮次波动：
+
+```sh
+uv run --env-file .env python scripts/probe_task.py --case all --repeats 2 \
+  --output docs/diagnostics/probe-latest.json
+```
+
+`fix`／`edit`／`multifile` 用真实测试结果判定修复是否正确，`long` 验证 45 秒命令是否真正结束。默认只报告目标是否达到；加 `--require-targets` 才把未达到性能目标变成非零退出码。
 
 ## 文档
 

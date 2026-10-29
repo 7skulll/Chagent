@@ -294,6 +294,28 @@ async function init() {
 }
 init().catch(showError);
 
+// New UI wiring: rail button opens the context panel inside the tools sidebar.
+$("open-context").addEventListener("click", () => {
+  const panel = $("context-panel");
+  panel.open = true;
+  loadContext().catch(showError);
+  panel.scrollIntoView({behavior: "smooth", block: "nearest"});
+});
+
+// Collapsible sidebars: state persists across reloads via localStorage.
+function applyCollapsed(name, collapsed) {
+  document.body.classList.toggle(`${name}-collapsed`, collapsed);
+  localStorage.setItem(`chagent.${name}.collapsed`, collapsed ? "1" : "0");
+}
+for (const name of ["sidebar", "tools"]) {
+  const collapsed = localStorage.getItem(`chagent.${name}.collapsed`) === "1";
+  document.body.classList.toggle(`${name}-collapsed`, collapsed);
+}
+$("toggle-sidebar").addEventListener("click", () =>
+  applyCollapsed("sidebar", !document.body.classList.contains("sidebar-collapsed")));
+$("toggle-tools").addEventListener("click", () =>
+  applyCollapsed("tools", !document.body.classList.contains("tools-collapsed")));
+
 // Memory management is explicit user input; generated candidates never auto-activate.
 const memoryState = {cursor: null, editing: null, version: 0};
 function memoryNotice(message, failed = false) {

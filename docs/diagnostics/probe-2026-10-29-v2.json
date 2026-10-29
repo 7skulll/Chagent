@@ -1,0 +1,64 @@
+{
+  "recorded_at_utc": "2026-10-29T01:21:00Z",
+  "scenario": {
+    "workspace": "/tmp/chagent-probe2",
+    "shape": "3 源文件 + 1 测试文件 + 6 个无关 docs/note-*.md",
+    "defect": "折扣档位取首个命中而非最优（单行 bug）",
+    "failures": 2,
+    "prompt": "tests 目录里有 2 个失败用例。找出根因，修改 app/ 下的源码把它们修好，然后实际运行测试确认全部通过。不要修改 tests 下的任何文件。"
+  },
+  "provider": "deepseek-flash",
+  "runs": [
+    {
+      "phase": "P0 之前",
+      "run_id": "3649c8e7-9976-41ce-a5cc-5da82e7877b8",
+      "elapsed_s": 15.74,
+      "model_calls": 10,
+      "tool_calls": 14,
+      "input_tokens": 4297,
+      "output_tokens": 1594,
+      "correct": true
+    },
+    {
+      "phase": "P0 之后（3 次中位）",
+      "elapsed_s": 9.03,
+      "model_calls": 6,
+      "tool_calls": 8,
+      "input_tokens": 1849,
+      "output_tokens": 704,
+      "correct": true
+    },
+    {
+      "phase": "P0+P1 之后",
+      "run_id": "a5983cfa",
+      "elapsed_s": 8.6,
+      "model_calls": 6,
+      "tool_calls": 8,
+      "input_tokens": 1874,
+      "output_tokens": 928,
+      "cache_read": 15232,
+      "cache_hit": 0.89,
+      "correct": true,
+      "tool_sequence": [
+        "list_dir .",
+        "run_tests (2 failed)",
+        "read_file tests/test_invoice.py",
+        "list_dir app",
+        "read_file app/invoice.py",
+        "read_file app/pricing.py",
+        "edit_file app/pricing.py",
+        "run_tests (3 passed)"
+      ],
+      "redundant": [
+        "list_dir . — 开局定向，可用静态仓库地图消除",
+        "list_dir app — 上一步 read_file app/invoice.py 已证明路径可达"
+      ]
+    }
+  ],
+  "cost_model": {
+    "per_turn_ms": 1433,
+    "ttft_ms": 570,
+    "framework_ms": 7,
+    "note": "TTFT 为供应商首字延迟，框架侧占单轮 0.5%，SQL 与事件路径已不再是可优化项。"
+  }
+}

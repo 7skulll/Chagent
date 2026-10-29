@@ -131,6 +131,19 @@ class RecoveryProjectionTests(unittest.IsolatedAsyncioTestCase):
         events = [event["type"] for event in await self.runner.runs.events(result.run_id)]
         self.assertIn("recovery_projected", events)
 
+    async def test_a_patch_applied_by_a_failed_run_is_reported(self):
+        """apply_patch changes files too, and its target only exists in the result."""
+        patch = "\n".join(["--- a/notes.py", "+++ b/notes.py", "@@ -0,0 +1,1 @@", "+VALUE = 1"])
+        await self.fail_with_tool("apply_patch", {"patch": patch})
+        self.assertTrue((Path(self.workspace.name) / "notes.py").exists())
+
+        result = await create_demo_runner(self.database).run(self.session, "继续")
+        row = await self.first_request(result.run_id)
+        system = row["request"]["messages"][0]["content"]
+        self.assertIn(HEADER, system)
+        self.assertIn("apply_patch notes.py — committed", system)
+        self.assertEqual(row["context_snapshot"]["recovery_fact_count"], 1)
+
     async def test_unknown_outcome_is_reported_as_unknown(self):
         failed = await self.fail_with_write()
         async with self.database.transaction() as connection:

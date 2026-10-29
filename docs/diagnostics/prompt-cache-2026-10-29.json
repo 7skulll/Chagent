@@ -1,0 +1,1667 @@
+[
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 1811,
+    "cached_tokens": 0,
+    "cache_hit": 0.0,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 2265,
+    "cached_tokens": 1792,
+    "cache_hit": 0.7912,
+    "reusable_share": 0.7422,
+    "break": null
+   },
+   {
+    "iteration": 2,
+    "messages": 8,
+    "prompt_tokens": 2701,
+    "cached_tokens": 2176,
+    "cache_hit": 0.8056,
+    "reusable_share": 0.8441,
+    "break": null
+   },
+   {
+    "iteration": 3,
+    "messages": 11,
+    "prompt_tokens": 3169,
+    "cached_tokens": 2688,
+    "cache_hit": 0.8482,
+    "reusable_share": 0.8632,
+    "break": null
+   },
+   {
+    "iteration": 4,
+    "messages": 13,
+    "prompt_tokens": 3469,
+    "cached_tokens": 3200,
+    "cache_hit": 0.9225,
+    "reusable_share": 0.9139,
+    "break": null
+   },
+   {
+    "iteration": 5,
+    "messages": 16,
+    "prompt_tokens": 3695,
+    "cached_tokens": 3456,
+    "cache_hit": 0.9353,
+    "reusable_share": 0.933,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 17110,
+  "cached_tokens": 13312,
+  "cache_hit": 0.778,
+  "breaks": 0,
+  "run_id": "dd2832c0-fa32-4773-9507-eeb8b6437a3d"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 1868,
+    "cached_tokens": 1664,
+    "cache_hit": 0.8908,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 2311,
+    "cached_tokens": 1920,
+    "cache_hit": 0.8308,
+    "reusable_share": 0.7499,
+    "break": null
+   },
+   {
+    "iteration": 2,
+    "messages": 8,
+    "prompt_tokens": 2757,
+    "cached_tokens": 2304,
+    "cache_hit": 0.8357,
+    "reusable_share": 0.8472,
+    "break": null
+   },
+   {
+    "iteration": 3,
+    "messages": 11,
+    "prompt_tokens": 3225,
+    "cached_tokens": 2816,
+    "cache_hit": 0.8732,
+    "reusable_share": 0.8666,
+    "break": null
+   },
+   {
+    "iteration": 4,
+    "messages": 13,
+    "prompt_tokens": 3408,
+    "cached_tokens": 3200,
+    "cache_hit": 0.939,
+    "reusable_share": 0.9398,
+    "break": null
+   },
+   {
+    "iteration": 5,
+    "messages": 15,
+    "prompt_tokens": 3610,
+    "cached_tokens": 3456,
+    "cache_hit": 0.9573,
+    "reusable_share": 0.9465,
+    "break": null
+   },
+   {
+    "iteration": 6,
+    "messages": 17,
+    "prompt_tokens": 3930,
+    "cached_tokens": 3584,
+    "cache_hit": 0.912,
+    "reusable_share": 0.9287,
+    "break": null
+   },
+   {
+    "iteration": 7,
+    "messages": 19,
+    "prompt_tokens": 4027,
+    "cached_tokens": 3840,
+    "cache_hit": 0.9536,
+    "reusable_share": 0.9678,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 25136,
+  "cached_tokens": 22784,
+  "cache_hit": 0.9064,
+  "breaks": 0,
+  "run_id": "dc77739e-7486-452f-8d13-1486daaf093c"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 1868,
+    "cached_tokens": 1664,
+    "cache_hit": 0.8908,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 2314,
+    "cached_tokens": 1920,
+    "cache_hit": 0.8297,
+    "reusable_share": 0.7483,
+    "break": null
+   },
+   {
+    "iteration": 2,
+    "messages": 8,
+    "prompt_tokens": 2764,
+    "cached_tokens": 2304,
+    "cache_hit": 0.8336,
+    "reusable_share": 0.8462,
+    "break": null
+   },
+   {
+    "iteration": 3,
+    "messages": 11,
+    "prompt_tokens": 3232,
+    "cached_tokens": 2816,
+    "cache_hit": 0.8713,
+    "reusable_share": 0.867,
+    "break": null
+   },
+   {
+    "iteration": 4,
+    "messages": 13,
+    "prompt_tokens": 3634,
+    "cached_tokens": 3328,
+    "cache_hit": 0.9158,
+    "reusable_share": 0.889,
+    "break": null
+   },
+   {
+    "iteration": 5,
+    "messages": 15,
+    "prompt_tokens": 3724,
+    "cached_tokens": 3584,
+    "cache_hit": 0.9624,
+    "reusable_share": 0.9684,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 17536,
+  "cached_tokens": 15616,
+  "cache_hit": 0.8905,
+  "breaks": 0,
+  "run_id": "3c54d134-1311-4a0d-9944-e14c1af8c2f5"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 1868,
+    "cached_tokens": 1664,
+    "cache_hit": 0.8908,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 2329,
+    "cached_tokens": 1920,
+    "cache_hit": 0.8244,
+    "reusable_share": 0.7469,
+    "break": null
+   },
+   {
+    "iteration": 2,
+    "messages": 8,
+    "prompt_tokens": 2775,
+    "cached_tokens": 2304,
+    "cache_hit": 0.8303,
+    "reusable_share": 0.8477,
+    "break": null
+   },
+   {
+    "iteration": 3,
+    "messages": 11,
+    "prompt_tokens": 3243,
+    "cached_tokens": 2816,
+    "cache_hit": 0.8683,
+    "reusable_share": 0.867,
+    "break": null
+   },
+   {
+    "iteration": 4,
+    "messages": 13,
+    "prompt_tokens": 3508,
+    "cached_tokens": 3328,
+    "cache_hit": 0.9487,
+    "reusable_share": 0.9235,
+    "break": null
+   },
+   {
+    "iteration": 5,
+    "messages": 15,
+    "prompt_tokens": 3614,
+    "cached_tokens": 3456,
+    "cache_hit": 0.9563,
+    "reusable_share": 0.9658,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 17337,
+  "cached_tokens": 15488,
+  "cache_hit": 0.8933,
+  "breaks": 0,
+  "run_id": "74f52049-5cc1-4db2-b5f7-9337613e7fba"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 1868,
+    "cached_tokens": 0,
+    "cache_hit": 0.0,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 2384,
+    "cached_tokens": 1920,
+    "cache_hit": 0.8054,
+    "reusable_share": 0.7566,
+    "break": null
+   },
+   {
+    "iteration": 2,
+    "messages": 8,
+    "prompt_tokens": 2546,
+    "cached_tokens": 2304,
+    "cache_hit": 0.9049,
+    "reusable_share": 0.9186,
+    "break": null
+   },
+   {
+    "iteration": 3,
+    "messages": 12,
+    "prompt_tokens": 3376,
+    "cached_tokens": 2560,
+    "cache_hit": 0.7583,
+    "reusable_share": 0.7715,
+    "break": null
+   },
+   {
+    "iteration": 4,
+    "messages": 15,
+    "prompt_tokens": 3582,
+    "cached_tokens": 3328,
+    "cache_hit": 0.9291,
+    "reusable_share": 0.936,
+    "break": null
+   },
+   {
+    "iteration": 5,
+    "messages": 17,
+    "prompt_tokens": 4150,
+    "cached_tokens": 3584,
+    "cache_hit": 0.8636,
+    "reusable_share": 0.7931,
+    "break": null
+   },
+   {
+    "iteration": 6,
+    "messages": 19,
+    "prompt_tokens": 4391,
+    "cached_tokens": 4224,
+    "cache_hit": 0.962,
+    "reusable_share": 0.9465,
+    "break": null
+   },
+   {
+    "iteration": 7,
+    "messages": 21,
+    "prompt_tokens": 4741,
+    "cached_tokens": 4480,
+    "cache_hit": 0.9449,
+    "reusable_share": 0.9274,
+    "break": null
+   },
+   {
+    "iteration": 8,
+    "messages": 23,
+    "prompt_tokens": 5092,
+    "cached_tokens": 4864,
+    "cache_hit": 0.9552,
+    "reusable_share": 0.935,
+    "break": null
+   },
+   {
+    "iteration": 9,
+    "messages": 25,
+    "prompt_tokens": 5538,
+    "cached_tokens": 4992,
+    "cache_hit": 0.9014,
+    "reusable_share": 0.9204,
+    "break": null
+   },
+   {
+    "iteration": 10,
+    "messages": 27,
+    "prompt_tokens": 5761,
+    "cached_tokens": 5504,
+    "cache_hit": 0.9554,
+    "reusable_share": 0.9613,
+    "break": null
+   },
+   {
+    "iteration": 11,
+    "messages": 29,
+    "prompt_tokens": 6273,
+    "cached_tokens": 5760,
+    "cache_hit": 0.9182,
+    "reusable_share": 0.92,
+    "break": null
+   },
+   {
+    "iteration": 12,
+    "messages": 31,
+    "prompt_tokens": 6528,
+    "cached_tokens": 6272,
+    "cache_hit": 0.9608,
+    "reusable_share": 0.9589,
+    "break": null
+   },
+   {
+    "iteration": 13,
+    "messages": 33,
+    "prompt_tokens": 6803,
+    "cached_tokens": 6656,
+    "cache_hit": 0.9784,
+    "reusable_share": 0.9563,
+    "break": null
+   },
+   {
+    "iteration": 14,
+    "messages": 35,
+    "prompt_tokens": 7179,
+    "cached_tokens": 6912,
+    "cache_hit": 0.9628,
+    "reusable_share": 0.9508,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 70212,
+  "cached_tokens": 63360,
+  "cache_hit": 0.9024,
+  "breaks": 0,
+  "run_id": "e7a2f0df-1f29-4939-8d06-e66eaec037e7"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 1096,
+    "cached_tokens": 256,
+    "cache_hit": 0.2336,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 1396,
+    "cached_tokens": 1152,
+    "cache_hit": 0.8252,
+    "reusable_share": 0.7664,
+    "break": null
+   },
+   {
+    "iteration": 2,
+    "messages": 8,
+    "prompt_tokens": 1894,
+    "cached_tokens": 1408,
+    "cache_hit": 0.7434,
+    "reusable_share": 0.7289,
+    "break": null
+   },
+   {
+    "iteration": 3,
+    "messages": 12,
+    "prompt_tokens": 2462,
+    "cached_tokens": 1920,
+    "cache_hit": 0.7799,
+    "reusable_share": 0.7629,
+    "break": null
+   },
+   {
+    "iteration": 4,
+    "messages": 15,
+    "prompt_tokens": 3138,
+    "cached_tokens": 2560,
+    "cache_hit": 0.8158,
+    "reusable_share": 0.6809,
+    "break": null
+   },
+   {
+    "iteration": 5,
+    "messages": 17,
+    "prompt_tokens": 3572,
+    "cached_tokens": 3200,
+    "cache_hit": 0.8959,
+    "reusable_share": 0.8782,
+    "break": null
+   },
+   {
+    "iteration": 6,
+    "messages": 19,
+    "prompt_tokens": 4007,
+    "cached_tokens": 3584,
+    "cache_hit": 0.8944,
+    "reusable_share": 0.8729,
+    "break": null
+   },
+   {
+    "iteration": 7,
+    "messages": 21,
+    "prompt_tokens": 4440,
+    "cached_tokens": 4224,
+    "cache_hit": 0.9514,
+    "reusable_share": 0.9065,
+    "break": null
+   },
+   {
+    "iteration": 8,
+    "messages": 23,
+    "prompt_tokens": 4591,
+    "cached_tokens": 4352,
+    "cache_hit": 0.9479,
+    "reusable_share": 0.9618,
+    "break": null
+   },
+   {
+    "iteration": 9,
+    "messages": 25,
+    "prompt_tokens": 5093,
+    "cached_tokens": 4736,
+    "cache_hit": 0.9299,
+    "reusable_share": 0.9125,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 31689,
+  "cached_tokens": 27392,
+  "cache_hit": 0.8644,
+  "breaks": 0,
+  "run_id": "3649c8e7-9976-41ce-a5cc-5da82e7877b8"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8973,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "ae4c93ff-1277-4436-a806-1890fd026688"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "25b7c76d-f86c-41d2-a38a-772e9ae55499"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "28cc7784-8061-42d3-b66a-08239c1c29dc"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 3,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8941,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "9a9391e5-162f-41ee-8898-40b1a2d69e26"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 10,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 12,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.9117,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "d2c8f23f-0212-4de2-a2b5-a96530aee2a1"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 6,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 8,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8985,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "5022681a-bb92-42ec-a2d9-e14bfe48e350"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.9041,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "7ba125a1-2b41-410f-8974-6b83b23794b3"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 3,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8941,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "07bfe8e2-e457-4fae-a1c0-05194d2932e8"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 10,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 12,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.9117,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "ad6706e2-1fb0-4024-9105-7c8eca6622b6"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 6,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 8,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8985,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "3f0699cf-d3e4-4a3f-af89-defdd836da19"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.9041,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "00d6798e-97c1-4c90-936a-75188fd0561a"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 3,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8941,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "87b3cbae-37b1-4438-9ec4-ad6a296f4980"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 10,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 12,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.9117,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "04e29824-15f9-406d-b2f9-583e8dc5c91e"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 6,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 8,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8985,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "3472f488-4663-4c7b-86c0-ce6098dda1a7"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.9041,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "bb58d7f3-8720-4205-b7fd-5b172401b8d9"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 3,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8941,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "3658c0a4-a350-417d-8d3c-469b61c1b037"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 10,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 12,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.9117,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "fe047ad9-0c62-41be-8de1-741eb5dc007b"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 6,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 8,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8985,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "5e12c301-66f5-41cf-9875-5e108799f541"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.9041,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "e35d6f94-3ef0-4e7c-8492-e3e449231406"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.894,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "7588eaf1-38a6-4354-90e9-cdf1b5223b06"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8923,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "d59c61e1-2a0f-4c3f-94b6-205e95f33309"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8923,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "4e77e9d4-9230-4088-a18e-6a6b9491c20c"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8567,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "c0983c2c-dc93-4033-bb6a-c390e4de66b2"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8567,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "2c9de810-1ad7-4afa-9246-26caef3a2535"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 12,
+    "prompt_tokens": 1131,
+    "cached_tokens": 896,
+    "cache_hit": 0.7922,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 1131,
+  "cached_tokens": 896,
+  "cache_hit": 0.7922,
+  "breaks": 0,
+  "run_id": "1a936133-d52a-4fca-9338-4b891e797ef6"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 10,
+    "prompt_tokens": 1080,
+    "cached_tokens": 896,
+    "cache_hit": 0.8296,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 1080,
+  "cached_tokens": 896,
+  "cache_hit": 0.8296,
+  "breaks": 0,
+  "run_id": "6ac1cd6c-7934-4e47-aa3f-29c2ff0c7ef9"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 8,
+    "prompt_tokens": 1027,
+    "cached_tokens": 768,
+    "cache_hit": 0.7478,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 1027,
+  "cached_tokens": 768,
+  "cache_hit": 0.7478,
+  "breaks": 0,
+  "run_id": "2f0dcf4e-b663-4c84-b373-d2cdbb49799b"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 6,
+    "prompt_tokens": 969,
+    "cached_tokens": 768,
+    "cache_hit": 0.7926,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 969,
+  "cached_tokens": 768,
+  "cache_hit": 0.7926,
+  "breaks": 0,
+  "run_id": "bf68289c-5127-4e4e-8fa6-74e1a418cb65"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 4,
+    "prompt_tokens": 928,
+    "cached_tokens": 768,
+    "cache_hit": 0.8276,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 928,
+  "cached_tokens": 768,
+  "cache_hit": 0.8276,
+  "breaks": 0,
+  "run_id": "7315d7ef-b5fe-4c44-aef8-c0ba190f0b95"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 899,
+    "cached_tokens": 765,
+    "cache_hit": 0.8509,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 899,
+  "cached_tokens": 765,
+  "cache_hit": 0.8509,
+  "breaks": 0,
+  "run_id": "156c65c2-93d5-4198-87e8-c7ba4652fb00"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 899,
+    "cached_tokens": 640,
+    "cache_hit": 0.7119,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 899,
+  "cached_tokens": 640,
+  "cache_hit": 0.7119,
+  "breaks": 0,
+  "run_id": "87c73417-f73e-4284-9e2e-03c330b0ac5a"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 3,
+    "prompt_tokens": 1024,
+    "cached_tokens": 640,
+    "cache_hit": 0.625,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 6,
+    "prompt_tokens": 1567,
+    "cached_tokens": 896,
+    "cache_hit": 0.5718,
+    "reusable_share": 0.6242,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 2591,
+  "cached_tokens": 1536,
+  "cache_hit": 0.5928,
+  "breaks": 0,
+  "run_id": "65e7f202-3c6c-4404-8f5e-4bfd09d02788"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 899,
+    "cached_tokens": 0,
+    "cache_hit": 0.0,
+    "reusable_share": null,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 899,
+  "cached_tokens": 0,
+  "cache_hit": 0.0,
+  "breaks": 0,
+  "run_id": "d88ecbaa-b50c-4f81-9bfc-d0fdb4cef48f"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 3,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8978,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "cdaec3a1-93d5-4a11-a928-3f94bf0e498f"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 3,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8625,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "f76699c2-1ad3-4858-a8c2-71c4d3d8e45d"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.4966,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "bfd61072-2d2a-42e6-b1d4-b9f700ca0c2f"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 3,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 5,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8757,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "942184b4-f77f-4d87-8142-ba43b8aac125"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 6,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 8,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8301,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "1b6c0cf9-60b6-4885-b752-48ae565a3f6b"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.7447,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "7e4621c6-19e2-447c-b322-8abc2a4d0817"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 6,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 8,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.9003,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "825c56d5-6fd3-419e-a49e-b8b198e17cb5"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8628,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "8c4dfbbf-deb1-49ac-8beb-3e51221ddf5d"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8646,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "a0dd107f-998f-4956-93f9-1cd3928625c5"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8736,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "3ce01fcd-ae21-40f4-b784-3d5a85f014e4"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.8964,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "0bb88f6b-2e20-4977-841a-20752620bb5b"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.7764,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "825934f9-6d6e-4298-921f-9921def7813a"
+ },
+ {
+  "turns": [
+   {
+    "iteration": 0,
+    "messages": 2,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": null,
+    "break": null
+   },
+   {
+    "iteration": 1,
+    "messages": 4,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "cache_hit": null,
+    "reusable_share": 0.5195,
+    "break": null
+   }
+  ],
+  "prompt_tokens": 0,
+  "cached_tokens": 0,
+  "cache_hit": null,
+  "breaks": 0,
+  "run_id": "6d4b8292-d006-4ce6-b034-7f859d294de7"
+ }
+]

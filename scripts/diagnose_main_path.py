@@ -52,6 +52,9 @@ class Metrics:
         self.sql = Counter()
         self.sql_ms = Counter()
         self.spans = defaultdict(list)
+        # Text deltas are buffered by RunRepository.emit and only reach PostgreSQL
+        # on the next flush, so acceptance and commit are two distinct timestamps.
+        self.first_text_queued = None
         self.first_text_committed = None
 
     def snapshot(self):
@@ -165,7 +168,7 @@ def instrument(runner, database, *, event_delay=0):
         original = getattr(owner, method_name)
 
         async def measured(*args, **kwargs):
-            phase = "text_delta" if label == "event" and args[1] == "text_delta" else label
+            phase = "text_delta" if label in ("event", "event_emit") and args[1] == "text_delta" else label
             token = PHASE.set(phase)
             started = perf_counter()
             try:
@@ -174,15 +177,19 @@ def instrument(runner, database, *, event_delay=0):
                 return await original(*args, **kwargs)
             finally:
                 database.metrics.spans[phase].append((perf_counter() - started) * 1000)
-                if phase == "text_delta" and database.metrics.first_text_committed is None:
+                if phase == "text_delta" and database.metrics.first_text_queued is None:
+                    database.metrics.first_text_queued = perf_counter()
+                if phase == "event_flush" and database.metrics.first_text_queued is not None \
+                        and database.metrics.first_text_committed is None:
                     database.metrics.first_text_committed = perf_counter()
                 PHASE.reset(token)
 
         setattr(owner, method_name, measured)
 
-    for method in ("begin", "event", "start_model_call", "save_response", "start_tool_call",
-                   "queue_tool_calls", "save_tool_result", "finish"):
-        wrap(runner.runs, method, method)
+    for method in ("begin", "event", "emit", "start_model_call", "save_response", "start_tool_call",
+                   "queue_tool_calls", "save_tool_result", "finish", "flush_events"):
+        wrap(runner.runs, method, "event_emit" if method == "emit" else
+             "event_flush" if method == "flush_events" else method)
     wrap(runner, "_response", "model_stream")
     wrap(runner.context_manager, "prepare", "context_prepare")
     wrap(runner.memory_service, "enrich", "memory_recall")
@@ -225,9 +232,11 @@ async def measure_run(database, workspace, spec):
         drain_started = perf_counter()
         await runner.memory_worker.drain(timeout=15)
         drained_ms = round((perf_counter() - drain_started) * 1000, 3)
+    queued, committed = database.metrics.first_text_queued, database.metrics.first_text_committed
     return {
         "elapsed_ms": round((ended - started) * 1000, 3),
-        "first_text_committed_ms": round((database.metrics.first_text_committed - started) * 1000, 3),
+        "first_text_queued_ms": round((queued - started) * 1000, 3) if queued else None,
+        "first_text_committed_ms": round((committed - started) * 1000, 3) if committed else None,
         "after_final_model_output_ms": round((ended - client.final_ready) * 1000, 3),
         "memory_drain_ms": drained_ms,
         "task_model_calls": client.task_calls, "memory_model_calls": client.memory_calls,

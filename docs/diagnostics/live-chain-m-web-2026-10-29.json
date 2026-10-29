@@ -1,0 +1,88 @@
+{
+  "recorded_at_utc": "2026-10-29T01:48:35.237819+00:00",
+  "configuration": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "api": "openai-chat",
+    "output_limit": 768,
+    "max_provider_requests": 4,
+    "key_source": "named provider key",
+    "case_selection": "web"
+  },
+  "environment": {
+    "python": "3.13.9",
+    "platform": "Darwin"
+  },
+  "limits": "single sample per scenario; synthetic data; no browser TTFT or comparative Pi/Codex benchmark",
+  "results": [
+    {
+      "name": "web_api_sse_replay",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "sse_terminal": true,
+        "sse_answer": true,
+        "durable_replay": true,
+        "model_stop_reason": true
+      },
+      "elapsed_ms": 709.798,
+      "answer": "WEB_LIVE_OK",
+      "sse_delta_count": 2,
+      "model_calls": 1,
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "tool_sequence": [],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": 557.731,
+          "consumer_wait_ms": 0.289,
+          "text_deltas": 4,
+          "usage": {
+            "input": 146,
+            "output": 4,
+            "cache_read": 1280,
+            "cache_write": 0,
+            "total_tokens": 1430,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 639.766
+        }
+      ]
+    }
+  ],
+  "schema_cleaned": true,
+  "total_provider_requests": 1,
+  "total_model_calls": 1,
+  "total_tool_calls": 0,
+  "total_repeated_tool_calls": 0,
+  "reported_tokens": {
+    "input": 146,
+    "output": 4,
+    "cache_read": 1280,
+    "cache_write": 0,
+    "total_tokens": 1430
+  },
+  "usage_missing_calls": 0,
+  "monetary_cost": null,
+  "monetary_cost_note": "No monetary price assumed; see provider-reported token usage.",
+  "passed": true,
+  "source_sha256": {
+    "src/chagent/agent/runner.py": "09d3bc0285b59d06a7ba26ea7f4576b83a22fcfbffe3b2a8d1368cc5f4c86502",
+    "src/chagent/memory/service.py": "add9bfac6daa8a1a6a302a34b6cfbc395f41e166263524087fdeabc4ecd1c3fa",
+    "src/chagent/models/openai_chat.py": "36758ad0327ed3e6b3ab9d39bad618221a3f0385e4c5fabfffe9df6ee9eabf3a",
+    "src/chagent/context/manager.py": "1acbf3fbd53d0e1ecfb04aee9026ce1fbb528b2dee2451c0abeaf5aaf77592fd",
+    "src/chagent/tools/scheduler.py": "bc60f47f3d0a56dc01f51a939b357ad07bbf54de30b2e66927418ac77e7bae3a",
+    "src/chagent/tools/executor.py": "49ee105eebb8fe8bca922b93269f810f461fd8b00cae668a68edf890e6964cf9",
+    "src/chagent/tools/filesystem.py": "54fc87b571ab5948235b8eafd92924849eb9168edaa199a851841d7b7a007972",
+    "src/chagent/agent/stream_writer.py": "d832efba4535d0a9fb2a0b01d0177a222db7f4f3e428245db1849627bf7d6f23",
+    "src/chagent/events/notifications.py": "84cc07254e02f5eda0abda7612215894ea748c312b1dbdd88681ac9de0664555",
+    "src/chagent/web/app.py": "914c95db72eac83ab1a95d8e201b0d1289c59c7d0a1b73d376fd224c1f559628"
+  }
+}

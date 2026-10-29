@@ -663,6 +663,9 @@ class RunRepository:
                 "  t.result->'details'->>'exit_code' AS exit_code, "
                 "  t.arguments->>'path' AS argument_path, "
                 "  t.arguments->>'cmd' AS command, "
+                "  CASE WHEN jsonb_typeof(t.result->'details'->'files') = 'array' THEN "
+                "    (SELECT string_agg(f.value->>'path', ', ') "
+                "     FROM jsonb_array_elements(t.result->'details'->'files') AS f) END AS patch_paths, "
                 "  a.id AS artifact_id "
                 "FROM runs r JOIN tool_calls t ON t.run_id = r.id "
                 "LEFT JOIN tool_artifacts a ON a.tool_record_id = t.id "
@@ -678,7 +681,8 @@ class RunRepository:
             rows = await cursor.fetchall()
         facts = []
         for row in rows:
-            target = row["file_path"] or row["argument_path"] or row["command"]
+            # A patch has no single target argument: its files live in the result.
+            target = row["file_path"] or row["argument_path"] or row["patch_paths"] or row["command"]
             if not target:
                 continue
             target = " ".join(str(target).split())

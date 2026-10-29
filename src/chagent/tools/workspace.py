@@ -114,3 +114,12 @@ class WorkspaceFS:
                 except FileNotFoundError:
                     pass
         return sha256(data).hexdigest()
+
+    def remove(self, path: str, *, expected_hash: str | None = None) -> None:
+        """Unlink one regular file; symlinks and directories are never followed."""
+        with self.parent(path) as (parent, name):
+            current, _ = self._read_at(parent, name)
+            if expected_hash is not None and sha256(current).hexdigest() != expected_hash:
+                raise ValueError("File changed since it was read")
+            os.unlink(name, dir_fd=parent)
+            os.fsync(parent)

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 # Only tools whose success leaves a change outside this conversation.
-SIDE_EFFECT_TOOLS = frozenset({"write_file", "edit_file", "exec_command"})
+SIDE_EFFECT_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "exec_command"})
 MAX_FACTS = 12
 MAX_CHARS = 2000
 MAX_TARGET = 120

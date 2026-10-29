@@ -1,0 +1,54 @@
+{
+  "recorded_at_utc": "2026-10-29T00:10:00+00:00",
+  "purpose": "P0 acceptance probe: same three-file, one-line bug fix before and after adding grep/glob/apply_patch/run_tests",
+  "workspace": "/tmp/chagent-probe2",
+  "fixture": {
+    "files": 3,
+    "planted_defect": "discount_rate returns the first eligible tier instead of the best one",
+    "failing_tests": 2,
+    "unrelated_documentation_files": 6
+  },
+  "model": {"provider": "deepseek", "model": "deepseek-flash"},
+  "prompt": "tests 目录里有 2 个失败用例。找出根因，修改 app/ 下的源码把它们修好，然后实际运行测试确认全部通过。不要修改 tests 下的任何文件。",
+  "before": {
+    "run_id": "3649c8e7-9976-41ce-a5cc-5da82e7877b8",
+    "wall_ms": 15752,
+    "model_calls": 10,
+    "tool_calls": 14,
+    "tool_calls_failed": 0,
+    "tokens": {"input": 4297, "output": 1594, "cache_read": 27392},
+    "tool_sequence": ["list_dir", "exec_command", "exec_command", "read_file", "read_file", "read_file",
+                      "read_file", "exec_command", "exec_command", "exec_command", "exec_command",
+                      "edit_file", "exec_command", "exec_command"],
+    "correct": true
+  },
+  "after": {
+    "samples": [
+      {"run_id": "74f52049-5cc1-4db2-b5f7-9337613e7fba", "wall_ms": 8730, "model_calls": 6, "tool_calls": 8,
+       "tool_calls_failed": 1, "tokens": {"input": 1849, "output": 704, "cache_read": 15488}},
+      {"run_id": "3c54d134-1311-4a0d-9944-e14c1af8c2f5", "wall_ms": 9030, "model_calls": 6, "tool_calls": 8,
+       "tool_calls_failed": 1, "tokens": {"input": 1920, "output": 850, "cache_read": 15616}},
+      {"run_id": "dc77739e-7486-452f-8d13-1486daaf093c", "wall_ms": 11620, "model_calls": 8, "tool_calls": 10,
+       "tool_calls_failed": 2, "tokens": {"input": 2352, "output": 997, "cache_read": 22784}}
+    ],
+    "median": {"wall_ms": 9030, "model_calls": 6, "tool_calls": 8},
+    "tool_sequence_sample": ["list_dir", "run_tests", "read_file", "glob", "read_file", "read_file",
+                             "apply_patch", "run_tests"],
+    "correct": true,
+    "tests_untouched": true
+  },
+  "acceptance": {
+    "target": {"model_calls": 5, "tool_calls": 7, "wall_ms": 8000},
+    "median_result": {"model_calls": 6, "tool_calls": 8, "wall_ms": 9030},
+    "met": false,
+    "gap_reason": "Each run still opens with list_dir and then repeats a redundant glob app/**/*.py; both are model orientation habits rather than missing tools."
+  },
+  "attempts_not_counted": {
+    "run_id": "e7a2f0df-1f29-4939-8d06-e66eaec037e7",
+    "wall_ms": 25790,
+    "model_calls": 15,
+    "tool_calls": 19,
+    "note": "First post-change run exposed two tool defects: unittest discovery used -t . against a bare tests/ directory, and apply_patch rejected a valid patch over header counts and a *** End Patch marker. Both were fixed before the samples above; this run is excluded from the comparison."
+  },
+  "limitations": "Single task, single provider, three post-change samples after a prompt change to the default instructions. Not a general capability benchmark."
+}

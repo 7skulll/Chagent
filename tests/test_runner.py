@@ -68,7 +68,9 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             rows = await cursor.fetchall()
         self.assertEqual(len(rows), 4)
         self.assertEqual(len(rows[2]["context_snapshot"]["source_message_ids"]), 5)
-        self.assertEqual(rows[0]["request"]["messages"][0]["tools_added"][0]["name"], "echo")
+        declared = [tool["name"] for tool in rows[0]["request"]["messages"][0]["tools_added"]]
+        self.assertIn("echo", declared)
+        self.assertEqual(declared, sorted(declared))
 
     async def test_error_persisted_and_failed_run_not_replayed(self):
         class ErrorClient:
