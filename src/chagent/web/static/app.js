@@ -140,8 +140,9 @@ async function watchMemoryJob(runId, version) {
 }
 function showRunStatus(run) {
   const labels = {completed: "已完成", failed: "运行失败", cancelled: "已停止", interrupted: "运行已中断"};
-  const reasons = {tool_requested_stop: "工具已请求正常停止", turn_limit: "已达到模型轮数上限",
-    run_timeout: "已达到运行时间上限", context_budget_exhausted: "上下文预算不足",
+  const reasons = {tool_requested_stop: "工具已请求正常停止", explicit_memory: "已写入长期记忆",
+    turn_limit: "已达到模型轮数上限", run_timeout: "已达到运行时间上限",
+    context_budget_exhausted: "上下文预算不足",
     output_limit: "模型输出达到上限", model_aborted: "模型已停止生成"};
   $("status").textContent = reasons[run.end_reason] || labels[run.status] || run.status;
   if (run.error && run.status !== "cancelled") showError(new Error(run.error));

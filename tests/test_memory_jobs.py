@@ -5,6 +5,7 @@ import json
 import os
 from time import monotonic
 from pathlib import Path
+import tempfile
 import unittest
 from uuid import uuid4
 
@@ -58,7 +59,10 @@ class MemoryJobTests(unittest.IsolatedAsyncioTestCase):
         await self.database.connect()
         await migrate(self.database)
         self.runner = create_demo_runner(self.database, memory_policy=MemoryPolicy())
-        self.session = await self.runner.conversations.create_session(Path.cwd())
+        # Empty workspace: the environment snapshot is part of the prompt.
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.session = await self.runner.conversations.create_session(Path(self.temporary.name))
         self.jobs = MemoryJobRepository(self.database)
 
     async def drop_schema(self):

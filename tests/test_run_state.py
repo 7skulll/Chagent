@@ -4,6 +4,7 @@ import asyncio
 from copy import deepcopy
 import os
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -21,7 +22,7 @@ from chagent.models.fake import FakeModelClient
 from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
 from chagent.tools.echo import EchoTool
-from test_long_runs import EmitTool, LongClient
+from test_long_runs import LONG_RUN_WINDOW, EmitTool, LongClient
 
 
 class StopTool(EchoTool):
@@ -68,7 +69,11 @@ class RunStateTests(unittest.IsolatedAsyncioTestCase):
         await self.database.connect()
         await migrate(self.database)
         self.runner = create_demo_runner(self.database, memory_policy=MemoryPolicy(enabled=False))
-        self.session = await self.runner.conversations.create_session(Path.cwd())
+        # Empty workspace: the run-static environment snapshot is part of the
+        # prompt and these tests size model windows for compaction arithmetic.
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.session = await self.runner.conversations.create_session(Path(self.temporary.name))
 
     async def drop_schema(self):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
@@ -282,7 +287,7 @@ class RunStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resumed.end_reason, "model_stop")
 
     async def test_compaction_reuses_committed_checkpoint_without_history_reload(self):
-        self.runner.model.context_window = 12000
+        self.runner.model.context_window = LONG_RUN_WINDOW
         self.runner.tools.registry.register(EmitTool("tool output " + "x" * 2400))
         self.runner.client = LongClient(steps=6)
         original = self.runner.conversations.messages
@@ -315,7 +320,9 @@ class RunStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("extra_echo", [tool.name for tool in second.messages[0].tools_added])
 
     async def test_concurrent_sessions_have_independent_invocation_state(self):
-        other = await self.runner.conversations.create_session(Path.cwd())
+        second_workspace = Path(self.temporary.name) / "other"
+        second_workspace.mkdir()
+        other = await self.runner.conversations.create_session(second_workspace)
         states = self.capture_states()
         results = await asyncio.gather(self.runner.run(self.session, "first session input"),
                                        self.runner.run(other, "second session input"))

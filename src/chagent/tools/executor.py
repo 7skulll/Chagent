@@ -31,7 +31,8 @@ class ToolExecutor:
                 raise ValueError(call.arguments_error)
             if not isinstance(call.arguments, dict):
                 raise ValueError("Tool arguments must be a JSON object")
-            Draft202012Validator(tool.parameters).validate(call.arguments)
+            arguments = tool.prepare_arguments(call.arguments)
+            Draft202012Validator(tool.parameters).validate(arguments)
             if tool.requires_workspace and context is None:
                 raise PermissionError("This tool requires a session workspace")
             if tool.requires_host_execution and not self.allow_host_commands:
@@ -41,10 +42,10 @@ class ToolExecutor:
             async with asyncio.timeout(self.timeout):
                 execution_started = True
                 if tool.requires_workspace:
-                    result = await tool.execute(call.id, deepcopy(call.arguments), signal=signal,
+                    result = await tool.execute(call.id, deepcopy(arguments), signal=signal,
                                                 on_update=on_update, context=context)
                 else:
-                    result = await tool.execute(call.id, deepcopy(call.arguments), signal=signal, on_update=on_update)
+                    result = await tool.execute(call.id, deepcopy(arguments), signal=signal, on_update=on_update)
             if not isinstance(result, AgentToolResult):
                 raise TypeError("Tool returned an invalid result")
             if result.structured_content is not None and tool.output_schema is not None:

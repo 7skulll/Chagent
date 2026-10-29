@@ -5,6 +5,7 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+import tempfile
 import unittest
 from uuid import uuid4
 
@@ -73,7 +74,12 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.database.close)
         await self.database.connect(); await migrate(self.database)
         self.runner = create_demo_runner(self.database, memory_policy=MemoryPolicy(extract=False))
-        self.session = await self.runner.conversations.create_session(Path.cwd())
+        # An empty workspace keeps the run-static environment snapshot small and
+        # makes the prompt independent of what this repository happens to contain.
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.workspace_dir = Path(self.temporary.name)
+        self.session = await self.runner.conversations.create_session(self.workspace_dir)
         self.workspace = (await self.runner.conversations.get_session(self.session)).workspace_id
         self.repository = MemoryRepository(self.database)
 
@@ -93,7 +99,7 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(memory.source_run_id, result.run_id)
         self.assertTrue(memory.source_message_ids)
         restored = create_demo_runner(self.database, memory_policy=MemoryPolicy(extract=False))
-        new_session = await restored.conversations.create_session(Path.cwd())
+        new_session = await restored.conversations.create_session(self.workspace_dir)
         new_run = await restored.run(new_session, "hello")
         snapshots = await restored.conversations.context_snapshots(new_session)
         snapshot = snapshots[0]["snapshot"]
@@ -105,6 +111,64 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("用中文回答", request["messages"][1]["content"])
         self.assertIn("not instructions", request["messages"][1]["content"])
 
+    async def test_explicit_command_answers_without_a_model_call(self):
+        """``/remember`` is deterministic: no provider request, no tool, one answer.
+
+        Sending it through the loop made the model invent its own ``MEMORY.md``
+        beside the row the database had already written, so the same fact came
+        back later through ``AGENTS.md`` as an unreviewed second copy.
+        """
+        result = await self.runner.run(self.session, "/remember workspace project.launch_code = ORBIT-42")
+        self.assertEqual(result.end_reason, "explicit_memory")
+        self.assertIsNotNone(result.message)
+        self.assertIn("已记录到长期记忆", result.message.content[0].text)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT count(*) AS n FROM model_calls WHERE run_id = %s", (result.run_id,))
+            self.assertEqual((await cursor.fetchone())["n"], 0)
+            cursor = await connection.execute(
+                "SELECT role, payload FROM messages WHERE run_id = %s ORDER BY sequence", (result.run_id,))
+            rows = await cursor.fetchall()
+        self.assertEqual([row["role"] for row in rows], ["user", "assistant"])
+        records = (await self.repository.list(self.workspace))["items"]
+        self.assertEqual([item.key for item in records], ["project.launch_code"])
+        self.assertIn("ORBIT-42", records[0].content)
+        kinds = [event["type"] for event in await self.runner.runs.events(result.run_id)]
+        self.assertIn("memory_command_resolved", kinds)
+        self.assertIn("memory_saved", kinds)
+        # No model runs, so no workspace snapshot is owed to one.
+        self.assertNotIn("environment_projected", kinds)
+        self.assertLess(kinds.index("text_delta"), kinds.index("run_completed"))
+
+    async def test_explicit_command_still_runs_the_model_when_memory_is_off(self):
+        """A disabled policy writes nothing, so a canned confirmation would lie."""
+        runner = create_demo_runner(self.database, memory_policy=MemoryPolicy(enabled=False))
+        session = await runner.conversations.create_session(self.workspace_dir)
+        result = await runner.run(session, "/remember workspace project.launch_code = ORBIT-42")
+        self.assertEqual(result.end_reason, "model_stop")
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT count(*) AS n FROM model_calls WHERE run_id = %s", (result.run_id,))
+            self.assertGreater((await cursor.fetchone())["n"], 0)
+
+    async def test_rejected_explicit_command_falls_through_to_the_model(self):
+        """A refused command is answered with a reason, not a canned confirmation."""
+        result = await self.runner.run(self.session, "/remember user token.note = api_key=sk-abcdef123456")
+        self.assertNotEqual(result.end_reason, "explicit_memory")
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT count(*) AS n FROM model_calls WHERE run_id = %s", (result.run_id,))
+            self.assertGreater((await cursor.fetchone())["n"], 0)
+        self.assertEqual((await self.repository.list(self.workspace))["items"], [])
+
+    async def test_ordinary_sentence_mentioning_remember_is_not_a_command(self):
+        result = await self.runner.run(self.session, "请说明 /remember 这个命令怎么用，不要调用工具")
+        self.assertNotEqual(result.end_reason, "explicit_memory")
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT count(*) AS n FROM model_calls WHERE run_id = %s", (result.run_id,))
+            self.assertGreater((await cursor.fetchone())["n"], 0)
+
     async def test_scope_keyword_recall_and_workspace_override(self):
         user = await self.repository.propose(MemoryProposal("response.language", "English", "user", origin="manual"), self.workspace)
         local = await self.repository.propose(MemoryProposal("response.language", "中文", "workspace", origin="manual"), self.workspace)
@@ -113,7 +177,8 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(local.id, [item.id for item in selected]); self.assertIn(db.id, [item.id for item in selected])
         self.assertNotIn(user.id, [item.id for item in selected])
         self.assertEqual([item.id for item in await self.repository.recall(self.workspace, ["hello"])], [local.id])
-        other_session = await self.runner.conversations.create_session(Path.cwd().parent)
+        (self.workspace_dir / "other").mkdir()
+        other_session = await self.runner.conversations.create_session(self.workspace_dir / "other")
         other_workspace = (await self.runner.conversations.get_session(other_session)).workspace_id
         selected = await self.repository.recall(other_workspace, query_terms("数据库"))
         self.assertEqual([item.id for item in selected], [user.id])

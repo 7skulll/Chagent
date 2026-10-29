@@ -1,0 +1,415 @@
+{
+  "recorded_at_utc": "2026-10-29T04:22:28.367992+00:00",
+  "configuration": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "api": "openai-chat",
+    "case": "fix",
+    "repeats": 3,
+    "max_provider_requests": 60
+  },
+  "environment": {
+    "python": "3.13.9",
+    "platform": "Darwin"
+  },
+  "results": [
+    {
+      "scenario": "fix",
+      "repetition": 1,
+      "run_id": "cd9c9442-a321-4528-8bb9-a4f837471dd8",
+      "turns": 4,
+      "elapsed_s": 5.24,
+      "correct": true,
+      "checks": {
+        "tests_pass": true,
+        "protected_files_unchanged": true,
+        "test_output_tail": "----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+        "run_completed": true
+      },
+      "end_reason": "model_stop",
+      "error_type": null,
+      "tool_calls": 5,
+      "repeated_tool_calls": 0,
+      "tool_sequence": [
+        {
+          "call_index": 0,
+          "name": "read_file",
+          "arguments": {
+            "path": "tests/test_invoice.py"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 1,
+          "name": "read_file",
+          "arguments": {
+            "path": "app/invoice.py"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 2,
+          "name": "read_file",
+          "arguments": {
+            "path": "app/pricing.py"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "apply_patch",
+          "arguments": {
+            "patch": "--- a/app/pricing.py\n+++ b/app/pricing.py\n@@\n def discount_rate(subtotal_cents: int) -> float:\n-    for threshold, rate in TIERS:\n-        if subtotal_cents >= threshold:\n-            return rate\n-    return 0.0\n+    rate = 0.0\n+    for threshold, tier_rate in TIERS:\n+        if subtotal_cents >= threshold and tier_rate > rate:\n+            rate = tier_rate\n+    return rate\n \n \n def total_cents(items, member=False):\n     subtotal = sum(price * qty for price, qty in items)\n     rate = discount_rate(subtotal)\n     if member:\n         rate += 0.02\n+    rate = min(rate, 1.0)\n     return int(round(subtotal * (1 - rate)))\n"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "run_tests",
+          "arguments": {},
+          "status": "completed",
+          "repeated": false
+        }
+      ],
+      "usage": {
+        "input": 3279,
+        "output": 683,
+        "cache_read": 8448,
+        "cache_write": 0
+      },
+      "target": {
+        "turns_max": 4,
+        "tool_calls_max": 6,
+        "elapsed_s_max": 6.5,
+        "met": true
+      }
+    },
+    {
+      "scenario": "fix",
+      "repetition": 2,
+      "run_id": "1239f29d-0f6e-44e4-9c41-b92e5f136b08",
+      "turns": 6,
+      "elapsed_s": 7.327,
+      "correct": true,
+      "checks": {
+        "tests_pass": true,
+        "protected_files_unchanged": true,
+        "test_output_tail": "----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+        "run_completed": true
+      },
+      "end_reason": "model_stop",
+      "error_type": null,
+      "tool_calls": 9,
+      "repeated_tool_calls": 1,
+      "tool_sequence": [
+        {
+          "call_index": 0,
+          "name": "read_file",
+          "arguments": {
+            "path": "tests/test_invoice.py"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 1,
+          "name": "read_file",
+          "arguments": {
+            "path": "app/invoice.py"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 2,
+          "name": "read_file",
+          "arguments": {
+            "path": "app/pricing.py"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "run_tests",
+          "arguments": {},
+          "status": "failed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "read_file",
+          "arguments": {
+            "path": "docs/note-0.md"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 1,
+          "name": "read_file",
+          "arguments": {
+            "path": "docs/note-1.md"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 2,
+          "name": "read_file",
+          "arguments": {
+            "path": "docs/note-2.md"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "edit_file",
+          "arguments": {
+            "path": "app/pricing.py",
+            "edits": [
+              {
+                "new_text": "def discount_rate(subtotal_cents: int) -> float:\n    best = 0.0\n    for threshold, rate in TIERS:\n        if subtotal_cents >= threshold and rate > best:\n            best = rate\n    return best",
+                "old_text": "def discount_rate(subtotal_cents: int) -> float:\n    for threshold, rate in TIERS:\n        if subtotal_cents >= threshold:\n            return rate\n    return 0.0"
+              }
+            ]
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "run_tests",
+          "arguments": {},
+          "status": "completed",
+          "repeated": true
+        }
+      ],
+      "usage": {
+        "input": 4915,
+        "output": 743,
+        "cache_read": 17920,
+        "cache_write": 0
+      },
+      "target": {
+        "turns_max": 4,
+        "tool_calls_max": 6,
+        "elapsed_s_max": 6.5,
+        "met": false
+      }
+    },
+    {
+      "scenario": "fix",
+      "repetition": 3,
+      "run_id": "ccc16518-234e-47cc-a695-f8e34b402983",
+      "turns": 6,
+      "elapsed_s": 8.129,
+      "correct": true,
+      "checks": {
+        "tests_pass": true,
+        "protected_files_unchanged": true,
+        "test_output_tail": "----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+        "run_completed": true
+      },
+      "end_reason": "model_stop",
+      "error_type": null,
+      "tool_calls": 7,
+      "repeated_tool_calls": 1,
+      "tool_sequence": [
+        {
+          "call_index": 0,
+          "name": "read_file",
+          "arguments": {
+            "path": "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-probe-fix-sk_zzb_u/tests/test_invoice.py"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 1,
+          "name": "read_file",
+          "arguments": {
+            "path": "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-probe-fix-sk_zzb_u/app/invoice.py"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 2,
+          "name": "read_file",
+          "arguments": {
+            "path": "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-probe-fix-sk_zzb_u/app/pricing.py"
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "run_tests",
+          "arguments": {
+            "suite": "pytest"
+          },
+          "status": "failed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "run_tests",
+          "arguments": {
+            "suite": "unittest"
+          },
+          "status": "failed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "edit_file",
+          "arguments": {
+            "path": "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-probe-fix-sk_zzb_u/app/pricing.py",
+            "edits": [
+              {
+                "new_text": "def discount_rate(subtotal_cents: int) -> float:\n    \"\"\"Return the best (highest) tier rate the subtotal qualifies for.\"\"\"\n    rate = 0.0\n    for threshold, tier_rate in TIERS:\n        if subtotal_cents >= threshold and tier_rate > rate:\n            rate = tier_rate\n    return rate",
+                "old_text": "def discount_rate(subtotal_cents: int) -> float:\n    for threshold, rate in TIERS:\n        if subtotal_cents >= threshold:\n            return rate\n    return 0.0"
+              }
+            ]
+          },
+          "status": "completed",
+          "repeated": false
+        },
+        {
+          "call_index": 0,
+          "name": "run_tests",
+          "arguments": {
+            "suite": "unittest"
+          },
+          "status": "completed",
+          "repeated": true
+        }
+      ],
+      "usage": {
+        "input": 4289,
+        "output": 990,
+        "cache_read": 17152,
+        "cache_write": 0
+      },
+      "target": {
+        "turns_max": 4,
+        "tool_calls_max": 6,
+        "elapsed_s_max": 6.5,
+        "met": false
+      }
+    }
+  ],
+  "schema_cleaned": true,
+  "summary": {
+    "fix": {
+      "runs": 3,
+      "correct_runs": 3,
+      "target_runs": 1,
+      "turns": [
+        4,
+        6,
+        6
+      ],
+      "turn_variation": 2,
+      "tool_calls": [
+        5,
+        9,
+        7
+      ],
+      "elapsed_s": [
+        5.24,
+        7.327,
+        8.129
+      ]
+    }
+  },
+  "total_provider_requests": 16,
+  "source_sha256": {
+    "src/chagent/bootstrap.py": "246313b9e04484d97e89a7e27f7f6c435c8a55128bdc9b579b83aa055e5a3507",
+    "src/chagent/config.py": "1222c20960a93d84d2882b38ac89a1fe6e52d4663b66ea2215a2aa824c8b9e15",
+    "src/chagent/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/__main__.py": "234c0bd941291942a32efc43fa3dad98b91af6362044f1bb1e43a2b8a5fe4286",
+    "src/chagent/tools/patch.py": "822163407f8ab2accf32b64b76491398717f861edbbe52e206b06cdb7b33cbdc",
+    "src/chagent/tools/command.py": "5304f733bfeeb7587fd85633187f5c9eb04aac3645d2a4f8cf906bfb300b6479",
+    "src/chagent/tools/registry.py": "b283d7068160936ab7ae6837d52bf2ffcf31bd1c3b1c1b83bcd72d767fd0ef27",
+    "src/chagent/tools/tests_runner.py": "c4d024fdbeee3024bf197c871d31c909aba1434f3c46206cb45ab5c831b5e891",
+    "src/chagent/tools/filesystem.py": "2c88df60fb1a2f68ff10464dd74648cc7dc7e041de3c6c1fab3b6333b2ce3617",
+    "src/chagent/tools/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/tools/edit_diff.py": "ec9d7869c92283f2848fcc62f0771498fb8d2970d5cdca40cac43e822e8800e7",
+    "src/chagent/tools/context.py": "ef348093aed62fd358082e44a21603c41c7c3d305c5a6eb4bbc0a0d915c6108e",
+    "src/chagent/tools/search.py": "53cff6674d288668ec1dc7a800a188453cb3998a1b01bfa15fa2300114cc2089",
+    "src/chagent/tools/builtin.py": "afe04dcfabe48b88fb08151fdc7f3d84c6798e305569363ab91f9aa327a72251",
+    "src/chagent/tools/scheduler.py": "bc60f47f3d0a56dc01f51a939b357ad07bbf54de30b2e66927418ac77e7bae3a",
+    "src/chagent/tools/artifacts.py": "27764551b5e388fecb53740fac144d8c57ee9b19e39cd4bac16996a1ae3a5a43",
+    "src/chagent/tools/workspace.py": "3f6027dc233b205c866ed5ee9e71836384a856150eea44c49db3a186cff92570",
+    "src/chagent/tools/echo.py": "e7c8c0f5e8c8ccc8c5cff9a1b11fd18782da976433dbb69547772b9b28111d45",
+    "src/chagent/tools/base.py": "7075a07dd94549cafaaa9cbea3b74d73fc401a2336a418a91310bb7a22f69ad2",
+    "src/chagent/tools/executor.py": "d762a67799eff24c0896ba62e103e4bacc1f6bf6b36ec3235cb6ec4f126fe844",
+    "src/chagent/context/compactor.py": "b087fa5aac86f9eba7152606311bfc368d8b26e1ed3141348d63faf13dc9feb5",
+    "src/chagent/context/segments.py": "74b080727934071160062e736c88512764b56bed3983fdd570640156cb5355b4",
+    "src/chagent/context/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/context/tokens.py": "e29834db80c40fcb2c1e6209b29a5db44ed0a08185ca281740f3741deda7f051",
+    "src/chagent/context/builder.py": "758009c55cd828a3e08526957319baa76ddd16617b86a97409e479cf2569ed9a",
+    "src/chagent/context/environment.py": "01035c1e1603990f06aa654365154a0b57375a9ce2f99798574c9cc00f969c38",
+    "src/chagent/context/projection.py": "4df3738d211e9e7f7772a397aa5770b7d834145cf8abe38e0ca8de03ba603d8d",
+    "src/chagent/context/manager.py": "263e36f10f3ac8189051971986e0f1f2c73a2ddba745ca75d2b90634a58314d9",
+    "src/chagent/memory/worker.py": "c13bce47416d4ca8d8d6dcc429f7241835e3ebd330aeed223a9eef48491eaecc",
+    "src/chagent/memory/service.py": "add9bfac6daa8a1a6a302a34b6cfbc395f41e166263524087fdeabc4ecd1c3fa",
+    "src/chagent/memory/__init__.py": "c62409cf7fbb4e721755642059b8f8200b0f8968208cab9728b60e0618a098a0",
+    "src/chagent/memory/__main__.py": "c54e33ac6c10a17eebbafa6b6d1c363df94c5568e6cd998ec22c172c68f507b9",
+    "src/chagent/web/__init__.py": "6b6fb1d0e504ffdd57103bad62dfda2a7055140441322ebcb2f854ae5b708525",
+    "src/chagent/web/schemas.py": "e69a70ee7d14c76024f669004feecdb275704c7e9f8dcd3c8049a5f0353d5c80",
+    "src/chagent/web/app.py": "914c95db72eac83ab1a95d8e201b0d1289c59c7d0a1b73d376fd224c1f559628",
+    "src/chagent/web/__main__.py": "ab158dc5f5c4e67ccc45a671d89c458ade449aec67b40262d2b6c0b1fe4aa503",
+    "src/chagent/agent/runner.py": "e20a02b5f4f59355098c1b0d40501b4274846c9738204bf1f0e7cd4c3c2ce30a",
+    "src/chagent/agent/stream_writer.py": "d832efba4535d0a9fb2a0b01d0177a222db7f4f3e428245db1849627bf7d6f23",
+    "src/chagent/agent/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/agent/types.py": "0ae0d37cd824c07582ee06938f1a7e83372080ce6cf0e97710a9bdfe9901ef9c",
+    "src/chagent/models/fake.py": "8661246ea3cfdc11a9c034d1e34a212a47fd41641a1a0f91f98f71702910a274",
+    "src/chagent/models/transcript.py": "a6d6105ceb054282ee8b7a840f9a96a9eb6c78012a6f12f21d4a99d9e20395e9",
+    "src/chagent/models/openai_chat.py": "36758ad0327ed3e6b3ab9d39bad618221a3f0385e4c5fabfffe9df6ee9eabf3a",
+    "src/chagent/models/events.py": "a294b11c08f8d362d4e44cf916b391e377d2fd0ffa7317fc0b39a90a531e1f63",
+    "src/chagent/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/models/factory.py": "a5505631864a58bba2ad440851a45e640aafd24365a1a47fd6a152223ca102e4",
+    "src/chagent/models/http.py": "033fee18bfbed7a600bcfc6ae3fabf16a9deefd2f6d56bda3fe52ab7577a7fcd",
+    "src/chagent/models/anthropic.py": "685b56df1511e544bba1c6825f00e391b320de8b2dc1e57c86610b67ff72a479",
+    "src/chagent/models/settings.py": "cd90e6db9bba898b5efedda7d4e8ecb9d57ee88348112dadd530d0f528a7e138",
+    "src/chagent/models/__main__.py": "dbe94637c10fc06774a2d9feeb877e5a6d1d086949a5265e8f1dd60de0f7a9b9",
+    "src/chagent/models/base.py": "fab9901507af859bd3f32b9243c47a54c4e3d24fa20558d99b874f365c56dcb0",
+    "src/chagent/storage/memory_jobs.py": "7afcda21f8db0dba8a24fd9d01c626d42e14e78848083b1ef4c76788176ff435",
+    "src/chagent/storage/database.py": "b897462cc82311dbad5b1478a0261830c8c2d33f581ff8f74c16d07e8e0caf6a",
+    "src/chagent/storage/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/storage/event_queue.py": "7ebb6df772bec7cb5a1d86c82cd413351dbbe5c6fe58992910776c05f81f8a3c",
+    "src/chagent/storage/repositories.py": "a52c34356971872ded00d06aa21bf0f0ec65f7a61be8aa4a310cc3327f29ecde",
+    "src/chagent/storage/memories.py": "0113a6e5ee8b9ab35f6992bdbd8a73a0e995cc9eeead8b5c349704b7eee8bbc9",
+    "src/chagent/storage/artifacts.py": "79504d479d4819c301a3420410833b071f6fc2361f0393a036d2d9bf4665c35e",
+    "src/chagent/storage/summaries.py": "662e051d331a51a2efe86973cf4c9b84bf7f5a7dbe71decdd6aae6ff8c8058d4",
+    "src/chagent/storage/migrate.py": "28cd73f736b009391e330378949845f9f616880ce9fc17580ed1104e4c76f9ad",
+    "src/chagent/storage/__main__.py": "a28493512729df2ab25bca7f659817b7361fbb59d4c5a7f823bfe642547af5d5",
+    "src/chagent/sessions/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/sessions/errors.py": "210443dc731464ec975eb4fa52226f2f9779775310b68b2195b1b6a848aa6ee5",
+    "src/chagent/sessions/__main__.py": "bf82035aaed6f629a25bbe11ecd062d866021742163de19b704271e0cd57f1f0",
+    "src/chagent/sessions/manager.py": "e624b6c5d0cf55703a900d8071e7f7cd5f145ee545a3d5107c8577dd2d3d71ef",
+    "src/chagent/events/__init__.py": "57fe2a38bbe45bdc53c239a708cc23d4245b267221e777463a2044577942982d",
+    "src/chagent/events/notifications.py": "84cc07254e02f5eda0abda7612215894ea748c312b1dbdd88681ac9de0664555",
+    "src/chagent/domain/sessions.py": "0be62a9d22e7a5c891000225daa666833f8c65654b8b96ceb821903acae5cf99",
+    "src/chagent/domain/recovery.py": "745afe03fa04a2119106a40fa4992c3e464816be39ce5e4f806e36d0332c8b50",
+    "src/chagent/domain/json_types.py": "2c216daa15e0be5a8b46e818b90fd3333a8443280d639088413c3df24921999f",
+    "src/chagent/domain/tools.py": "ba801bb40bcf43c24aa2666e99fe89aad15afaa7954e6aa62749091f53ed5a7c",
+    "src/chagent/domain/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/chagent/domain/context.py": "0d1778ea142a10e11654aafa38a09837090f115e4e37e9d2754f5f50996ffe4b",
+    "src/chagent/domain/messages.py": "a4b206390517906013b911f6aa79ae48fad71150201187809b51d1be85365573",
+    "src/chagent/domain/memories.py": "f763c62b28be1a96c2263920bcdb22ee8cc64ef729ec95a441b098373f854c45",
+    "src/chagent/domain/artifacts.py": "4d38488321862f7903acbc96c93bc9ecd16efd0d94933431fc4fe61b1a881c7b",
+    "src/chagent/domain/codec.py": "2ad63405ca27d97c642ce5762478901a4cfcdb0e32a9c95a5802174d156f44c5",
+    "src/chagent/domain/runs.py": "2071ae2bb14fbb70c9deca3e14821732d59228d56f9498b7f83a26017ce7903b",
+    "src/chagent/domain/summaries.py": "71b61c9f0e4b59af60298b8344b9d0af617d6b8d696cb05cb95b5b12bb602d4b",
+    "src/chagent/domain/usage.py": "1c28e3042920be9bb057b377375b11d509bef5e60424db9f1cbeaf344ce9481f"
+  }
+}

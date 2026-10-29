@@ -12,7 +12,7 @@ RunStatus: TypeAlias = Literal[
 ]
 
 RunEndReason: TypeAlias = Literal[
-    "model_stop", "tool_requested_stop", "user_cancelled", "model_aborted",
+    "model_stop", "tool_requested_stop", "explicit_memory", "user_cancelled", "model_aborted",
     "turn_limit", "run_timeout", "context_budget_exhausted", "output_limit",
     "model_error", "model_protocol_error", "storage_error", "execution_error",
     "owner_lost", "legacy_terminal",
@@ -21,7 +21,7 @@ RunEndReason: TypeAlias = Literal[
 
 def terminal_reason(status: RunStatus, reason: RunEndReason | None = None) -> RunEndReason:
     allowed = {
-        "completed": {"model_stop", "tool_requested_stop"},
+        "completed": {"model_stop", "tool_requested_stop", "explicit_memory"},
         "cancelled": {"user_cancelled", "model_aborted"},
         "failed": {"turn_limit", "run_timeout", "context_budget_exhausted", "output_limit",
                    "model_error", "model_protocol_error", "storage_error", "execution_error"},

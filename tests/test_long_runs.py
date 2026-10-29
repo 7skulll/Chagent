@@ -5,6 +5,7 @@ from copy import deepcopy
 from hashlib import sha256
 import os
 from pathlib import Path
+import tempfile
 import unittest
 from uuid import UUID, uuid4
 
@@ -25,6 +26,11 @@ from chagent.storage.migrate import migrate
 from chagent.storage.summaries import SummaryRepository
 from chagent.tools.base import AgentTool, AgentToolResult
 from chagent.tools.context import ToolContext
+
+
+# Six 2.4 KB tool results force compaction inside this window; the window also has
+# to hold the run-static environment snapshot, so it is not the bare minimum.
+LONG_RUN_WINDOW = 12_800
 
 
 class EmitTool(AgentTool):
@@ -78,11 +84,15 @@ class LongRunTests(unittest.IsolatedAsyncioTestCase):
         await self.database.connect()
         await migrate(self.database)
         self.runner = create_demo_runner(self.database, compaction_policy=CompactionPolicy())
-        self.runner.model.context_window = 12_000
+        self.runner.model.context_window = LONG_RUN_WINDOW
         self.runner.tools.registry.register(EmitTool("tool result\n" + "x" * 2400))
         self.client = LongClient()
         self.runner.client = self.client
-        self.session = await self.runner.conversations.create_session(Path.cwd())
+        # An empty workspace keeps the run-static environment snapshot small; these
+        # tests are about compaction arithmetic, not about what the directory holds.
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.session = await self.runner.conversations.create_session(Path(self.temporary.name))
         self.summaries = SummaryRepository(self.database)
 
     async def drop_schema(self):
@@ -105,10 +115,10 @@ class LongRunTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(any(isinstance(message, UserMessage) and message.content == original for message in request.messages))
                 # The raw and projected transcripts both maintain complete batches.
                 BasicContextBuilder._validate([type(records[0])(uuid4(), i, message) for i, message in enumerate(request.messages)])
-                self.assertLessEqual(self.runner.context.counter.count(request.messages) + request.max_tokens + 256, 12_000)
+                self.assertLessEqual(self.runner.context.counter.count(request.messages) + request.max_tokens + 256, LONG_RUN_WINDOW)
         self.assertEqual((await self.summaries.latest(self.session)).id, summaries[0].id)
         restored = create_demo_runner(self.database)
-        restored.model.context_window = 12_000
+        restored.model.context_window = LONG_RUN_WINDOW
         await restored.run(self.session, "continue from completed long task")
 
     async def test_failed_active_checkpoints_are_not_replayed_and_revisions_can_branch(self):
@@ -186,11 +196,13 @@ class LongRunTests(unittest.IsolatedAsyncioTestCase):
             page = await artifacts.read(self.session, UUID(client.reference.id), offset=offset)
             pieces.append(page["text"]); offset = page["next_offset"]
         self.assertEqual("".join(pieces), text)
-        other = await self.runner.conversations.create_session(Path.cwd())
+        second_workspace = Path(self.temporary.name) / "other"
+        second_workspace.mkdir()
+        other = await self.runner.conversations.create_session(second_workspace)
         with self.assertRaises(LookupError):
             await artifacts.read(other, UUID(client.reference.id))
         denied = await self.runner.tools.execute(ToolCall("deny", "read_artifact", {"artifact_id": client.reference.id}),
-                                                 context=ToolContext(Path.cwd(), other))
+                                                 context=ToolContext(second_workspace, other))
         self.assertTrue(denied.is_error)
         self.assertTrue(any(event["payload"].get("artifact_id") == client.reference.id for event in await self.runner.runs.events(result.run_id)))
 

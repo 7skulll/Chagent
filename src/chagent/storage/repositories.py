@@ -488,6 +488,20 @@ class RunRepository:
         self.notifications.notify(run_id)
         return record
 
+    async def save_notice(self, run_id: UUID, session_id: UUID, message: AssistantMessage) -> StoredMessage:
+        """Persist an assistant message that no model produced.
+
+        A deterministic command still owes the transcript an answer, but there
+        is no ``model_calls`` row to attach it to, so this writes the message
+        alone under the same ownership gate as ``save_response``.
+        """
+        await self.flush_events(run_id)
+        async with self.database.transaction() as connection:
+            await self.check_owner(connection, run_id)
+            record = await self._message(connection, session_id, run_id, message)
+        self.notifications.notify(run_id)
+        return record
+
     async def queue_tool_calls(self, run_id: UUID, model_call_id: UUID, calls: list[ToolCall]) -> list[UUID]:
         identities = [uuid4() for _ in calls]
         await self.flush_events(run_id)

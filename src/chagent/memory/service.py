@@ -139,6 +139,27 @@ class MemoryService:
 
     # -- completion transaction (no model call) -------------------------
 
+    def explicit_command(self, state: RunState) -> MemoryProposal | None:
+        """The deterministic command this run must answer itself, if any.
+
+        Only an enabled policy can answer it: when memory is off ``on_completed``
+        writes nothing, so a confirmation would claim a fact that was not saved.
+
+        A rejected command is not a command. A malformed key or credential-like
+        content falls through to the model, which can explain the refusal; the
+        write still fails later in ``on_completed``, so nothing is stored either
+        way, but the user gets a reason instead of a canned "saved".
+        """
+        if not self.policy.enabled:
+            return None
+        text = state.current_input.message.content
+        if not isinstance(text, str):
+            return None
+        try:
+            return explicit_memory(text)
+        except ValueError:
+            return None
+
     @staticmethod
     def _source(records, run_id):
         source = next((item for item in records if item.run_id == run_id and isinstance(item.message, UserMessage)), None)

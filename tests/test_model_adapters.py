@@ -11,7 +11,7 @@ from chagent.domain.messages import (
 )
 from chagent.domain.tools import Tool, ToolReference
 from chagent.models.base import ModelRequest
-from chagent.models.events import DoneEvent, ErrorEvent, StartEvent, ToolCallEndEvent
+from chagent.models.events import DoneEvent, ErrorEvent, StartEvent
 from chagent.models.factory import create_model_client
 from chagent.models.settings import ModelSettings
 from chagent.models.transcript import anthropic_payload, openai_payload

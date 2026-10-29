@@ -16,7 +16,7 @@ import httpx
 from chagent.agent.runner import RunFailedError
 from chagent.bootstrap import create_demo_runner, create_runner
 from chagent.config import Settings
-from chagent.domain.messages import AssistantMessage, ToolResultMessage, UserMessage
+from chagent.domain.messages import AssistantMessage, ToolResultMessage
 from chagent.models.events import DoneEvent, ErrorEvent, StartEvent
 from chagent.models.fake import FakeModelClient
 from chagent.models.factory import create_model_client
@@ -50,6 +50,10 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
 
     async def test_success_round_trip_and_continue_with_new_runner(self):
+        # This test asserts that a short history is retained in full. The prompt
+        # now also carries the run-static environment snapshot, so the window has
+        # to leave room for it rather than sit just above the message count.
+        self.runner.model.context_window = 16384
         result = await self.runner.run(self.session, "第一轮")
         self.assertEqual(result.message.content[0].text, "工具执行结果：第一轮")
         self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
@@ -61,6 +65,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(restored[2].message, ToolResultMessage)
         self.assertEqual(restored[1].message.content[0].id, restored[2].message.tool_call_id)
         other = create_demo_runner(self.database)
+        other.model.context_window = 16384
         await other.run(self.session, "第二轮")
         self.assertEqual(len(await other.conversations.messages(self.session)), 8)
         async with self.database.connection() as connection:
@@ -92,6 +97,41 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         users = [item["content"] for item in request["messages"] if item["role"] == "user"]
         self.assertEqual(users, ["恢复输入"])
         self.assertEqual(len(await self.runner.conversations.messages(self.session)), 6)
+
+    async def test_small_window_still_runs_in_a_large_workspace(self):
+        """The snapshot must not push a small model over its own context budget."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for index in range(60):
+                (root / f"module-{index:03d}-with-a-long-name").mkdir()
+            session = await self.runner.conversations.create_session(root)
+            self.runner.model.context_window = 8192
+            result = await self.runner.run(session, "hello")
+        self.assertEqual(result.end_reason, "model_stop")
+
+    async def test_environment_snapshot_is_frozen_across_turns(self):
+        """The snapshot is part of the prompt prefix, so it must not move mid-run."""
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            (workspace / "app").mkdir()
+            (workspace / "app" / "pricing.py").write_text("value = 1\n", encoding="utf-8")
+            session = await self.runner.conversations.create_session(workspace)
+            result = await self.runner.run(session, "第一轮")
+        events = await self.runner.runs.events(result.run_id)
+        projected = [event for event in events if event["type"] == "environment_projected"]
+        self.assertEqual(len(projected), 1)
+        self.assertIn("chars", projected[0]["payload"])
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT iteration, request FROM model_calls WHERE run_id = %s ORDER BY iteration", (result.run_id,))
+            rows = await cursor.fetchall()
+        self.assertEqual([row["iteration"] for row in rows], [0, 1])
+        system = [row["request"]["messages"][0]["content"] for row in rows]
+        self.assertEqual(system[0], system[1])
+        self.assertIn(f"Working directory: {workspace.resolve()}", system[0])
+        self.assertIn("app/ (1 file: pricing.py)", system[0])
+        self.assertIn("authoritative for the working directory", system[0])
+        self.assertEqual(system[0].count("Working directory:"), 1)
 
     async def test_invalid_arguments_return_to_model_without_execution(self):
         class InvalidArgsClient(FakeModelClient):
@@ -240,7 +280,10 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.runner.model.context_window = 1000
         with self.assertRaises(RunFailedError) as raised:
             await self.runner.run(self.session, "x" * 2000)
-        events = await self.runner.runs.events(raised.exception.run_id)
+        recorded = await self.runner.runs.events(raised.exception.run_id)
+        # The environment snapshot is projected before the context is built, so it
+        # is audited even for a run that never reaches the model.
+        events = [item for item in recorded if item["type"] != "environment_projected"]
         self.assertEqual([item["type"] for item in events], ["run_started", "context_rejected", "run_failed"])
         rejection = events[1]["payload"]
         self.assertGreater(rejection["required_tokens"], rejection["input_budget"])

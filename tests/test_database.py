@@ -38,12 +38,16 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
 
     async def test_migrate_is_concurrent_and_idempotent(self):
+        # Counted from the bundled files: adding a migration must not fail this
+        # test, only applying one twice or losing one must.
+        expected = len([path for path in files("chagent.storage").joinpath("migrations").iterdir()
+                        if path.name.endswith(".sql")])
         results = await asyncio.gather(migrate(self.database), migrate(self.database))
-        self.assertEqual(sorted(len(result) for result in results), [0, 11])
+        self.assertEqual(sorted(len(result) for result in results), [0, expected])
         self.assertEqual(await migrate(self.database), [])
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT count(*) AS total FROM schema_migrations")
-            self.assertEqual((await cursor.fetchone())["total"], 11)
+            self.assertEqual((await cursor.fetchone())["total"], expected)
 
     async def test_run_owner_token_and_expired_lease_reject_writes_and_renewal(self):
         from pathlib import Path

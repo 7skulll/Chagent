@@ -33,6 +33,9 @@ class RunState:
     # Facts from earlier runs that ended without a normal stop; loaded once per
     # run so every turn sees the same note and no turn re-queries it.
     recovery: RecoveryNote | None = None
+    # Workspace snapshot (cwd, tree, branch, AGENTS.md) rendered once at run
+    # start. It is part of the prompt prefix, so it must not change mid-run.
+    environment: str | None = None
 
     @property
     def current_input(self) -> StoredMessage:

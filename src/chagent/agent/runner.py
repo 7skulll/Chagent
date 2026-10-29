@@ -12,9 +12,11 @@ from psycopg_pool import PoolTimeout
 from chagent.agent.types import FinishDecision, RunState
 from chagent.agent.stream_writer import TextStreamWriter
 from chagent.context.builder import ContextBudgetError, ContextBuilder
+from chagent.context.environment import build as build_environment
 from chagent.context.manager import ContextManager
 from chagent.memory.service import MemoryService
-from chagent.domain.messages import AssistantMessage, ToolCall, UserMessage
+from chagent.domain.memories import MemoryProposal
+from chagent.domain.messages import AssistantMessage, TextContent, ToolCall, UserMessage
 from chagent.domain.recovery import build_recovery_note
 from chagent.domain.runs import RunEndReason, RunResult
 from chagent.models.base import Model, ModelClient, ModelRequest
@@ -117,7 +119,10 @@ class AgentRunner:
             async with asyncio.timeout(self.timeout):
                 state = await self._load_state(run_id, session_id)
                 self._states[run_id] = state
-                result = await self._loop(state)
+                command = (self.memory_service.explicit_command(state)
+                           if self.memory_service is not None else None)
+                result = (await self._explicit_memory(state, command) if command is not None
+                          else await self._loop(state))
             async def commit(connection):
                 # Explicit memories are deterministic; automatic extraction only
                 # enqueues a job so this answer never waits for a second model call.
@@ -198,7 +203,39 @@ class AgentRunner:
             await self.runs.event(run_id, "recovery_projected", {
                 "fact_count": note.fact_count, "source_runs": list(note.run_ids),
             })
-        return RunState(run_id, session, history, task_state, summary, recovery=note)
+        state = RunState(run_id, session, history, task_state, summary, recovery=note)
+        if self.memory_service is not None and self.memory_service.explicit_command(state) is not None:
+            # The command is answered without a model, so nothing reads the
+            # workspace: skipping the scan keeps it out of large trees' way.
+            return state
+        facts = await build_environment(session.workspace, context_window=self.model.context_window)
+        await self.runs.event(run_id, "environment_projected", {
+            "chars": len(facts.text), "tree_entries": facts.tree_entries,
+            "tree_truncated": facts.tree_truncated, "git_repo": facts.git_repo,
+            "agents_files": facts.agents_files, "context_window": self.model.context_window,
+        })
+        return RunState(run_id, session, history, task_state, summary, recovery=note, environment=facts.text)
+
+    async def _explicit_memory(self, state: RunState, proposal: MemoryProposal) -> RunResult:
+        """Answer a deterministic memory command without a provider call.
+
+        The row itself is written by ``on_completed`` inside the completion
+        transaction, so a model turn could only restate it. Skipping the model
+        is not an optimisation: handed the command plus a workspace snapshot, a
+        model reliably writes its own ``MEMORY.md`` as well, and that file
+        returns on the next run through ``AGENTS.md`` as a second, unreviewed
+        copy of the same fact.
+        """
+        run_id, session_id = state.run_id, state.session.id
+        answer = f"已记录到长期记忆（{proposal.scope}）：{proposal.key}"
+        message = AssistantMessage([TextContent(answer)], self.model.api, self.model.provider,
+                                   self.model.id, time_ns() // 1_000_000, "stop")
+        await self.runs.emit(run_id, "text_delta", {"delta": answer, "count": 1})
+        await self.runs.event(run_id, "memory_command_resolved",
+                              {"scope": proposal.scope, "key": proposal.key})
+        state.append_committed(await self.runs.save_notice(run_id, session_id, message))
+        await self.runs.flush_events(run_id)
+        return RunResult(run_id, session_id, message, "explicit_memory")
 
     async def _loop(self, state: RunState) -> RunResult:
         run_id, session_id = state.run_id, state.session.id
@@ -218,7 +255,7 @@ class AgentRunner:
                 else:
                     built = await self.context.build(state.history, self.model, state.tools,
                                                      task_state=state.task_state, current_run_id=run_id,
-                                                     recovery=state.recovery)
+                                                     recovery=state.recovery, environment=state.environment)
             except ContextBudgetError as error:
                 await self.runs.event(run_id, "context_rejected", {
                     "reason": str(error), "required_tokens": error.required_tokens,

@@ -42,9 +42,16 @@ class ContextBuilder(Protocol):
     ) -> BuiltContext: ...
 
 
+DEFAULT_INSTRUCTIONS = (
+    "Complete the user's task with the available tools: locate code with grep or glob, apply all "
+    "changes to a file in one edit_file call, and verify with run_tests once after editing. If the "
+    "request already says which tests fail, do not re-run them first."
+)
+
+
 class BasicContextBuilder:
     def __init__(
-        self, instructions: str = "Complete the user's task using the available tools.",
+        self, instructions: str = DEFAULT_INSTRUCTIONS,
         *, policy: ContextPolicy | None = None, counter: TokenCounter | None = None,
     ):
         self.instructions = instructions
@@ -58,6 +65,7 @@ class BasicContextBuilder:
         allow_over_budget: bool = False,
         cache: ProjectionCache | None = None,
         recovery: RecoveryNote | None = None,
+        environment: str | None = None,
     ) -> BuiltContext:
         original = history
         if len({item.id for item in history}) != len(history):
@@ -83,6 +91,10 @@ class BasicContextBuilder:
         if budget <= 0:
             raise ContextBudgetError("Output reservation and safety margin exhaust the context window")
         instructions = self.instructions
+        if environment:
+            # Computed once per run by the runner, so the prefix stays byte-identical
+            # between turns; see environment.py for why that matters.
+            instructions += "\n\n" + environment
         if task_state is not None:
             state = asdict(task_state)
             state.pop("revision")

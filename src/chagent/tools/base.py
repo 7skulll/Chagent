@@ -65,6 +65,16 @@ class AgentTool(Tool, ABC):
         """Execute validated parameters; runtime owns validation and timeouts."""
         ...
 
+    def prepare_arguments(self, params: JsonObject) -> JsonObject:
+        """Repair provider-specific argument shapes before schema validation.
+
+        Models disagree about nesting and key spelling for the same intent; a
+        strict schema turns that into a failed turn. A repairer may only
+        normalize the shape of what was sent, never invent content, and the
+        result still has to satisfy ``parameters``.
+        """
+        return params
+
     def declaration(self) -> Tool:
         """Expose only model-visible metadata, never an execution callback."""
         return Tool(self.name, self.description, deepcopy(self.parameters))

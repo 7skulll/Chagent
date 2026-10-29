@@ -6,6 +6,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import tempfile
 import unittest
 from uuid import uuid4
 
@@ -16,7 +17,7 @@ from chagent.agent.runner import RunFailedError
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
 from chagent.context.compactor import serialize_turn
-from chagent.domain.messages import AssistantMessage, ImageContent, SystemMessage, TextContent, ThinkingContent, ToolCall, ToolResultMessage, UserMessage
+from chagent.domain.messages import AssistantMessage, ImageContent, TextContent, ThinkingContent, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.runs import StoredMessage
 from chagent.domain.sessions import TaskState
 from chagent.domain.summaries import CompactionPolicy
@@ -84,7 +85,10 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         self.client = RecordingClient()
         self.runner.client = self.client
         self.summaries = SummaryRepository(self.database)
-        self.session = await self.runner.conversations.create_session(Path.cwd())
+        # Empty workspace: the environment snapshot is part of the prompt.
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.session = await self.runner.conversations.create_session(Path(self.temporary.name))
 
     async def drop_schema(self):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
@@ -170,7 +174,7 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_summary_never_activates_and_credentials_are_not_logged(self):
         for mode in ("empty", "length", "oversize", "tool", "incomplete", "exception"):
             with self.subTest(mode=mode):
-                self.session = await self.runner.conversations.create_session(Path.cwd())
+                self.session = await self.runner.conversations.create_session(Path(self.temporary.name))
                 self.client.mode = "success"
                 await self.seed()
                 self.client.mode = mode
