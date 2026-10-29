@@ -15,7 +15,7 @@ from chagent.domain.usage import Usage, UsageCost
 from chagent.models.base import ModelRequest
 from chagent.sessions.errors import StateConflictError
 from chagent.storage.database import Database
-from chagent.storage.repositories import RunRepository
+from chagent.storage.repositories import RunOwnershipLost, RunRepository
 
 
 class SummaryRepository:
@@ -59,7 +59,11 @@ class SummaryRepository:
 
     async def save(self, summary: SessionSummary, run_id: UUID, *, completed_event: JsonObject | None = None) -> SessionSummary:
         async with self.database.transaction() as connection:
-            await RunRepository(self.database).check_owner(connection, run_id)
+            # One gate: it validates the owner, locks the run row and returns
+            # the columns the checkpoint needs, so the run is not read twice.
+            run = await RunRepository(self.database).check_owner(connection, run_id)
+            if run["session_id"] != summary.session_id:
+                raise StateConflictError("Compaction run belongs to another session")
             await connection.execute("SELECT id FROM sessions WHERE id = %s FOR UPDATE", (summary.session_id,))
             cursor = await connection.execute(
                 "SELECT id, revision, covered_through_sequence, source_run_id FROM session_summaries s "
@@ -75,10 +79,6 @@ class SummaryRepository:
             boundary = previous["covered_through_sequence"] if previous else 0
             if summary.covered_through_sequence <= boundary:
                 raise ValueError("Summary boundary must advance")
-            cursor = await connection.execute("SELECT session_id, status FROM runs WHERE id = %s FOR UPDATE", (run_id,))
-            run = await cursor.fetchone()
-            if run is None or run["session_id"] != summary.session_id or run["status"] != "running":
-                raise StateConflictError("Compaction run is no longer active")
             cursor = await connection.execute(
                 "SELECT m.id, m.run_id, m.sequence, m.role, m.payload, r.status FROM messages m LEFT JOIN runs r ON r.id = m.run_id "
                 "WHERE m.session_id = %s AND m.sequence > %s AND m.sequence <= %s AND m.role <> 'system' ORDER BY m.sequence",
@@ -136,12 +136,18 @@ class SummaryRepository:
 
     async def start_call(self, compaction_id: UUID, run_id: UUID, iteration: int, request: ModelRequest) -> UUID:
         identity = uuid4()
+        token = self.database.run_owners.get(run_id)
         async with self.database.transaction() as connection:
-            await RunRepository(self.database).check_owner(connection, run_id)
-            await connection.execute(
-                "INSERT INTO compaction_calls (id, compaction_id, run_id, iteration, request) VALUES (%s, %s, %s, %s, %s)",
-                (identity, compaction_id, run_id, iteration, Jsonb(asdict(request))),
+            # Conditional insert: the run row decides whether the call may
+            # exist, so nothing has to be read before writing.
+            cursor = await connection.execute(
+                "INSERT INTO compaction_calls (id, compaction_id, run_id, iteration, request) "
+                "SELECT %s, %s, r.id, %s, %s FROM runs r WHERE r.id = %s AND r.status = 'running' "
+                "AND r.owner_token = %s AND r.lease_expires_at > clock_timestamp()",
+                (identity, compaction_id, iteration, Jsonb(asdict(request)), run_id, token),
             )
+            if cursor.rowcount == 0:
+                raise RunOwnershipLost("Run ownership lost or lease expired")
         return identity
 
     async def finish_call(self, identity: UUID, status: str, response: AssistantMessage | None,
@@ -153,9 +159,26 @@ class SummaryRepository:
             row = await cursor.fetchone()
             if row is None:
                 raise StateConflictError("Compaction call missing")
-            await RunRepository(self.database).check_owner(connection, row["run_id"])
-            await connection.execute(
-                "UPDATE compaction_calls SET status = %s, response = %s, duration_ms = %s, error = %s, ended_at = now() "
-                "WHERE id = %s AND status = 'running'",
-                (status, Jsonb(message_to_dict(response)) if response else None, duration_ms, error, identity),
+            token = self.database.run_owners.get(row["run_id"])
+            cursor = await connection.execute(
+                "UPDATE compaction_calls c SET status = %s, response = %s, duration_ms = %s, error = %s, ended_at = now() "
+                "FROM runs r WHERE r.id = c.run_id AND c.id = %s AND c.status = 'running' "
+                "AND r.status = 'running' AND r.owner_token = %s AND r.lease_expires_at > clock_timestamp() "
+                "RETURNING c.id",
+                (status, Jsonb(message_to_dict(response)) if response else None, duration_ms, error, identity, token),
             )
+            if await cursor.fetchone() is None:
+                await self._reject_call_write(connection, identity)
+
+    async def _reject_call_write(self, connection, identity: UUID) -> None:
+        """Classify a rejected call update; only reached on the error path."""
+        cursor = await connection.execute(
+            "SELECT c.status AS call_status, r.status AS run_status FROM compaction_calls c "
+            "LEFT JOIN runs r ON r.id = c.run_id WHERE c.id = %s", (identity,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            raise StateConflictError("Compaction call missing")
+        if row["call_status"] != "running":
+            raise StateConflictError("Compaction call is no longer running")
+        raise RunOwnershipLost("Run ownership lost or lease expired")

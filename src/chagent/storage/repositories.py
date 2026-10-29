@@ -229,15 +229,25 @@ class RunRepository:
         # process. Streams are never reconstructed from rows.
         self._streams: dict[UUID, EventStream] = {}
 
-    async def check_owner(self, connection, run_id: UUID) -> None:
+    async def check_owner(self, connection, run_id: UUID) -> DictRow:
+        """The one ownership gate a write transaction needs.
+
+        Validates token, run status and lease, and holds the run row lock. That
+        lock is also what makes the ``MAX(sequence) + 1`` allocation in
+        ``_insert_events`` safe, so the events written afterwards in the same
+        transaction pass ``locked=True`` and cost one statement each instead of
+        two. Calling this twice in one transaction buys nothing.
+        """
         token = self.database.run_owners.get(run_id)
         cursor = await connection.execute(
-            "SELECT id FROM runs WHERE id = %s AND status = 'running' "
+            "SELECT id, session_id, status FROM runs WHERE id = %s AND status = 'running' "
             "AND owner_token = %s AND lease_expires_at > clock_timestamp() FOR UPDATE",
             (run_id, token),
         )
-        if await cursor.fetchone() is None:
+        row = await cursor.fetchone()
+        if row is None:
             raise RunOwnershipLost("Run ownership lost or lease expired")
+        return row
 
     async def heartbeat(self, run_id: UUID, lease_seconds: float = 30) -> None:
         token = self.database.run_owners.get(run_id)
@@ -279,14 +289,15 @@ class RunRepository:
                 queued = await cursor.fetchall()
                 for kind, rows in (("tool_interrupted", unknown), ("tool_cancelled", queued)):
                     for row in rows:
-                        await self._event(connection, run_id, kind, {"tool_call_id": row["call_id"], "name": row["name"]})
+                        await self._event(connection, run_id, kind,
+                                          {"tool_call_id": row["call_id"], "name": row["name"]}, locked=True)
                 for table in ("model_calls", "compaction_calls"):
                     await connection.execute(
                         f"UPDATE {table} SET status = 'interrupted', ended_at = now() "
                         "WHERE run_id = %s AND status = 'running'", (run_id,),
                     )
                 await self._event(connection, run_id, "run_interrupted",
-                                  {"error": "Run ownership lease expired", "end_reason": "owner_lost"})
+                                  {"error": "Run ownership lease expired", "end_reason": "owner_lost"}, locked=True)
         for run_id in identities:
             stream = self._streams.pop(run_id, None)
             if stream is not None:
@@ -310,11 +321,15 @@ class RunRepository:
 
     async def _insert_events(
         self, connection: AsyncConnection[DictRow], run_id: UUID, items: list[EventItem],
-        *, locked: bool = False,
     ) -> None:
-        if not locked:
-            # Lock the run so concurrent writers cannot allocate the same sequence.
-            await connection.execute("SELECT id FROM runs WHERE id = %s FOR UPDATE", (run_id,))
+        """Append events; the caller must already hold this run's row lock.
+
+        In practice that means the transaction called ``check_owner``, or is
+        the one that created or updated the run row. Without the lock two
+        writers could read the same ``MAX(sequence)`` and collide on the
+        ``(run_id, sequence)`` primary key; with it, one statement numbers the
+        whole batch in input order.
+        """
         # MAX(sequence) reads the pre-statement snapshot, so one statement can
         # number the whole batch with row_number() over the input order.
         await connection.execute(
@@ -328,8 +343,17 @@ class RunRepository:
 
     async def _event(
         self, connection: AsyncConnection[DictRow], run_id: UUID,
-        kind: str, payload: JsonObject,
+        kind: str, payload: JsonObject, *, locked: bool = False,
     ) -> None:
+        """Append one event inside an existing transaction.
+
+        ``locked`` says whether this transaction already holds the run row:
+        ownership-gated writers pass ``True``; a writer that only adds audit
+        events to a run it does not own (the memory worker, the reaper's
+        successors) leaves it ``False`` and takes the lock here.
+        """
+        if not locked:
+            await connection.execute("SELECT id FROM runs WHERE id = %s FOR UPDATE", (run_id,))
         await self._insert_events(connection, run_id, [(kind, payload)])
 
     def _stream(self, run_id: UUID) -> EventStream:
@@ -337,10 +361,10 @@ class RunRepository:
         if stream is None:
             async def write(items: list[EventItem]) -> None:
                 async with self.database.transaction() as connection:
-                    # check_owner already holds the run row lock for this
-                    # transaction, so the insert must not take it again.
+                    # One gate per batch: it validates the owner and holds the
+                    # lock the batch insert allocates sequence numbers under.
                     await self.check_owner(connection, run_id)
-                    await self._insert_events(connection, run_id, items, locked=True)
+                    await self._insert_events(connection, run_id, items)
                 self.notifications.notify(run_id)
 
             stream = self._streams[run_id] = EventStream(run_id, write)
@@ -404,7 +428,9 @@ class RunRepository:
                     (run_id, session_id, owner),
                 )
                 await self._message(connection, session_id, run_id, message)
-                await self._event(connection, run_id, "run_started", {"session_id": str(session_id)})
+                # This transaction created the run row, so it already holds the
+                # lock the event insert needs.
+                await self._event(connection, run_id, "run_started", {"session_id": str(session_id)}, locked=True)
                 await connection.execute("UPDATE sessions SET updated_at = now() WHERE id = %s", (session_id,))
         except errors.UniqueViolation as error:
             if error.diag.constraint_name == "runs_one_active_per_session_idx":
@@ -424,7 +450,7 @@ class RunRepository:
         await self.flush_events(run_id)
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
-            await self._event(connection, run_id, kind, payload)
+            await self._event(connection, run_id, kind, payload, locked=True)
         self.notifications.notify(run_id)
 
     async def start_model_call(self, run_id: UUID, iteration: int, built: BuiltContext) -> UUID:
@@ -437,7 +463,7 @@ class RunRepository:
                 "VALUES (%s, %s, %s, %s, %s)",
                 (call_id, run_id, iteration, Jsonb(asdict(built.request)), Jsonb(asdict(built.snapshot))),
             )
-            await self._event(connection, run_id, "model_started", {"model_call_id": str(call_id)})
+            await self._event(connection, run_id, "model_started", {"model_call_id": str(call_id)}, locked=True)
         self.notifications.notify(run_id)
         return call_id
 
@@ -458,7 +484,7 @@ class RunRepository:
             record = await self._message(connection, session_id, run_id, message)
             await self._event(connection, run_id, "model_completed", {
                 "model_call_id": str(model_call_id), "stop_reason": message.stop_reason,
-            })
+            }, locked=True)
         self.notifications.notify(run_id)
         return record
 
@@ -472,7 +498,8 @@ class RunRepository:
                     "INSERT INTO tool_calls (id, run_id, model_call_id, call_id, name, arguments, status, call_index) "
                     "VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s)",
                     (identity, run_id, model_call_id, call.id, call.name, Jsonb(call.arguments), index))
-                await self._event(connection, run_id, "tool_queued", {"tool_call_id": call.id, "name": call.name})
+                await self._event(connection, run_id, "tool_queued", {"tool_call_id": call.id, "name": call.name},
+                                  locked=True)
         self.notifications.notify(run_id)
         return identities
 
@@ -488,7 +515,7 @@ class RunRepository:
                 raise StateConflictError("Tool call is no longer queued")
             await self._event(connection, run_id, "tool_started", {
                 "tool_call_id": call.id, "name": call.name,
-            })
+            }, locked=True)
         self.notifications.notify(run_id)
         return record_id
 
@@ -517,7 +544,7 @@ class RunRepository:
                 "tool_call_id": message.tool_call_id, "is_error": message.is_error,
                 "outcome_unknown": result.outcome_unknown,
                 "artifact_id": message.artifact.id if message.artifact else None,
-            })
+            }, locked=True)
         self.notifications.notify(run_id)
         return record
 
@@ -525,14 +552,19 @@ class RunRepository:
                      end_reason: RunEndReason | None = None, on_completed=None) -> None:
         end_reason = terminal_reason(status, end_reason)
         await self._flush_before_terminal(run_id)
+        token = self.database.run_owners.get(run_id)
         async with self.database.transaction() as connection:
-            await self.check_owner(connection, run_id)
+            # The terminal write is its own gate: a non-matching owner, a
+            # terminal run or an expired lease updates nothing, so no separate
+            # ownership probe is needed before it.
             cursor = await connection.execute(
                 "UPDATE runs SET status = %s, error = %s, end_reason = %s, ended_at = now() "
-                "WHERE id = %s AND status = 'running' RETURNING id", (status, error, end_reason, run_id),
+                "WHERE id = %s AND status = 'running' AND owner_token = %s "
+                "AND lease_expires_at > clock_timestamp() RETURNING id",
+                (status, error, end_reason, run_id, token),
             )
             if await cursor.fetchone() is None:
-                raise RuntimeError("Run is missing or already terminal")
+                await self._reject_terminal_write(connection, run_id)
             cursor = await connection.execute(
                 "UPDATE tool_calls SET status = 'unknown', ended_at = now() "
                 "WHERE run_id = %s AND status = 'running' RETURNING call_id, name", (run_id,),
@@ -544,7 +576,8 @@ class RunRepository:
             cancelled = await cursor.fetchall()
             for kind, rows in (("tool_interrupted", unknown), ("tool_cancelled", cancelled)):
                 for row in rows:
-                    await self._event(connection, run_id, kind, {"tool_call_id": row["call_id"], "name": row["name"]})
+                    await self._event(connection, run_id, kind,
+                                      {"tool_call_id": row["call_id"], "name": row["name"]}, locked=True)
             await connection.execute(
                 "UPDATE model_calls SET status = %s, ended_at = now() "
                 "WHERE run_id = %s AND status = 'running'",
@@ -561,9 +594,19 @@ class RunRepository:
                     async with connection.transaction():
                         await on_completed(connection)
                 except Exception as memory_error:
-                    await self._event(connection, run_id, "memory_write_failed", {"reason": type(memory_error).__name__})
-            await self._event(connection, run_id, "run_" + status, {"error": error, "end_reason": end_reason})
+                    await self._event(connection, run_id, "memory_write_failed",
+                                      {"reason": type(memory_error).__name__}, locked=True)
+            await self._event(connection, run_id, "run_" + status,
+                              {"error": error, "end_reason": end_reason}, locked=True)
         self.notifications.notify(run_id)
+
+    async def _reject_terminal_write(self, connection: AsyncConnection[DictRow], run_id: UUID) -> None:
+        """Classify a rejected terminal update; only reached on the error path."""
+        cursor = await connection.execute("SELECT status, owner_token FROM runs WHERE id = %s", (run_id,))
+        row = await cursor.fetchone()
+        if row is None or row["status"] != "running":
+            raise RuntimeError("Run is missing or already terminal")
+        raise RunOwnershipLost("Run ownership lost or lease expired")
 
     async def get(self, run_id: UUID) -> DictRow | None:
         async with self.database.connection() as connection:
