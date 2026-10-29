@@ -19,6 +19,7 @@ from chagent.tools.builtin import create_builtin_registry
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.processes import ProcessManager
 from chagent.tools.sandbox import Sandbox
+from chagent.tools.web import WebAccess
 from chagent.domain.memories import MemoryPolicy
 from chagent.memory.service import MemoryService
 from chagent.storage.approvals import ApprovalRepository
@@ -43,6 +44,7 @@ def create_demo_runner(
     approval_remote: bool = True,
     process_wall_timeout: float = 600.0,
     max_processes: int = 4,
+    web: WebAccess | None = None,
 ) -> AgentRunner:
     return create_runner(
         database, Model(id="fake-echo", provider="local-test", api="fake", context_window=8192, max_tokens=512),
@@ -55,6 +57,7 @@ def create_demo_runner(
         approval_policy=approval_policy, approval_timeout=approval_timeout,
         approval_decider=approval_decider, approval_remote=approval_remote,
         process_wall_timeout=process_wall_timeout, max_processes=max_processes,
+        web=web,
     )
 
 
@@ -74,13 +77,14 @@ def create_runner(
     approval_remote: bool = True,
     process_wall_timeout: float = 600.0,
     max_processes: int = 4,
+    web: WebAccess | None = None,
 ) -> AgentRunner:
     # One manager per runner: process ownership is per run, and the runner is
     # the only object that knows when a run ends.
     processes = ProcessManager(wall_timeout=process_wall_timeout, max_per_run=max_processes)
     registry = create_builtin_registry(allow_host_commands=allow_host_commands,
                                        artifacts=ArtifactRepository(database), sandbox=sandbox,
-                                       processes=processes)
+                                       processes=processes, web=web)
     builder = BasicContextBuilder(policy=context_policy,
                                   counter=token_counter or select_counter(model))
     conversations, runs = ConversationRepository(database), RunRepository(database)

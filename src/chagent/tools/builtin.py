@@ -11,11 +11,13 @@ from chagent.tools.tests_runner import RunTestsTool
 from chagent.tools.artifacts import ReadArtifactTool
 from chagent.storage.artifacts import ArtifactRepository
 from chagent.tools.sandbox import Sandbox
+from chagent.tools.web import WebAccess, create_web_tools
 
 
 def create_builtin_registry(*, allow_host_commands: bool = False, artifacts: ArtifactRepository | None = None,
                             sandbox: Sandbox | None = None,
-                            processes: ProcessManager | None = None) -> ToolRegistry:
+                            processes: ProcessManager | None = None,
+                            web: WebAccess | None = None) -> ToolRegistry:
     registry = ToolRegistry()
     for tool in (EchoTool(), ListDirTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
                  GlobTool(), GrepTool(), ApplyPatchTool()):
@@ -30,4 +32,9 @@ def create_builtin_registry(*, allow_host_commands: bool = False, artifacts: Art
             registry.register(ProcessTool(processes))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
+    if web is not None:
+        # Outbound access is independent of host commands: reading a page needs
+        # no shell, and the keyless case registers nothing at all.
+        for tool in create_web_tools(web):
+            registry.register(tool)
     return registry

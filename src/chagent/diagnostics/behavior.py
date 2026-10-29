@@ -18,6 +18,9 @@ def describe(settings: Settings, compaction: CompactionPolicy | None = None,
     line = (f"sandbox={sandbox}"
             f" approval={settings.approval}"
             f" host_commands={'on' if settings.allow_host_commands else 'off'}"
+            # The one path that leaves the machine is worth naming on the same
+            # line as the one that confines it.
+            f" web={settings.web_access}"
             f" compaction={'on' if policy.enabled else 'off'}"
             # A session process is the one path that outlives its tool call, so
             # its two limits belong on this line too.

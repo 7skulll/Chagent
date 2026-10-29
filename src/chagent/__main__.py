@@ -14,6 +14,7 @@ from chagent.config import Settings
 from chagent.diagnostics.behavior import describe as describe_behavior
 from chagent.domain.summaries import CompactionPolicy
 from chagent.tools.sandbox import Sandbox
+from chagent.tools.web import WebAccess
 from chagent.domain.messages import TextContent
 from chagent.tools.policy import ApprovalPolicy
 from chagent.domain.json_types import JsonObject
@@ -60,6 +61,8 @@ async def _run(
         host_commands = allow_commands or settings.allow_host_commands
         sandbox = Sandbox.from_settings(settings)
         approval = ApprovalPolicy.from_settings(settings)
+        # Outbound access is its own decision, independent of host commands.
+        web = WebAccess(settings.tavily_api_key) if settings.web_access != "off" else None
         if model_settings is None:
             runner = create_demo_runner(database, tool_name=tool or "echo", tool_arguments=arguments,
                                         allow_host_commands=host_commands, max_turns=settings.max_turns,
@@ -69,7 +72,7 @@ async def _run(
                                         approval_timeout=settings.approval_timeout,
                                         approval_decider=local_approver(), approval_remote=False,
                                         process_wall_timeout=settings.process_timeout,
-                                        max_processes=settings.max_processes)
+                                        max_processes=settings.max_processes, web=web)
         else:
             assert client is not None
             runner = create_runner(database, model_settings.model(), client,
@@ -80,7 +83,7 @@ async def _run(
                                    approval_timeout=settings.approval_timeout,
                                    approval_decider=local_approver(), approval_remote=False,
                                    process_wall_timeout=settings.process_timeout,
-                                   max_processes=settings.max_processes)
+                                   max_processes=settings.max_processes, web=web)
         if session_id is None:
             session = await SessionManager(runner.conversations).create(workspace, title="新会话")
             session_id = session.id

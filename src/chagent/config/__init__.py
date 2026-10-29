@@ -33,6 +33,12 @@ class Settings:
     # run may hold at once, and the wall clock that bounds each of them.
     max_processes: int = 4
     process_timeout: float = 600.0
+    # Outbound HTTP. ``off`` keeps the tool surface at twelve tools; ``tavily``
+    # opens web_search and web_fetch together. The tools run inside the agent
+    # process, so the sandbox does not apply to them and this switch is the only
+    # gate on leaving the machine.
+    web_access: str = "off"
+    tavily_api_key: str = field(default="", repr=False)
 
     def __post_init__(self) -> None:
         if not self.database_url.strip():
@@ -69,6 +75,12 @@ class Settings:
             raise ValueError("CHAGENT_MAX_PROCESSES must be an integer between 1 and 16")
         if not math.isfinite(self.process_timeout) or self.process_timeout <= 0:
             raise ValueError("CHAGENT_PROCESS_TIMEOUT must be finite and positive")
+        if self.web_access not in {"off", "tavily"}:
+            raise ValueError("CHAGENT_WEB_ACCESS must be off or tavily")
+        # Fail loudly here rather than registering a tool that fails on its
+        # first call: an enabled-but-keyless switch is a configuration mistake.
+        if self.web_access == "tavily" and not self.tavily_api_key.strip():
+            raise ValueError("CHAGENT_WEB_ACCESS=tavily requires CHAGENT_TAVILY_API_KEY")
         # Each extracting worker holds a connection while it reads or writes. If
         # they can occupy the whole pool, a concurrent run waits until it gives
         # up on db_timeout and fails. A single-connection pool is exempt: there,
@@ -108,4 +120,6 @@ class Settings:
             approval_timeout=float(values.get("CHAGENT_APPROVAL_TIMEOUT", "300")),
             max_processes=int(values.get("CHAGENT_MAX_PROCESSES", "4")),
             process_timeout=float(values.get("CHAGENT_PROCESS_TIMEOUT", "600")),
+            web_access=values.get("CHAGENT_WEB_ACCESS", "off").strip().lower(),
+            tavily_api_key=values.get("CHAGENT_TAVILY_API_KEY", "").strip(),
         )
