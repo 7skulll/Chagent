@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import sys
 from uuid import UUID
 
 from chagent.bootstrap import create_demo_runner, create_runner
@@ -13,6 +14,7 @@ from chagent.diagnostics.behavior import describe as describe_behavior
 from chagent.domain.summaries import CompactionPolicy
 from chagent.tools.sandbox import Sandbox
 from chagent.domain.messages import TextContent
+from chagent.tools.policy import ApprovalPolicy
 from chagent.domain.json_types import JsonObject
 from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
@@ -20,6 +22,18 @@ from chagent.sessions.manager import SessionManager
 from chagent.models.factory import create_model_client
 from chagent.models.http import HTTPModelClient
 from chagent.models.settings import ModelConfigurationError, ModelSettings
+
+
+def local_approver():
+    """Ask the terminal once. No TTY means nobody can answer, and the broker denies."""
+    async def decide(request):
+        if not sys.stdin.isatty():
+            return None
+        prompt = (f"\n[approval required] {request.tool_name} in {request.cwd}\n"
+                  f"  {request.subject}\nApprove once? [y/N] ")
+        answer = await asyncio.to_thread(input, prompt)
+        return answer.strip().lower() in {"y", "yes"}
+    return decide
 
 
 async def run(
@@ -44,19 +58,24 @@ async def _run(
         await migrate(database)
         host_commands = allow_commands or settings.allow_host_commands
         sandbox = Sandbox.from_settings(settings)
+        approval = ApprovalPolicy.from_settings(settings)
         if model_settings is None:
             runner = create_demo_runner(database, tool_name=tool or "echo", tool_arguments=arguments,
                                         allow_host_commands=host_commands, max_turns=settings.max_turns,
                                         max_tool_concurrency=settings.max_tool_concurrency,
                                         memory_worker_concurrency=settings.memory_worker_concurrency,
-                                        sandbox=sandbox)
+                                        sandbox=sandbox, approval_policy=approval,
+                                        approval_timeout=settings.approval_timeout,
+                                        approval_decider=local_approver(), approval_remote=False)
         else:
             assert client is not None
             runner = create_runner(database, model_settings.model(), client,
                                    allow_host_commands=host_commands, timeout=model_settings.run_timeout, max_turns=settings.max_turns,
                                    max_tool_concurrency=settings.max_tool_concurrency,
                                    memory_worker_concurrency=settings.memory_worker_concurrency,
-                                   sandbox=sandbox)
+                                   sandbox=sandbox, approval_policy=approval,
+                                   approval_timeout=settings.approval_timeout,
+                                   approval_decider=local_approver(), approval_remote=False)
         if session_id is None:
             session = await SessionManager(runner.conversations).create(workspace, title="新会话")
             session_id = session.id

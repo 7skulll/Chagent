@@ -16,6 +16,7 @@ def describe(settings: Settings, compaction: CompactionPolicy | None = None,
     if sandbox != "off":
         sandbox += "/network" if settings.sandbox_network else "/no-network"
     line = (f"sandbox={sandbox}"
+            f" approval={settings.approval}"
             f" host_commands={'on' if settings.allow_host_commands else 'off'}"
             f" compaction={'on' if policy.enabled else 'off'}"
             f" max_turns={settings.max_turns}")

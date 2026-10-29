@@ -116,6 +116,16 @@ class RunView(BaseModel):
     created_at: datetime
     started_at: datetime | None
     ended_at: datetime | None
+    # A waiting run stays ``running``; this is a projection over approval_requests.
+    waiting_for: Literal["approval"] | None = None
+    approval_id: UUID | None = None
+    approval: dict | None = None
+
+
+class ApprovalDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    approve: bool
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class SessionDetail(BaseModel):

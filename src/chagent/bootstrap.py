@@ -20,7 +20,10 @@ from chagent.tools.executor import ToolExecutor
 from chagent.tools.sandbox import Sandbox
 from chagent.domain.memories import MemoryPolicy
 from chagent.memory.service import MemoryService
+from chagent.storage.approvals import ApprovalRepository
 from chagent.storage.memories import MemoryRepository
+from chagent.tools.approvals import ApprovalBroker
+from chagent.tools.policy import ApprovalPolicy
 
 
 def create_demo_runner(
@@ -33,6 +36,10 @@ def create_demo_runner(
     max_tool_concurrency: int = 4,
     memory_worker_concurrency: int = 1,
     sandbox: Sandbox | None = None,
+    approval_policy: ApprovalPolicy | None = None,
+    approval_timeout: float = 300.0,
+    approval_decider=None,
+    approval_remote: bool = True,
 ) -> AgentRunner:
     return create_runner(
         database, Model(id="fake-echo", provider="local-test", api="fake", context_window=8192, max_tokens=512),
@@ -42,6 +49,8 @@ def create_demo_runner(
         max_tool_concurrency=max_tool_concurrency,
         memory_worker_concurrency=memory_worker_concurrency,
         sandbox=sandbox,
+        approval_policy=approval_policy, approval_timeout=approval_timeout,
+        approval_decider=approval_decider, approval_remote=approval_remote,
     )
 
 
@@ -55,6 +64,10 @@ def create_runner(
     max_tool_concurrency: int = 4,
     memory_worker_concurrency: int = 1,
     sandbox: Sandbox | None = None,
+    approval_policy: ApprovalPolicy | None = None,
+    approval_timeout: float = 300.0,
+    approval_decider=None,
+    approval_remote: bool = True,
 ) -> AgentRunner:
     registry = create_builtin_registry(allow_host_commands=allow_host_commands,
                                        artifacts=ArtifactRepository(database), sandbox=sandbox)
@@ -73,6 +86,14 @@ def create_runner(
         timeout=timeout, max_turns=max_turns,
         max_tool_concurrency=max_tool_concurrency,
     )
+    # Approval questions are asked by the scheduler before it takes execution
+    # resources; the broker owns the wait and the single-use grant.
+    runner.scheduler.policy = approval_policy or ApprovalPolicy()
+    runner.scheduler.approvals = ApprovalBroker(
+        ApprovalRepository(database, runs), runs, timeout=approval_timeout,
+        decider=approval_decider, remote=approval_remote,
+    )
+    runner.scheduler.sandbox_mode = sandbox.settings.mode if sandbox is not None else "off"
     # One worker per runner: it reads model/client at call time, so a replaced
     # client (test doubles, provider switch) applies to extraction as well.
     runner.sandbox = sandbox

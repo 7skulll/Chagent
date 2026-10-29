@@ -24,6 +24,11 @@ class Settings:
     sandbox_network: bool = False
     sandbox_deny_read: str = ""
     sandbox_writable_tmp: bool = True
+    # Human approval for host commands. ``never`` keeps the pre-approval
+    # behaviour exactly; ``on-failure`` is intentionally unsupported.
+    approval: str = "never"
+    approval_allowlist: str = ""
+    approval_timeout: float = 300.0
 
     def __post_init__(self) -> None:
         if not self.database_url.strip():
@@ -49,6 +54,12 @@ class Settings:
             raise ValueError("CHAGENT_MEMORY_WORKER_CONCURRENCY must be an integer between 1 and 4")
         if self.sandbox not in {"off", "workspace-write"}:
             raise ValueError("CHAGENT_SANDBOX must be off or workspace-write")
+        if self.approval == "on-failure":
+            raise ValueError("CHAGENT_APPROVAL=on-failure is not supported yet")
+        if self.approval not in {"never", "on-request", "untrusted"}:
+            raise ValueError("CHAGENT_APPROVAL must be never, on-request or untrusted")
+        if not math.isfinite(self.approval_timeout) or self.approval_timeout <= 0:
+            raise ValueError("CHAGENT_APPROVAL_TIMEOUT must be finite and positive")
         # Each extracting worker holds a connection while it reads or writes. If
         # they can occupy the whole pool, a concurrent run waits until it gives
         # up on db_timeout and fails. A single-connection pool is exempt: there,
@@ -83,4 +94,7 @@ class Settings:
             sandbox_network=sandbox_network == "true",
             sandbox_deny_read=values.get("CHAGENT_SANDBOX_DENY_READ", ""),
             sandbox_writable_tmp=sandbox_tmp == "true",
+            approval=values.get("CHAGENT_APPROVAL", "never").strip().lower(),
+            approval_allowlist=values.get("CHAGENT_APPROVAL_ALLOWLIST", ""),
+            approval_timeout=float(values.get("CHAGENT_APPROVAL_TIMEOUT", "300")),
         )

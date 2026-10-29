@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from chagent.agent.runner import AgentRunner, RunFailedError
 from chagent.bootstrap import create_demo_runner, create_runner
 from chagent.config import Settings
+from chagent.tools.policy import ApprovalPolicy
 from chagent.tools.sandbox import Sandbox
 from chagent.domain.codec import message_to_dict
 from chagent.models.factory import create_model_client
@@ -35,11 +36,12 @@ from chagent.storage.artifacts import ArtifactRepository
 from chagent.domain.artifacts import artifact_text
 from chagent.domain.messages import ToolResultMessage
 from chagent.domain.memories import MemoryProposal
+from chagent.storage.approvals import ApprovalRepository
 from chagent.storage.memories import MemoryRepository
 from chagent.storage.memory_jobs import MemoryJobRepository
 from chagent.web.schemas import MemoryJobState
 from chagent.sessions.errors import StateConflictError
-from chagent.web.schemas import (AppInfo, ArtifactPage, Cancellation, CancelRequest, ContextView, ErrorResponse,
+from chagent.web.schemas import (AppInfo, ApprovalDecision, ArtifactPage, Cancellation, CancelRequest, ContextView, ErrorResponse,
     MemoryCreate, MemoryDetail, MemoryEdit, MemoryPage, MemoryReview, MessagePage, RevisionRequest,
     RunAccepted, RunCreate, RunView, SessionCreate, SessionDetail, SessionPage)
 from chagent.domain.sessions import Session
@@ -64,6 +66,7 @@ class WebRuntime:
         if not self.workspace.is_dir():
             raise NotADirectoryError("Workspace must be a directory")
         self.sessions = SessionManager(runner.conversations)
+        self.approvals = ApprovalRepository(runner.runs.database, runner.runs)
         self.tasks: set[asyncio.Task] = set()
         self.closing = False
         self._workspace_id = None
@@ -89,7 +92,8 @@ class WebRuntime:
         if run is None:
             raise HTTPException(404, "Run does not exist")
         await self.session(run["session_id"])
-        return run
+        # A waiting run keeps status=running; the projection tells the UI why.
+        return {**run, **await self.approvals.waiting_for(identity)}
 
     async def start(self, session_id: UUID, text: str) -> UUID:
         if self.closing:
@@ -285,6 +289,29 @@ async def run_detail(run_id: UUID, current: Current):
     return await current.run(run_id)
 
 
+@api.get("/runs/{run_id}/approvals", tags=["运行"])
+async def run_approvals(run_id: UUID, current: Current):
+    run = await current.run(run_id)
+    pending = await current.approvals.pending(run_id)
+    return {"waiting_for": "approval" if pending else None,
+            "pending": [{"id": str(item.id), "tool_name": item.tool_name, "subject": item.subject,
+                         "cwd": item.cwd, "expires_at": item.expires_at.isoformat(),
+                         "status": item.status} for item in pending]}
+
+
+@api.post("/approvals/{approval_id}/decide", tags=["运行"])
+async def decide_approval(approval_id: UUID, value: ApprovalDecision, current: Current):
+    """The only way to approve: a local UI request bound to this workspace."""
+    approval = await current.approvals.get(approval_id)
+    if approval is None:
+        raise HTTPException(404, "Approval does not exist")
+    run = await current.run(approval.run_id)
+    status = await current.approvals.decide(approval_id, approve=value.approve, note=value.note)
+    if status == "conflict":
+        raise HTTPException(409, "Approval is no longer pending (decided, expired or the run ended)")
+    return {"id": str(approval_id), "status": status, "run_id": str(run["id"])}
+
+
 @api.post("/runs/{run_id}/cancel", response_model=Cancellation, response_model_exclude_none=True,
           responses={202: {"model": Cancellation}}, tags=["运行"])
 async def cancel(run_id: UUID, current: Current, response: Response, value: CancelRequest | None = None):
@@ -461,6 +488,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
             return
         configured = settings or Settings.from_env()
         selected = None if demo else (model_settings or ModelSettings.from_env())
+        approval = ApprovalPolicy.from_settings(configured)
         client = create_model_client(selected) if selected is not None else None
         try:
             async with Database(configured) as database:
@@ -470,14 +498,16 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                     runner = create_demo_runner(database, allow_host_commands=configured.allow_host_commands, max_turns=configured.max_turns,
                                                 max_tool_concurrency=configured.max_tool_concurrency,
                                                 memory_worker_concurrency=configured.memory_worker_concurrency,
-                                                sandbox=sandbox)
+                                                sandbox=sandbox, approval_policy=approval,
+                                                approval_timeout=configured.approval_timeout)
                 else:
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
                                            timeout=selected.run_timeout, max_turns=configured.max_turns,
                                            max_tool_concurrency=configured.max_tool_concurrency,
                                            memory_worker_concurrency=configured.memory_worker_concurrency,
-                                           sandbox=sandbox)
+                                           sandbox=sandbox, approval_policy=approval,
+                                           approval_timeout=configured.approval_timeout)
                 app.state.runtime = WebRuntime(runner, workspace)
                 app.state.runtime.start_worker()
                 try:

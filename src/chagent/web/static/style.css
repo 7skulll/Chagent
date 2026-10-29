@@ -183,3 +183,16 @@ body.tools-collapsed .tools-panel{display:none}
   #empty h2{font-size:21px}
   .fake-tab{display:none}
 }
+
+.approval {
+  display: flex; flex-direction: column; gap: 6px;
+  margin: 12px 0; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid #d8a531; background: #fff8e6;
+}
+.approval-title { font-weight: 600; }
+.approval-command {
+  white-space: pre-wrap; word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+}
+.approval-note { font-size: 12px; opacity: 0.75; }
+.approval-actions { display: flex; gap: 8px; }

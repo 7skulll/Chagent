@@ -8,12 +8,14 @@ from pathlib import Path
 from time import monotonic_ns, time_ns
 from uuid import UUID
 
-from chagent.domain.messages import ToolCall, ToolResultMessage
+from chagent.domain.messages import TextContent, ToolCall, ToolResultMessage
 from chagent.domain.runs import StoredMessage
 from chagent.storage.repositories import RunRepository
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
+from chagent.tools.approvals import STALE, UNAVAILABLE, ApprovalBroker
 from chagent.tools.executor import ToolExecutor
+from chagent.tools.policy import ApprovalPolicy
 from chagent.tools.progress import ProgressGuard, Decision
 
 
@@ -67,17 +69,28 @@ class _WorkspaceGate:
 
 class ToolScheduler:
     def __init__(self, runs: RunRepository, *, max_concurrency: int = 4,
-                 progress: ProgressGuard | None = None):
+                 progress: ProgressGuard | None = None,
+                 policy: ApprovalPolicy | None = None,
+                 approvals: ApprovalBroker | None = None,
+                 sandbox_mode: str = "off"):
         if isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or not 1 <= max_concurrency <= 32:
             raise ValueError("Tool concurrency must be an integer between 1 and 32")
         self.runs, self.max_concurrency = runs, max_concurrency
         self.progress = progress if progress is not None else ProgressGuard()
+        # Approvals are asked before execution resources are taken; see _ask.
+        self.policy = policy if policy is not None else ApprovalPolicy()
+        self.approvals = approvals
+        self.sandbox_mode = sandbox_mode
         # Shared across concurrent sessions owned by this runner.
         self._slots = asyncio.Semaphore(max_concurrency)
         self._gates: dict[Path, _WorkspaceGate] = {}
 
     def release(self, run_id: UUID) -> None:
         self.progress.release(run_id)
+
+    async def cancel_approvals(self, run_id: UUID) -> None:
+        if self.approvals is not None:
+            await self.approvals.cancel(run_id)
 
     def _groups(self, calls, executor):
         groups = []
@@ -92,7 +105,8 @@ class ToolScheduler:
 
     async def execute_batch(self, calls: list[ToolCall], *, context: ToolContext, model_call_id: UUID,
                             executor: ToolExecutor,
-                            on_committed: Callable[[StoredMessage], None]) -> ToolBatchResult:
+                            on_committed: Callable[[StoredMessage], None],
+                            budget=None) -> ToolBatchResult:
         if context.run_id is None or context.session_id is None:
             raise ValueError("Tool batches require a run and session")
         identities = await self.runs.queue_tool_calls(context.run_id, model_call_id, calls)
@@ -186,6 +200,22 @@ class ToolScheduler:
                             if signal.is_set():
                                 return
                             call = calls[index]
+                            if index in refused:
+                                # No slot needed for a decision already made; the
+                                # refusal is committed like any other tool error.
+                                outcomes[index] = refused_outcome(call, refused[index])
+                                ready[index].set_result(None)
+                                continue
+                            granted = grants.get(index)
+                            if granted is not None:
+                                spent = await self.approvals.consume(
+                                    granted, run_id=context.run_id, tool_name=call.name,
+                                    arguments=call.arguments, cwd=str(context.workspace))
+                                if not spent:
+                                    outcomes[index] = refused_outcome(
+                                        call, approval_result(STALE, granted, "stale"))
+                                    ready[index].set_result(None)
+                                    continue
                             decision: Decision = self.progress.check(
                                 context.run_id, call, executor.registry.get(call.name))
                             if not decision.execute:
@@ -240,6 +270,10 @@ class ToolScheduler:
         gate.users += 1
         try:
             for parallel, indices in self._groups(calls, executor):
+                # Questions are asked before a slot, the workspace gate or an
+                # execution slot is taken, so an unanswered one blocks only this run.
+                refused, grants = await self._ask(calls, indices, context, executor, identities,
+                                                  signal, budget)
                 async with gate.hold(parallel):
                     # Cleanup must finish while still holding the gate: cancelled
                     # read threads may still be accessing this workspace.
@@ -251,3 +285,38 @@ class ToolScheduler:
 
         return ToolBatchResult([outcomes[i].result for i in range(len(calls))],
                                [committed[i].message for i in range(len(calls))], stalled)
+
+    async def _ask(self, calls, indices, context, executor, identities, signal, budget):
+        """Decide which calls need a human, and wait for those decisions."""
+        refused: dict[int, object] = {}
+        grants: dict[int, UUID] = {}
+        for index in indices:
+            call = calls[index]
+            if not self.policy.requires_approval(call.name, call.arguments, sandbox=self.sandbox_mode):
+                continue
+            if self.approvals is None:
+                refused[index] = approval_result(UNAVAILABLE, None, "unavailable")
+                continue
+            outcome = await self.approvals.request(
+                run_id=context.run_id, tool_record_id=identities[index], tool_name=call.name,
+                arguments=call.arguments, cwd=str(context.workspace), signal=signal, budget=budget)
+            if outcome.approved and outcome.approval_id is not None:
+                grants[index] = outcome.approval_id
+            else:
+                refused[index] = approval_result(outcome.message, outcome.approval_id, outcome.reason)
+        return refused, grants
+
+
+def approval_result(message: str, approval_id, reason: str):
+    """A refusal that says what happened, so the model does not retry blindly."""
+    return AgentToolResult(
+        content=[TextContent(message)], is_error=True,
+        details={"approval": reason, "approval_id": str(approval_id) if approval_id else None,
+                 "execution_started": False},
+    )
+
+
+def refused_outcome(call: ToolCall, result: AgentToolResult) -> ToolOutcome:
+    return ToolOutcome(result, ToolResultMessage(
+        tool_call_id=call.id, tool_name=call.name, content=result.content, is_error=True,
+        timestamp=time_ns() // 1_000_000, details=result.details))

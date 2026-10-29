@@ -168,6 +168,8 @@ function connectRun(runId, version) {
     if (type === "compaction_completed") {
       $("live").append(textNode("div", `历史已压缩 · 摘要第 ${payload.revision} 版 · ${payload.tokens_before} → ${payload.tokens_after} 估算 token`, "tool-status"));
     }
+    if (type === "approval_requested") { showApproval(runId).catch(showError); $("status").textContent = "等待确认命令…"; }
+    if (["approval_decided", "approval_expired", "approval_cancelled"].includes(type)) hideApproval();
     if (type === "compaction_failed") {
       $("live").append(textNode("div", "压缩未完成，继续使用原有摘要和近期完整轮次。", "tool-status failed"));
     }
@@ -212,6 +214,38 @@ function connectRun(runId, version) {
     } catch (error) { source.close(); setBusy(false); showError(error); }
   };
 }
+function hideApproval() {
+  const row = $("approval");
+  if (row) row.remove();
+}
+
+async function showApproval(runId) {
+  const data = await api(`/api/runs/${runId}/approvals`);
+  if (!data.pending.length || state.run !== runId) return;
+  hideApproval();
+  const request = data.pending[0];
+  const row = textNode("div", "", "approval");
+  row.id = "approval";
+  row.append(textNode("div", `需要确认：${request.tool_name}`, "approval-title"));
+  row.append(textNode("code", request.subject, "approval-command"));
+  row.append(textNode("div", `目录 ${request.cwd} · ${new Date(request.expires_at).toLocaleTimeString()} 前有效 · 批准只对这一次调用生效`, "approval-note"));
+  const actions = textNode("div", "", "approval-actions");
+  const approve = textNode("button", "批准这一次", "primary");
+  const deny = textNode("button", "拒绝", "");
+  const decide = async value => {
+    approve.disabled = deny.disabled = true;
+    try { await post(`/api/approvals/${request.id}/decide`, {approve: value}); }
+    catch (error) { showError(error); }
+    finally { hideApproval(); }
+  };
+  approve.addEventListener("click", () => decide(true));
+  deny.addEventListener("click", () => decide(false));
+  actions.append(approve, deny);
+  row.append(actions);
+  $("live").append(row);
+  scrollBottom();
+}
+
 $("composer").addEventListener("submit", async event => {
   event.preventDefault();
   const text = $("input").value;

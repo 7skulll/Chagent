@@ -16,7 +16,7 @@ import uvicorn
 
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
-from chagent.domain.messages import AssistantMessage, TextContent
+from chagent.domain.messages import AssistantMessage, TextContent, UserMessage
 from chagent.models.events import ContentDeltaEvent, ErrorEvent, StartEvent
 from chagent.models.fake import FakeModelClient
 from chagent.storage.database import Database
@@ -375,3 +375,78 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         result = await self.client.post(f"/api/sessions/{identity}/runs", headers={"Content-Type": "application/json"}, content=chunks())
         self.assertEqual(result.status_code, 413)
         self.assertEqual((await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"], [])
+
+
+@unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")
+class ApprovalApiTests(unittest.IsolatedAsyncioTestCase):
+    """A question is visible and answerable over the local API, and only here."""
+
+    async def asyncSetUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.workspace = Path(self.directory.name)
+        self.schema = "chagent_web_approval_" + uuid4().hex
+        self.admin = await AsyncConnection.connect(os.environ["CHAGENT_TEST_DATABASE_URL"], autocommit=True)
+        self.addAsyncCleanup(self.admin.close)
+        await self.admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(self.schema)))
+        self.addAsyncCleanup(self.drop_schema)
+        self.database = Database(Settings(database_url=make_conninfo(
+            os.environ["CHAGENT_TEST_DATABASE_URL"], options=f"-c search_path={self.schema}")))
+        self.addAsyncCleanup(self.database.close)
+        await self.database.connect()
+        await migrate(self.database)
+        self.runner = create_demo_runner(self.database)
+        self.runtime = WebRuntime(self.runner, self.workspace)
+        self.app = create_app(workspace=self.workspace, injected_runtime=self.runtime)
+        self.lifespan = self.app.router.lifespan_context(self.app)
+        await self.lifespan.__aenter__()
+        self.addAsyncCleanup(self.lifespan.__aexit__, None, None, None)
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1")
+        self.addAsyncCleanup(self.client.aclose)
+        self.session = await self.runner.conversations.create_session(self.workspace)
+        self.run_id = await self.runner.runs.begin(self.session, UserMessage("需要批准", 0))
+        from chagent.storage.approvals import ApprovalRepository
+        from chagent.domain.messages import ToolCall
+        from psycopg.types.json import Jsonb
+        model_call = uuid4()
+        async with self.database.transaction() as connection:
+            await connection.execute(
+                "INSERT INTO model_calls (id, run_id, iteration, request, context_snapshot) "
+                "VALUES (%s, %s, 0, %s, %s)", (model_call, self.run_id, Jsonb({}), Jsonb({})))
+        record = (await self.runner.runs.queue_tool_calls(
+            self.run_id, model_call, [ToolCall("c1", "exec_command", {"cmd": "ls"})]))[0]
+        self.approvals = ApprovalRepository(self.database, self.runner.runs)
+        self.request = await self.approvals.create(
+            run_id=self.run_id, tool_record_id=record, fingerprint="fp", tool_name="exec_command",
+            cwd=str(self.workspace), subject="ls", ttl=60)
+
+    async def drop_schema(self):
+        await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
+
+    async def test_pending_question_is_projected_and_can_be_decided_once(self):
+        view = await self.client.get(f"/api/runs/{self.run_id}")
+        self.assertEqual(view.status_code, 200, view.text)
+        self.assertEqual(view.json()["waiting_for"], "approval")
+        self.assertEqual(view.json()["approval_id"], str(self.request.id))
+
+        pending = await self.client.get(f"/api/runs/{self.run_id}/approvals")
+        self.assertEqual(pending.status_code, 200, pending.text)
+        self.assertEqual([item["subject"] for item in pending.json()["pending"]], ["ls"])
+
+        decided = await self.client.post(f"/api/approvals/{self.request.id}/decide", json={"approve": True})
+        self.assertEqual(decided.status_code, 200, decided.text)
+        self.assertEqual(decided.json()["status"], "approved")
+
+        again = await self.client.post(f"/api/approvals/{self.request.id}/decide", json={"approve": False})
+        self.assertEqual(again.status_code, 409, again.text)
+
+    async def test_approvals_outside_the_workspace_are_not_visible(self):
+        other = Path(self.directory.name, "elsewhere")
+        other.mkdir()
+        other_runtime = WebRuntime(self.runner, other)
+        app = create_app(workspace=other, injected_runtime=other_runtime)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+                self.assertEqual((await client.get(f"/api/runs/{self.run_id}")).status_code, 404)
+                self.assertEqual((await client.post(f"/api/approvals/{self.request.id}/decide",
+                                                    json={"approve": True})).status_code, 404)

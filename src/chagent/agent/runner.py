@@ -9,6 +9,7 @@ from uuid import UUID
 from psycopg import Error as DatabaseError
 from psycopg_pool import PoolTimeout
 
+from chagent.agent.budget import RunBudget
 from chagent.agent.types import FinishDecision, RunState
 from chagent.agent.stream_writer import TextStreamWriter
 from chagent.context.builder import ContextBudgetError, ContextBuilder
@@ -115,16 +116,19 @@ class AgentRunner:
                     task.cancel()
 
         heartbeat_task = asyncio.create_task(heartbeat(), name=f"run-heartbeat-{run_id}")
+        # A pausable budget rather than asyncio.timeout: waiting for a human is
+        # not the run spending its execution time (see agent/budget.py).
+        budget = RunBudget(self.timeout, lambda: task.cancel() if task is not None else None)
         try:
+            budget.start()
             if on_started is not None:
                 on_started(run_id)
-            async with asyncio.timeout(self.timeout):
-                state = await self._load_state(run_id, session_id)
-                self._states[run_id] = state
-                command = (self.memory_service.explicit_command(state)
-                           if self.memory_service is not None else None)
-                result = (await self._explicit_memory(state, command) if command is not None
-                          else await self._loop(state))
+            state = await self._load_state(run_id, session_id)
+            self._states[run_id] = state
+            command = (self.memory_service.explicit_command(state)
+                       if self.memory_service is not None else None)
+            result = (await self._explicit_memory(state, command) if command is not None
+                      else await self._loop(state, budget))
             async def commit(connection):
                 # Explicit memories are deterministic; automatic extraction only
                 # enqueues a job so this answer never waits for a second model call.
@@ -137,6 +141,9 @@ class AgentRunner:
         except asyncio.CancelledError:
             if heartbeat_error is not None:
                 raise RunFailedError(run_id, "Run heartbeat failed; ownership is uncertain", "storage_error") from heartbeat_error
+            if budget.expired:
+                await self._close_if_running(run_id, "failed", "Run exceeded its time budget", "run_timeout")
+                raise RunFailedError(run_id, "Run exceeded its time budget", "run_timeout") from None
             await self._close_if_running(run_id, "cancelled", "Run cancelled", "user_cancelled")
             raise
         except RunOwnershipLost as error:
@@ -159,6 +166,7 @@ class AgentRunner:
         else:
             return result
         finally:
+            budget.stop()
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
             try:
@@ -172,6 +180,11 @@ class AgentRunner:
             self._states.pop(run_id, None)
             if self.context_manager is not None:
                 self.context_manager.release(run_id)
+            try:
+                # A pending question must not outlive its run.
+                await self.scheduler.cancel_approvals(run_id)
+            except BaseException:
+                pass
             self.scheduler.release(run_id)
             if self.memory_service is not None:
                 self.memory_service.release(run_id)
@@ -244,7 +257,7 @@ class AgentRunner:
         await self.runs.flush_events(run_id)
         return RunResult(run_id, session_id, message, "explicit_memory")
 
-    async def _loop(self, state: RunState) -> RunResult:
+    async def _loop(self, state: RunState, budget=None) -> RunResult:
         run_id, session_id = state.run_id, state.session.id
         tool_context = ToolContext(
             workspace=state.session.workspace, session_id=session_id, run_id=run_id,
@@ -294,7 +307,8 @@ class AgentRunner:
             if len({call.id for call in calls}) != len(calls):
                 raise RunExecutionError("Duplicate tool call IDs in one response", "model_protocol_error")
             batch = await self.scheduler.execute_batch(calls, context=tool_context, model_call_id=model_call_id,
-                                                        executor=self.tools, on_committed=state.append_committed)
+                                                        executor=self.tools, on_committed=state.append_committed,
+                                                        budget=budget)
             if batch.stalled:
                 # The model was already told the call is unchanged; repeating it
                 # again converts a stalled attempt into an explicit ending.
