@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+import tempfile
 import unittest
 
 from chagent.config import Settings
@@ -64,3 +67,64 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(Settings.from_env({"CHAGENT_ALLOW_HOST_COMMANDS": "true"}).allow_host_commands)
         with self.assertRaises(ValueError):
             Settings.from_env({"CHAGENT_ALLOW_HOST_COMMANDS": "maybe"})
+
+
+class ResolvedConfigurationTests(unittest.TestCase):
+    """``config show`` must explain behaviour and name shadowed values."""
+
+    def test_dotenv_parses_comments_quotes_and_export(self):
+        from chagent.config import dotenv
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text(
+                "# comment\n"
+                "\n"
+                "CHAGENT_MODEL=plain\n"
+                "export CHAGENT_PROVIDER=\"deepseek\"\n"
+                "DEEPSEEK_API_KEY='quoted-value'\n"
+                "NOT_A_PAIR\n",
+                encoding="utf-8")
+            values = dotenv.read(path)
+        self.assertEqual(values, {"CHAGENT_MODEL": "plain", "CHAGENT_PROVIDER": "deepseek",
+                                 "DEEPSEEK_API_KEY": "quoted-value"})
+
+    def test_shadowed_values_are_named_but_secrets_are_not_printed(self):
+        from chagent.config import dotenv
+        entries = dotenv.shadowed(
+            {"CHAGENT_MODEL": "from-shell", "CHAGENT_API_KEY": "secret-value"},
+            {"CHAGENT_MODEL": "from-file", "DEEPSEEK_API_KEY": "other-secret"})
+        self.assertEqual([(item["key"], item["kind"]) for item in entries],
+                         [("CHAGENT_MODEL", "overridden"), ("CHAGENT_API_KEY", "shell-only")])
+        lines = "\n".join(dotenv.describe(entries))
+        self.assertIn("from-file", lines)
+        self.assertIn("from-shell", lines)
+        self.assertNotIn("secret-value", lines)
+
+    def test_behavior_line_names_sandbox_host_commands_and_compaction(self):
+        from chagent.config import Settings
+        from chagent.diagnostics.behavior import describe
+        from chagent.domain.summaries import CompactionPolicy
+        line = describe(Settings(sandbox="workspace-write", sandbox_network=False, allow_host_commands=True),
+                        CompactionPolicy(enabled=False))
+        self.assertIn("sandbox=workspace-write/no-network", line)
+        self.assertIn("host_commands=on", line)
+        self.assertIn("compaction=off", line)
+
+    def test_collect_applies_the_file_as_defaults_and_reports_the_winner(self):
+        from chagent.config import dotenv
+        from chagent.config.__main__ import collect
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text("CHAGENT_PROVIDER=deepseek\nDEEPSEEK_API_KEY=file-secret\n"
+                            "CHAGENT_MODEL=file-model\nCHAGENT_SANDBOX=workspace-write\n",
+                            encoding="utf-8")
+            file_env = dotenv.read(path)
+            # The environment wins, exactly as `uv run --env-file` behaves.
+            env = {**file_env, "CHAGENT_MODEL": "shell-model"}
+            sections, problems = collect(env, file_env, path)
+        self.assertEqual(problems, [])
+        self.assertIn("deepseek/shell-model", sections["model"])
+        self.assertIn("sandbox=workspace-write", sections["behavior"])
+        self.assertEqual(sections["shadowed"],
+                         ["CHAGENT_MODEL from .env 'file-model' is overridden by environment 'shell-model'"])
+        self.assertNotIn("file-secret", json.dumps(sections))

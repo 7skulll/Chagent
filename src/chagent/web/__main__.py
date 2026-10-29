@@ -7,6 +7,8 @@ from pathlib import Path
 import uvicorn
 
 from chagent.config import Settings
+from chagent.diagnostics.behavior import describe as describe_behavior
+from chagent.domain.summaries import CompactionPolicy
 from chagent.models.settings import ModelSettings
 from chagent.web.app import create_app
 
@@ -29,13 +31,16 @@ def main():
     if args.model:
         environment["CHAGENT_MODEL"] = args.model
     try:
+        settings = Settings.from_env()
+        compaction = CompactionPolicy.from_env()
         selected = None if args.demo else ModelSettings.from_env(environment)
-        app = create_app(workspace=args.workspace, settings=Settings.from_env(), model_settings=selected, demo=args.demo)
+        app = create_app(workspace=args.workspace, settings=settings, model_settings=selected, demo=args.demo)
     except (ValueError, OSError) as error:
         parser.error(str(error))
     # Ambient variables win over --env-file, so name the resolved pair once.
     if selected is not None:
         print(f"Resolved: {selected.describe()}", flush=True)
+    print(f"Behavior: {describe_behavior(settings, compaction)}", flush=True)
     # Bound the wait for open SSE responses before lifespan cancels agent tasks.
     uvicorn.run(app, host="127.0.0.1", port=args.port, workers=1, timeout_graceful_shutdown=3)
 

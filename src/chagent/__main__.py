@@ -9,6 +9,8 @@ from uuid import UUID
 
 from chagent.bootstrap import create_demo_runner, create_runner
 from chagent.config import Settings
+from chagent.diagnostics.behavior import describe as describe_behavior
+from chagent.domain.summaries import CompactionPolicy
 from chagent.tools.sandbox import Sandbox
 from chagent.domain.messages import TextContent
 from chagent.domain.json_types import JsonObject
@@ -62,6 +64,7 @@ async def _run(
         # line is the one that explains why.
         if model_settings is not None:
             print(f"Resolved: {model_settings.describe()}", flush=True)
+        print(f"Behavior: {describe_behavior(settings, CompactionPolicy.from_env())}", flush=True)
         result = await runner.run(session_id, text)
         print(f"Model: {runner.model.provider}/{runner.model.id}" + (" (deterministic demo)" if client is None else ""))
         print(f"Session: {result.session_id}")

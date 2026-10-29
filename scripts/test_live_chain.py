@@ -2,6 +2,12 @@
 
 Run with uv run --env-file .env python scripts/test_live_chain.py --output PATH.
 Only synthetic inputs and temporary workspace files are sent to the provider.
+
+Each case also carries local prompt-cache facts (``hit`` from provider usage,
+``reusable`` from the recorded prefix overlap, and ``breaks`` naming the section
+that diverged). They are computed from stored requests, so auditing adds no
+provider traffic. ``--keep-schema DIR`` keeps a failed run's schema, a restore
+script and the failure list, because the rows are the only post-mortem evidence.
 """
 
 import argparse
@@ -27,6 +33,8 @@ from diagnose_main_path import Metrics, ObservedDatabase, instrument
 from run_metrics import summarize_tool_calls
 from chagent.bootstrap import create_runner
 from chagent.config import Settings
+from chagent.diagnostics.cache import audit
+from chagent.diagnostics.schema import keep_artifacts
 from chagent.domain.memories import MemoryPolicy
 from chagent.domain.messages import AssistantMessage, TextContent, UserMessage
 from chagent.domain.summaries import CompactionPolicy
@@ -142,13 +150,17 @@ class LiveSuite:
         tool_rows = []
         if identities:
             async with self.database.connection() as connection:
-                cursor = await connection.execute("SELECT request, context_snapshot FROM model_calls WHERE run_id = %s ORDER BY iteration", (identities[0],))
+                cursor = await connection.execute(
+                    "SELECT iteration, request, response, context_snapshot FROM model_calls "
+                    "WHERE run_id = %s ORDER BY iteration", (identities[0],))
                 model_rows = await cursor.fetchall()
                 cursor = await connection.execute(
                     "SELECT name, arguments, status, call_index FROM tool_calls "
                     "WHERE run_id = %s ORDER BY created_at, call_index", (identities[0],))
                 tool_rows = await cursor.fetchall()
         tool_metrics = summarize_tool_calls(tool_rows)
+        # Local, no extra requests: what each turn could reuse and what broke it.
+        cache = audit([row for row in model_rows if row.get("response") is not None])
         types = [event["type"] for event in events]
         terminal = types.index("run_completed") if "run_completed" in types else None
         # Extraction events append to the same stream after the terminal event,
@@ -168,13 +180,15 @@ class LiveSuite:
                   "failure_reason": (persisted_run["error"] or "").replace(self.selected.api_key, "[redacted]") if persisted_run else None,
                   "end_reason": result.end_reason if result else None,
                   "answer": text(result.message)[:1500] if result else None,
-                  "model_calls": len(model_rows), **tool_metrics,
+                  "model_calls": len(model_rows), **tool_metrics, "cache": cache,
                   "event_types": [event["type"] for event in events],
                   "provider_calls": self.client.calls[first_call:], "metrics": metrics, **extra}
         self.results.append(record)
         summary = {"case": name, "passed": record["passed"], "elapsed_ms": record["elapsed_ms"],
                    "model_calls": record["model_calls"], "tool_calls": record["tool_calls"],
-                   "repeated_tool_calls": record["repeated_tool_calls"], "checks": checks}
+                   "repeated_tool_calls": record["repeated_tool_calls"],
+                   "cache": {key: cache[key] for key in ("hit", "reusable", "breaks")},
+                   "checks": checks}
         if not record["passed"]:
             summary["tool_sequence"] = record["tool_sequence"]
         print(json.dumps(summary, ensure_ascii=False), flush=True)
@@ -329,6 +343,15 @@ class LiveSuite:
         await self.run("normal_tool_stop", runner,
                        "必须调用 finish_test 工具，参数 text 为 done。不要调用其他工具。", verify=verify)
 
+    async def cache_facts(self, run_id):
+        """Local prompt-cache facts for a run; reads rows, sends nothing."""
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT iteration, request, response FROM model_calls "
+                "WHERE run_id = %s ORDER BY iteration", (run_id,))
+            rows = await cursor.fetchall()
+        return audit([row for row in rows if row.get("response") is not None])
+
     async def web_case(self):
         # ASGI exercises the real web handlers and durable event replay. Its
         # in-process transport buffers SSE; it does not measure browser TTFT.
@@ -366,15 +389,18 @@ class LiveSuite:
                 "WHERE run_id = %s ORDER BY created_at, call_index", (run_id,))
             tool_rows = await cursor.fetchall()
         provider_calls = self.client.calls[first:]
+        cache = await self.cache_facts(run_id)
         record = {"name": "web_api_sse_replay", "passed": all(checks.values()), "checks": checks,
                   "elapsed_ms": round((perf_counter() - started) * 1000, 3),
                   "answer": answer, "sse_delta_count": len(deltas),
                   "model_calls": len(provider_calls), **summarize_tool_calls(tool_rows),
-                  "provider_calls": provider_calls}
+                  "cache": cache, "provider_calls": provider_calls}
         self.results.append(record)
         summary = {"case": record["name"], "passed": record["passed"],
                    "model_calls": record["model_calls"], "tool_calls": record["tool_calls"],
-                   "repeated_tool_calls": record["repeated_tool_calls"], "checks": checks}
+                   "repeated_tool_calls": record["repeated_tool_calls"],
+                   "cache": {key: cache[key] for key in ("hit", "reusable", "breaks")},
+                   "checks": checks}
         if not record["passed"]:
             summary["tool_sequence"] = record["tool_sequence"]
         print(json.dumps(summary, ensure_ascii=False), flush=True)
@@ -524,7 +550,7 @@ async def main_async(args):
                                 else "named provider key", "case_selection": args.case},
               "environment": {"python": platform.python_version(), "platform": platform.system()},
               "limits": "single sample per scenario; synthetic data; no browser TTFT or comparative Pi/Codex benchmark",
-              "results": [], "schema_cleaned": False}
+              "results": [], "schema_cleaned": False, "schema_kept": None}
     admin = await AsyncConnection.connect(configured.database_url, autocommit=True, connect_timeout=5)
     observed = None
     try:
@@ -557,8 +583,29 @@ async def main_async(args):
                             # Do not serialize arbitrary exception strings or provider bodies.
                             report["suite_error_type"] = type(error).__name__
         finally:
-            await admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
-            report["schema_cleaned"] = True
+            failed = "suite_error_type" in report or any(not case["passed"] for case in report["results"])
+            kept = False
+            if args.keep_schema is not None and failed:
+                failures = [{"case": case["name"],
+                             "failed_checks": [name for name, ok in case.get("checks", {}).items() if not ok],
+                             "error_type": case.get("error_type")}
+                            for case in report["results"] if not case["passed"]]
+                try:
+                    artifacts = keep_artifacts(args.keep_schema, schema=schema,
+                                               report_path=args.output.resolve(), failures=failures)
+                except OSError as error:
+                    # Leaking a schema is worse than losing the artifacts: fall back to the drop.
+                    report["schema_artifact_error"] = type(error).__name__
+                else:
+                    kept = True
+                    report["schema_kept"] = schema
+                    report["schema_artifacts"] = [str(path) for path in artifacts]
+                    print(json.dumps({"schema_kept": schema, "artifacts": report["schema_artifacts"],
+                                      "audit": f"PYTHONPATH=src python scripts/report_prompt_cache.py --schema {schema}",
+                                      "drop": f"sh {artifacts[1]}"}, ensure_ascii=False), flush=True)
+            if not kept:
+                await admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+                report["schema_cleaned"] = True
     finally:
         await admin.close()
         calls = observed.calls if observed else []
@@ -566,6 +613,19 @@ async def main_async(args):
         report["total_model_calls"] = sum(case.get("model_calls", 0) for case in report["results"])
         report["total_tool_calls"] = sum(case.get("tool_calls", 0) for case in report["results"])
         report["total_repeated_tool_calls"] = sum(case.get("repeated_tool_calls", 0) for case in report["results"])
+        audits = [(case["name"], case["cache"]) for case in report["results"] if case.get("cache")]
+        cache_prompt = sum(entry["prompt_tokens"] for _, entry in audits)
+        cache_cached = sum(entry["cached_tokens"] for _, entry in audits)
+        cache_shared = sum(entry["shared_bytes"] for _, entry in audits)
+        cache_total = sum(entry["total_bytes"] for _, entry in audits)
+        report["prompt_cache"] = {
+            "hit": round(cache_cached / cache_prompt, 4) if cache_prompt else None,
+            "reusable": round(cache_shared / cache_total, 4) if cache_total else None,
+            "breaks": [{"case": name, **broken} for name, entry in audits for broken in entry["breaks"]],
+            "cases": {name: entry["hit"] for name, entry in audits},
+            "scope": "task-loop model_calls only; memory extraction and compaction requests appear in reported_tokens but not here",
+            "note": "hit is provider-reported usage; reusable is the local prefix overlap; auditing sends no requests",
+        }
         report["reported_tokens"] = {key: sum((call["usage"] or {}).get(key, 0) for call in calls)
                                       for key in ("input", "output", "cache_read", "cache_write", "total_tokens")}
         report["usage_missing_calls"] = sum(call["usage"] is None for call in calls)
@@ -596,12 +656,16 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-calls", type=int, default=24)
     parser.add_argument("--case", choices=("all", "core", "web", "explicit", "scheduling", "events", "sandbox"), default="all")
+    parser.add_argument("--keep-schema", type=Path, metavar="DIR",
+                        help="On failure, keep the disposable schema and write keep-*.json plus restore-*.sh to DIR")
     args = parser.parse_args()
     if not 1 <= args.max_calls <= 30:
         parser.error("--max-calls must be between 1 and 30")
     report = asyncio.run(main_async(args))
     print(json.dumps({"passed": report["passed"], "requests": report["total_provider_requests"],
-                      "reported_tokens": report["reported_tokens"], "schema_cleaned": report["schema_cleaned"],
+                      "reported_tokens": report["reported_tokens"],
+                      "prompt_cache": {key: report["prompt_cache"][key] for key in ("hit", "reusable", "breaks")},
+                      "schema_cleaned": report["schema_cleaned"], "schema_kept": report["schema_kept"],
                       "report": str(args.output.resolve())}, ensure_ascii=False))
     raise SystemExit(0 if report["passed"] else 1)
 

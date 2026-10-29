@@ -22,8 +22,12 @@ uv run --env-file .env python -m chagent "你好，介绍一下这个项目"
 
 ```sh
 uv run --env-file .env python -m chagent.models check
+# 人读的完整解析：行为开关、预算、数据库，以及被 shell 覆盖的 .env 值
+uv run --env-file .env python -m chagent.config show
 uv run --env-file .env python -m chagent --demo "无需 API Key 的离线演示"
 ```
+
+启动时先打印 `Resolved:`（供应商／模型／地址／Key 来源）与 `Behavior:`（沙箱、宿主命令、压缩、轮数上限），因此 shell 里遗留的 `CHAGENT_*` 变量不会静默改变行为。
 
 预设模型、兼容范围与预算配置见[模型配置](docs/模型配置.md)。
 
@@ -64,7 +68,7 @@ uv run --env-file .env python -m chagent.memory list
 
 ## 验证
 
-已交付批次的实现、实测、边界与回退方式统一记在[实施记录](docs/实施记录.md)：记忆提取移出运行与上下文投影缓存、A 批文本合并与提交后通知、B1 运行所有权与失联收敛、B2 失败事实恢复、F1 事件批量提交、F2 一个事务一道所有权门、P0 检索与补丁工具、M 轮次度量、G 一次调用多处编辑、H 运行级环境快照、I 编辑失败路径的搜索预算与线程化、N `/remember` 本地短路。
+已交付批次的实现、实测、边界与回退方式统一记在[实施记录](docs/实施记录.md)：记忆提取移出运行与上下文投影缓存、A 批文本合并与提交后通知、B1 运行所有权与失联收敛、B2 失败事实恢复、F1 事件批量提交、F2 一个事务一道所有权门、P0 检索与补丁工具、P1 提示缓存不变量、M 轮次度量、G 一次调用多处编辑、H 运行级环境快照、G2 编辑失败路径的搜索预算与线程化、N `/remember` 本地短路、S 宿主机命令沙箱。
 
 写路径两批合起来的效果：1.6 秒流式回答从 260 条 SQL／81 个事务降到 59／21，两轮加一次工具从 57 条降到 46 条，事务数与失权判定不变。
 
@@ -74,9 +78,9 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   uv run python -m unittest discover -s tests -q
 ```
 
-数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **303 项通过**。
+数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **314 项通过**。
 
-真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求。结论与实测数据见[实施记录](docs/实施记录.md)与[执行效率优化](docs/执行效率优化.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
+真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。链路报告为每个用例带上本地计算的 `cache{hit,reusable,breaks}`（不额外请求），失败时可用 `--keep-schema docs/diagnostics` 保留一次性 schema，再用 `report_prompt_cache.py --schema <名称>` 事后审计。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求。结论与实测数据见[实施记录](docs/实施记录.md)与[执行效率优化](docs/执行效率优化.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
 
 四场景任务探针用固定临时仓库与一次性 schema 运行真实供应商，报告轮次、工具调用、重复调用、墙钟与正确性；`--repeats 2` 用来检查轮次波动：
 
@@ -102,6 +106,6 @@ uv run --env-file .env python scripts/probe_task.py --case all --repeats 2 \
 | 已交付批次的实现、实测、边界与回退 | [实施记录](docs/实施记录.md) |
 | 写入路径实测与收敛方案（F3 已决定不做） | [执行效率优化](docs/执行效率优化.md) |
 | 路线图、诊断基线、未实施项 | [下一阶段实施方案](docs/下一阶段实施方案.md) |
-| 沙箱、审批与事件通道（方案） | [执行边界设计](docs/执行边界设计.md) |
+| 沙箱、审批与事件通道（S 批已实施，K／J 待实施） | [执行边界设计](docs/执行边界设计.md) |
 
 诊断与真实链路的原始结果归档在 [`docs/diagnostics/`](docs/diagnostics/)。
