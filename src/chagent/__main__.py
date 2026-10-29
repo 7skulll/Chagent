@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -83,7 +84,9 @@ async def _run(
         # line is the one that explains why.
         if model_settings is not None:
             print(f"Resolved: {model_settings.describe()}", flush=True)
-        print(f"Behavior: {describe_behavior(settings, CompactionPolicy.from_env(), runner.context.counter.name)}", flush=True)
+        # The CLI flag can enable host commands on its own; the line must show
+        # what the run will actually do, not only what the environment said.
+        print(f"Behavior: {describe_behavior(replace(settings, allow_host_commands=host_commands), CompactionPolicy.from_env(), runner.context.counter.name)}", flush=True)
         result = await runner.run(session_id, text)
         print(f"Model: {runner.model.provider}/{runner.model.id}" + (" (deterministic demo)" if client is None else ""))
         print(f"Session: {result.session_id}")
