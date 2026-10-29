@@ -17,6 +17,7 @@ import httpx
 from chagent.agent.runner import RunFailedError
 from chagent.bootstrap import create_demo_runner, create_runner
 from chagent.config import Settings
+from chagent.domain.codec import message_from_dict
 from chagent.domain.messages import AssistantMessage, ToolCall, ToolResultMessage
 from chagent.models.events import DoneEvent, ErrorEvent, StartEvent
 from chagent.models.fake import FakeModelClient
@@ -127,7 +128,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT iteration, request FROM model_calls WHERE run_id = %s ORDER BY iteration", (result.run_id,))
             rows = await cursor.fetchall()
         self.assertEqual([row["iteration"] for row in rows], [0, 1])
-        system = [row["request"]["messages"][0]["content"] for row in rows]
+        system = [message_from_dict(row["request"]["messages"][0]).text() for row in rows]
         self.assertEqual(system[0], system[1])
         self.assertIn(f"Working directory: {workspace.resolve()}", system[0])
         self.assertIn("app/ (1 file: pricing.py)", system[0])

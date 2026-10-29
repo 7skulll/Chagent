@@ -16,7 +16,7 @@ from psycopg.conninfo import make_conninfo
 from chagent.agent.runner import RunFailedError
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
-from chagent.context.compactor import serialize_turn
+from chagent.context.compactor import RETAINED_HEADER, retained_outputs, serialize_turn, strip_retained
 from chagent.domain.messages import AssistantMessage, ImageContent, TextContent, ThinkingContent, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.runs import StoredMessage
 from chagent.domain.sessions import TaskState
@@ -126,7 +126,7 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
             if request.purpose == "summary":
                 self.assertTrue(all(not getattr(message, "tools_added", None) for message in request.messages))
             else:
-                self.assertIn("do not delete data", request.messages[0].content)
+                self.assertIn("do not delete data", request.messages[0].text())
                 self.assertIsInstance(request.messages[1], UserMessage)
                 self.assertIn(summary.content, request.messages[1].content)
         snapshots = await SessionManager(self.runner.conversations).contexts(self.session)
@@ -142,6 +142,25 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         latest = (await SessionManager(restored.conversations).contexts(self.session))[0]["snapshot"]
         self.assertEqual(latest["summary_id"], str(summary.id))
 
+    async def test_compaction_retains_the_newest_tool_output_verbatim(self):
+        """Summarizing the evidence makes the model re-read it; carry it instead."""
+        await self.seed()
+        await self.runner.run(self.session, "continue")
+        summary = await self.summaries.latest(self.session)
+        self.assertIsNotNone(summary)
+        self.assertIn(RETAINED_HEADER, summary.content)
+        history = await self.runner.conversations.messages(self.session)
+        covered = set(summary.source_message_ids)
+        results = [item.message for item in history
+                   if str(item.id) in covered and isinstance(item.message, ToolResultMessage)]
+        self.assertTrue(results)
+        newest = "\n".join(block.text for block in results[-1].content if isinstance(block, TextContent))
+        self.assertIn(newest[:200], summary.content)
+        # The model sees the evidence in the summary message of the same run.
+        self.assertTrue(any(RETAINED_HEADER in request.messages[1].content
+                            for request in self.client.requests
+                            if request.purpose == "task" and isinstance(request.messages[1], UserMessage)))
+
     async def test_incremental_checkpoint_uses_previous_summary_and_new_sources(self):
         await self.seed()
         await self.runner.run(self.session, "first compact")
@@ -154,7 +173,10 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(summary.covered_through_sequence, previous.covered_through_sequence)
         self.assertFalse(set(summary.source_message_ids) & set(previous.source_message_ids))
         request = next(request for request in self.client.requests if request.purpose == "summary")
-        self.assertEqual(json.loads(request.messages[1].content)["previous_summary"], previous.content)
+        # Retained evidence is re-derived from the turns on every compaction, so
+        # only the summary text travels forward.
+        self.assertEqual(json.loads(request.messages[1].content)["previous_summary"],
+                         strip_retained(previous.content))
         self.assertEqual(len(await self.summaries.list(self.session)), 2)
 
     async def test_multiple_bounded_summary_calls_create_one_checkpoint(self):
@@ -290,3 +312,36 @@ class CompactionUnitTests(unittest.TestCase):
                        {"CHAGENT_COMPACTION_ENABLED": "yes"}, {"CHAGENT_COMPACTION_MAX_CALLS": "0"}):
             with self.assertRaises(ValueError):
                 CompactionPolicy.from_env(values)
+
+class RetainedOutputTests(unittest.TestCase):
+    """The retained block is bounded, ordered and never confused with facts."""
+
+    def turn(self, *messages):
+        return [StoredMessage(uuid4(), index, message) for index, message in enumerate(messages, start=1)]
+
+    def result(self, text, name="read_file"):
+        return ToolResultMessage("call", name, [TextContent(text)], False, 1)
+
+    def test_keeps_the_newest_results_in_prompt_order(self):
+        turns = [self.turn(self.result("old result")), self.turn(self.result("new result"))]
+        text = retained_outputs(turns, 1)
+        self.assertIn("new result", text)
+        self.assertNotIn("old result", text)
+        both = retained_outputs(turns, 2)
+        self.assertLess(both.index("old result"), both.index("new result"))
+
+    def test_long_results_are_truncated_and_the_total_is_capped(self):
+        long_turn = [self.turn(self.result("x" * 5000))]
+        text = retained_outputs(long_turn, 1)
+        self.assertLess(len(text), 1000)
+        self.assertIn("excerpt", text)
+        many = [self.turn(self.result("y" * 700)) for _ in range(10)]
+        self.assertLessEqual(len(retained_outputs(many, 5)), 3000)
+
+    def test_zero_disables_retention(self):
+        self.assertEqual(retained_outputs([self.turn(self.result("body"))], 0), "")
+
+    def test_strip_retained_keeps_only_the_summary_text(self):
+        content = "Goal: done." + "\n\n" + RETAINED_HEADER + "\n\n[read_file]\nbody"
+        self.assertEqual(strip_retained(content), "Goal: done.")
+        self.assertEqual(strip_retained("Goal: done."), "Goal: done.")

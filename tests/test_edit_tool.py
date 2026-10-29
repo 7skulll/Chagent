@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from chagent.context.builder import DEFAULT_INSTRUCTIONS, BasicContextBuilder
+from chagent.context.builder import DEFAULT_INSTRUCTIONS, TOOLS_SECTION, BasicContextBuilder
 from chagent.domain.context import ContextPolicy
 from chagent.domain.messages import ToolCall, UserMessage
 from chagent.domain.runs import StoredMessage
@@ -281,9 +281,12 @@ class DefaultInstructionTests(unittest.IsolatedAsyncioTestCase):
     async def test_default_instructions_name_the_edit_tool(self):
         """Prompt text is load-bearing; a silent revert once cost two turns per edit."""
         self.assertIs(BasicContextBuilder("unchanged").instructions, "unchanged")
-        self.assertIn("edit_file", DEFAULT_INSTRUCTIONS)
+        self.assertIn("edit_file", TOOLS_SECTION)
         builder = BasicContextBuilder(policy=ContextPolicy(safety_tokens=0))
         self.assertEqual(builder.instructions, DEFAULT_INSTRUCTIONS)
         history = [StoredMessage(uuid4(), 1, UserMessage("hi", 1))]
         built = await builder.build(history, Model("test", "test", "fake", 4096, 256), [])
-        self.assertEqual(built.request.messages[0].content, DEFAULT_INSTRUCTIONS)
+        message = built.request.messages[0]
+        self.assertEqual(message.content, "")
+        self.assertEqual(message.sections["preamble"], DEFAULT_INSTRUCTIONS)
+        self.assertIn("edit_file", message.text())

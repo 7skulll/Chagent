@@ -36,6 +36,9 @@ class ContextSnapshot:
     safety_reserved: int
     task_state_revision: int | None
     selections: list[ContextSelection] = field(default_factory=list)
+    # Every available estimate under its own counter name; the primary one is
+    # ``token_counter``. They are recorded side by side, never averaged.
+    token_estimates: dict[str, int] = field(default_factory=dict)
     summary_id: str | None = None
     summary_revision: int | None = None
     summary_covered_through: int | None = None

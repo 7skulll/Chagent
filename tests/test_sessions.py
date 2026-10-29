@@ -10,6 +10,7 @@ from psycopg.conninfo import make_conninfo
 
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
+from chagent.domain.codec import message_from_dict
 from chagent.domain.messages import UserMessage
 from chagent.domain.sessions import TaskState
 from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError, StateConflictError
@@ -92,7 +93,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("input_budget", snapshots[0]["snapshot"])
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT request FROM model_calls WHERE id = %s", (snapshots[0]["model_call_id"],))
-            self.assertIn("不要修改数据库", (await cursor.fetchone())["request"]["messages"][0]["content"])
+            self.assertIn("不要修改数据库", message_from_dict((await cursor.fetchone())["request"]["messages"][0]).text())
         other = await self.manager.create(self.workspace, "other")
         with self.assertRaises(ValueError):
             await self.manager.update_task_state(other.id, TaskState(source_message_ids=[str(source.id)]), expected_revision=0)

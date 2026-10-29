@@ -1,0 +1,123 @@
+{
+ "runs": [
+  {
+   "run_id": "476efff8-6f5a-47dc-8d59-7bbbd69d0efd",
+   "model": "deepseek-flash",
+   "turns": [
+    {
+     "iteration": 0,
+     "actual": 2732,
+     "estimates": {
+      "utf8_json_bytes_estimate": 9144,
+      "tiktoken/cl100k_base": 2687
+     },
+     "deviation": {
+      "utf8_json_bytes_estimate": 2.347,
+      "tiktoken/cl100k_base": -0.0165
+     }
+    },
+    {
+     "iteration": 1,
+     "actual": 3533,
+     "estimates": {
+      "utf8_json_bytes_estimate": 11942,
+      "tiktoken/cl100k_base": 3707
+     },
+     "deviation": {
+      "utf8_json_bytes_estimate": 2.3801,
+      "tiktoken/cl100k_base": 0.0492
+     }
+    }
+   ],
+   "counters": [
+    "utf8_json_bytes_estimate",
+    "tiktoken/cl100k_base"
+   ]
+  },
+  {
+   "run_id": "82e5b5a4-5ee9-4637-90a9-72d98fc206bc",
+   "model": "deepseek-flash",
+   "turns": [
+    {
+     "iteration": 0,
+     "actual": 2724,
+     "estimates": {
+      "utf8_json_bytes_estimate": 9099,
+      "tiktoken/cl100k_base": 2666
+     },
+     "deviation": {
+      "utf8_json_bytes_estimate": 2.3403,
+      "tiktoken/cl100k_base": -0.0213
+     }
+    },
+    {
+     "iteration": 1,
+     "actual": 3232,
+     "estimates": {
+      "utf8_json_bytes_estimate": 10908,
+      "tiktoken/cl100k_base": 3328
+     },
+     "deviation": {
+      "utf8_json_bytes_estimate": 2.375,
+      "tiktoken/cl100k_base": 0.0297
+     }
+    }
+   ],
+   "counters": [
+    "utf8_json_bytes_estimate",
+    "tiktoken/cl100k_base"
+   ]
+  },
+  {
+   "run_id": "bc236db2-d929-4f76-99ea-6b379f244d00",
+   "model": "fake-echo",
+   "turns": [],
+   "counters": [
+    "utf8_json_bytes_estimate",
+    "tiktoken/cl100k_base"
+   ]
+  },
+  {
+   "run_id": "7c4ae9d5-5e47-41d4-85f8-6ca9f34dbea9",
+   "model": "deepseek-v4-flash",
+   "turns": [
+    {
+     "iteration": 0,
+     "actual": 2562,
+     "estimates": {
+      "utf8_json_bytes_estimate": 8421,
+      "tiktoken/cl100k_base": 2498
+     },
+     "deviation": {
+      "utf8_json_bytes_estimate": 2.2869,
+      "tiktoken/cl100k_base": -0.025
+     }
+    }
+   ],
+   "counters": [
+    "utf8_json_bytes_estimate",
+    "tiktoken/cl100k_base"
+   ]
+  },
+  {
+   "run_id": "992655b1-bdb0-491a-90cf-f83c68c6fab1",
+   "model": "deepseek-v4-flash",
+   "turns": [],
+   "counters": [
+    "utf8_json_bytes_estimate",
+    "tiktoken/cl100k_base"
+   ]
+  },
+  {
+   "run_id": "17ee0cc2-bfc0-484f-9568-212052118f85",
+   "model": "deepseek-v4-flash",
+   "turns": [],
+   "counters": [
+    "utf8_json_bytes_estimate",
+    "tiktoken/cl100k_base"
+   ]
+  }
+ ],
+ "samples": 5,
+ "skipped": 4
+}

@@ -309,6 +309,14 @@ class LiveSuite:
                     [TextContent("已记录这些受控样本约束；没有执行文件修改。")], self.selected.api,
                     self.selected.provider, self.selected.model_id, 0, "stop"))
             await runner.runs.finish(run_id, "completed")
+        # The window is sized from the estimate of the counter in use, not from a
+        # byte count. L replaced the byte estimate with a real tokenizer (~3x
+        # smaller), and a hard-coded window silently stopped triggering
+        # compaction instead of failing.
+        history = await runner.conversations.messages(session)
+        probe = await runner.context.build(history, runner.model, runner.tools.registry.definitions(),
+                                           allow_over_budget=True)
+        runner.model.context_window = int(probe.snapshot.projected_token_estimate * 0.9) + 2048
 
         async def compact(result, events, rows):
             answer = text(result.message)

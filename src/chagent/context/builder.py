@@ -42,10 +42,26 @@ class ContextBuilder(Protocol):
     ) -> BuiltContext: ...
 
 
-DEFAULT_INSTRUCTIONS = (
-    "Complete the user's task with the available tools: locate code with grep or glob, apply all "
-    "changes to a file in one edit_file call, and verify with run_tests once after editing. If the "
-    "request already says which tests fail, do not re-run them first."
+DEFAULT_INSTRUCTIONS = "Complete the user's task with the available tools."
+
+# The strategy that used to be one long instruction, kept verbatim as its own
+# section. It is load-bearing: it once cost two turns per edit when a revert
+# silently removed it (G batch), so it stays byte-identical.
+TOOLS_SECTION = (
+    "Locate code with grep or glob, apply all changes to a file in one edit_file call, and verify "
+    "with run_tests once after editing. If the request already says which tests fail, do not re-run "
+    "them first."
+)
+
+# The system prompt is assembled from named sections in a fixed order. The order
+# and the bytes matter: this text is the provider's cache prefix, so it is built
+# once per run and never re-ordered. Naming the parts makes a prompt change
+# auditable as "which section moved" instead of a diff of one long string, and
+# gives the cache audit a stable label per section.
+SECTION_ORDER = ("preamble", "tools", "rules", "environment", "state")
+
+RULES_SECTION = (
+    "Report only what a tool confirmed; never invent file contents, tool output or test results."
 )
 
 
@@ -57,6 +73,8 @@ class BasicContextBuilder:
         self.instructions = instructions
         self.policy = policy or ContextPolicy()
         self.counter = counter or ByteTokenCounter()
+        # Recorded alongside the primary estimate so the two never mix.
+        self.byte_counter = ByteTokenCounter()
 
     async def build(
         self, history: list[StoredMessage], model: Model, tools: list[Tool],
@@ -90,24 +108,28 @@ class BasicContextBuilder:
         budget = model.context_window - output - self.policy.safety_tokens
         if budget <= 0:
             raise ContextBudgetError("Output reservation and safety margin exhaust the context window")
-        instructions = self.instructions
+        sections: dict[str, str] = {"preamble": self.instructions,
+                                    "tools": TOOLS_SECTION, "rules": RULES_SECTION}
         if environment:
             # Computed once per run by the runner, so the prefix stays byte-identical
             # between turns; see environment.py for why that matters.
-            instructions += "\n\n" + environment
+            sections["environment"] = environment
+        state_parts: list[str] = []
         if task_state is not None:
             state = asdict(task_state)
             state.pop("revision")
             if any(state.values()):
-                instructions += (
-                    "\n\nUser-maintained task state (current user input takes precedence):\n"
+                state_parts.append(
+                    "User-maintained task state (current user input takes precedence):\n"
                     + json.dumps(state, ensure_ascii=False)
                 )
         if recovery is not None:
             # Host-generated reference data, counted as part of the fixed system
             # cost: it never becomes a message that could be replayed or paired
             # with a tool call.
-            instructions += "\n\n" + recovery.text
+            state_parts.append(recovery.text)
+        if state_parts:
+            sections["state"] = "\n\n".join(state_parts)
         # The leading message decides the whole provider prompt cache: it has to
         # be byte-identical between the turns of one run. Task state and the
         # recovery note qualify because the runner loads both once per run and
@@ -116,7 +138,8 @@ class BasicContextBuilder:
         # message is not an event, and letting it drift would make two otherwise
         # identical requests compare unequal.
         system = SystemMessage(
-            content=instructions, timestamp=0,
+            content="", timestamp=0,
+            sections={name: sections[name] for name in SECTION_ORDER if name in sections},
             tools_added=deepcopy(tools),
         )
 
@@ -189,13 +212,18 @@ class BasicContextBuilder:
             selected, running = trial, trial_cost
             reasons.update({identity: "recent_complete_turn" for identity in identities})
         messages = render(selected)
+        estimate = self.counter.count(messages)
+        estimates = {self.counter.name: estimate}
+        if self.counter.name != self.byte_counter.name:
+            estimates[self.byte_counter.name] = self.byte_counter.count(messages)
         return BuiltContext(
             request=ModelRequest(model=model, messages=messages, max_tokens=output),
             snapshot=ContextSnapshot(
                 strategy="summary_and_recent_turns" if summary else "recent_complete_turns",
                 source_message_ids=[str(item.id) for item in history if item.id in selected],
-                message_count=len(messages), token_estimate=self.counter.count(messages),
-                token_counter=self.counter.name, input_budget=budget, output_reserved=output,
+                message_count=len(messages), token_estimate=estimate,
+                token_counter=self.counter.name, token_estimates=estimates,
+                input_budget=budget, output_reserved=output,
                 safety_reserved=self.policy.safety_tokens,
                 task_state_revision=task_state.revision if task_state is not None else None,
                 selections=[ContextSelection(str(item.id), item.sequence, item.id in selected,

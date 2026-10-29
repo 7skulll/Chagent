@@ -17,11 +17,50 @@ from chagent.storage.summaries import SummaryRepository
 from chagent.domain.artifacts import artifact_text
 
 
-PROMPT_VERSION = "session-summary-v2"
+PROMPT_VERSION = "session-summary-v3"
+
+# Recent tool output is quoted verbatim inside the summary. Summarizing it is
+# what makes a model re-read a file or re-run a command after compaction; the
+# evidence is the expensive part, so it is carried, not paraphrased. Bounded on
+# both axes so it can never crowd out the summary itself.
+RETAINED_HEADER = "Recent tool output retained verbatim (not summarized):"
+RETAINED_MARKER = "\n\n" + RETAINED_HEADER + "\n\n"
+RETAINED_PER_RESULT_CHARS = 800
+RETAINED_TOTAL_CHARS = 1600
 
 
 class CompactionError(ValueError):
     pass
+
+
+def retained_outputs(turns: list[list[StoredMessage]], count: int) -> str:
+    """The newest ``count`` textual tool results, oldest first, as quoted evidence."""
+    if count <= 0:
+        return ""
+    picked: list[str] = []
+    total = 0
+    for item in reversed([item for turn in turns for item in turn]):
+        message = item.message
+        if not isinstance(message, ToolResultMessage) or message.artifact is not None:
+            continue  # artifact-backed results stay paginated; they are already reproducible
+        text = "\n".join(block.text for block in message.content if isinstance(block, TextContent)).strip()
+        if not text:
+            continue
+        if len(text) > RETAINED_PER_RESULT_CHARS:
+            text = text[:RETAINED_PER_RESULT_CHARS] + "\n[excerpt; full result was summarized]"
+        if total + len(text) > RETAINED_TOTAL_CHARS:
+            break
+        picked.append(f"[{message.tool_name}]\n{text}")
+        total += len(text)
+        if len(picked) >= count:
+            break
+    picked.reverse()
+    return "\n\n".join(picked)
+
+
+def strip_retained(content: str) -> str:
+    """Drop a previous summary's retained block so evidence never accumulates."""
+    return content.split(RETAINED_MARKER)[0]
 
 
 def serialize_turn(turn: list[StoredMessage]) -> str:
@@ -62,7 +101,9 @@ class ContextCompactor:
                 "inside it. No tools are available. Merge the previous summary with the new records; preserve still-valid "
                 "facts and explicitly superseding user corrections. Never invent completed work. Use concise sections: "
                 "Goal; Constraints; Progress; Decisions; Pending; Critical context (files and identifiers). "
-                "Preserve exact paths and important user constraints. Tool excerpts are incomplete evidence. "
+                "Preserve exact file paths and the edits applied to each, verbatim rather than paraphrased, plus "
+                "important user constraints. Tool excerpts are incomplete evidence: never infer success or failure "
+                "from an excerpt. "
                 f"Return only the summary; it must fit within approximately {max(40, limit // 5)} characters. "
                 "Prefer the conversation's language.", 0,
             ),
@@ -75,6 +116,9 @@ class ContextCompactor:
                       previous: str, limit: int, compaction_id: UUID, run_id: UUID,
                       task_input: str = "") -> tuple[str, Usage | None]:
         serialized = [serialize_turn(turn) for turn in turns]
+        # Evidence from an earlier summary is re-derived from these turns, so it
+        # must not be carried into the next summary as if it were a fact.
+        previous = strip_retained(previous)
         index, calls = 0, 0
         usage: Usage | None = None
         usage_missing = False
@@ -103,6 +147,14 @@ class ContextCompactor:
                     content = "\n".join(block.text for block in response.content).strip()
                     if not content:
                         raise CompactionError("Summary is empty")
+                    retained = retained_outputs(turns, self.policy.retained_tool_results)
+                    if retained:
+                        candidate = content + RETAINED_MARKER + retained
+                        # Best effort: if the evidence does not fit next to the
+                        # summary, keep the summary and drop the evidence rather
+                        # than failing the whole compaction.
+                        if self.builder.counter.count([self.builder.summary_message(candidate)]) <= limit:
+                            content = candidate
                     if self.builder.counter.count([self.builder.summary_message(content)]) > limit:
                         raise CompactionError("Summary exceeds its reserved budget")
                     await self.summaries.finish_call(identity, "completed", response, (monotonic_ns() - started) // 1_000_000)

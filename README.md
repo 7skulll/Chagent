@@ -2,7 +2,7 @@
 
 本机单用户 Agent：命令行或本地网页输入，模型在 Python 进程内以「模型 → 工具 → 模型」循环推进任务，消息、请求、工具调用与事件都落在本机 PostgreSQL。支持 OpenAI、DeepSeek、Anthropic、通义千问及自定义兼容服务，也提供无需网络的固定响应模型。
 
-能力：会话与显式任务状态、上下文预算与自动摘要、运行级环境快照、大工具输出产物化、用户／工作区长期记忆（`/remember` 由本地命令直接回答，不经过模型）、文件检索、一次调用多处编辑与多文件补丁、宿主命令与测试运行、重复调用拦截（无进展时以 `repeated_tool_call` 结束）、网页流式对话与事件回放。
+能力：会话与显式任务状态、上下文预算与自动摘要（可选真 tokenizer，缺省回退字节估算）、运行级环境快照、大工具输出产物化、用户／工作区长期记忆（`/remember` 由本地命令直接回答，不经过模型）、文件检索、一次调用多处编辑与多文件补丁、宿主命令与测试运行、重复调用拦截（无进展时以 `repeated_tool_call` 结束）、网页流式对话与事件回放。
 
 整体设计与模块划分见[设计总览](docs/设计总览.md)。
 
@@ -12,6 +12,8 @@
 
 ```sh
 uv sync
+# 可选：真正的 tokenizer（缺省回退到字节估算，见「会话、上下文与记忆」）
+uv sync --extra tokenizer
 cp -n .env.example .env          # 已有 .env 时保留自己的配置
 createdb chagent                 # 仅在数据库尚未创建时执行
 # 在 .env 配置一种供应商 Key，例如 DEEPSEEK_API_KEY=你的Key
@@ -78,9 +80,9 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   uv run python -m unittest discover -s tests -q
 ```
 
-数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **324 项通过**。
+数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **343 项通过**。
 
-真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。链路报告为每个用例带上本地计算的 `cache{hit,reusable,breaks}`（不额外请求），失败时可用 `--keep-schema docs/diagnostics` 保留一次性 schema，再用 `report_prompt_cache.py --schema <名称>` 事后审计。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求。结论与实测数据见[实施记录](docs/实施记录.md)与[执行效率优化](docs/执行效率优化.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
+真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。链路报告为每个用例带上本地计算的 `cache{hit,reusable,breaks}`（不额外请求），失败时可用 `--keep-schema docs/diagnostics` 保留一次性 schema，再用 `report_prompt_cache.py --schema <名称>` 事后审计。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求；`scripts/report_token_estimates.py` 对同一批请求比较本地 token 估算与供应商实际用量。结论与实测数据见[实施记录](docs/实施记录.md)与[执行效率优化](docs/执行效率优化.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
 
 四场景任务探针用固定临时仓库与一次性 schema 运行真实供应商，报告轮次、工具调用、重复调用、墙钟与正确性；`--repeats 2` 用来检查轮次波动：
 

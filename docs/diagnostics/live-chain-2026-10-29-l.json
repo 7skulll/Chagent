@@ -1,0 +1,1687 @@
+{
+  "recorded_at_utc": "2026-10-29T08:50:37.003422+00:00",
+  "configuration": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "api": "openai-chat",
+    "output_limit": 768,
+    "max_provider_requests": 24,
+    "key_source": "named provider key",
+    "case_selection": "all"
+  },
+  "environment": {
+    "python": "3.13.9",
+    "platform": "Darwin"
+  },
+  "limits": "single sample per scenario; synthetic data; no browser TTFT or comparative Pi/Codex benchmark",
+  "results": [
+    {
+      "name": "smoke",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "exact_marker": true
+      },
+      "elapsed_ms": 745.118,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "CHAGENT_LIVE_OK",
+      "model_calls": 1,
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [],
+      "cache": {
+        "turns": [
+          {
+            "iteration": 0,
+            "messages": 1,
+            "prompt_tokens": 1713,
+            "cached_tokens": 0,
+            "cache_hit": 0.0,
+            "reusable": null,
+            "break": null,
+            "shared_bytes": 0,
+            "total_bytes": 5862
+          }
+        ],
+        "prompt_tokens": 1713,
+        "cached_tokens": 0,
+        "shared_bytes": 0,
+        "total_bytes": 0,
+        "hit": 0.0,
+        "reusable": null,
+        "breaks": []
+      },
+      "event_types": [
+        "run_started",
+        "environment_projected",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": 599.279,
+          "consumer_wait_ms": 0.453,
+          "text_deltas": 6,
+          "usage": {
+            "input": 1713,
+            "output": 6,
+            "cache_read": 0,
+            "cache_write": 0,
+            "total_tokens": 1719,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 700.728
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 30,
+        "sql_by_phase": {
+          "other": 6,
+          "begin": 5,
+          "event": 2,
+          "start_model_call": 3,
+          "model_stream": 2,
+          "event_flush": 2,
+          "save_response": 4,
+          "finish": 6
+        },
+        "sql_execute_ms_by_phase": {
+          "other": 5.241,
+          "begin": 3.925,
+          "event": 1.1,
+          "start_model_call": 2.735,
+          "model_stream": 1.807,
+          "event_flush": 1.924,
+          "save_response": 2.967,
+          "finish": 3.565
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 4.222
+          },
+          "event_flush": {
+            "calls": 4,
+            "total_ms": 3.281
+          },
+          "event": {
+            "calls": 1,
+            "total_ms": 1.575
+          },
+          "context_prepare": {
+            "calls": 1,
+            "total_ms": 1.188
+          },
+          "memory_recall": {
+            "calls": 1,
+            "total_ms": 0.002
+          },
+          "start_model_call": {
+            "calls": 1,
+            "total_ms": 3.353
+          },
+          "text_delta": {
+            "calls": 2,
+            "total_ms": 0.079
+          },
+          "model_stream": {
+            "calls": 1,
+            "total_ms": 704.448
+          },
+          "save_response": {
+            "calls": 1,
+            "total_ms": 3.825
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 0.019
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 4.492
+          }
+        }
+      }
+    },
+    {
+      "name": "file_tool_chain",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "sum_from_file": true,
+        "read_tool_used": true,
+        "write_tool_used": true
+      },
+      "elapsed_ms": 2589.489,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "sum=41",
+      "model_calls": 3,
+      "tool_calls": 2,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [
+        {
+          "call_index": 0,
+          "name": "read_file",
+          "arguments": {
+            "path": "numbers.json"
+          },
+          "status": "completed",
+          "repeated": false,
+          "blocked": false
+        },
+        {
+          "call_index": 0,
+          "name": "write_file",
+          "arguments": {
+            "path": "result.json",
+            "content": "{\"sum\": 41}"
+          },
+          "status": "completed",
+          "repeated": false,
+          "blocked": false
+        }
+      ],
+      "cache": {
+        "turns": [
+          {
+            "iteration": 0,
+            "messages": 1,
+            "prompt_tokens": 1745,
+            "cached_tokens": 0,
+            "cache_hit": 0.0,
+            "reusable": null,
+            "break": null,
+            "shared_bytes": 0,
+            "total_bytes": 6009
+          },
+          {
+            "iteration": 1,
+            "messages": 3,
+            "prompt_tokens": 1884,
+            "cached_tokens": 1664,
+            "cache_hit": 0.8832,
+            "reusable": 0.9246,
+            "break": null,
+            "shared_bytes": 6009,
+            "total_bytes": 6499,
+            "lost_bytes": 0
+          },
+          {
+            "iteration": 2,
+            "messages": 5,
+            "prompt_tokens": 1999,
+            "cached_tokens": 1792,
+            "cache_hit": 0.8964,
+            "reusable": 0.9405,
+            "break": null,
+            "shared_bytes": 6499,
+            "total_bytes": 6910,
+            "lost_bytes": 0
+          }
+        ],
+        "prompt_tokens": 5628,
+        "cached_tokens": 3456,
+        "shared_bytes": 12508,
+        "total_bytes": 13409,
+        "hit": 0.6141,
+        "reusable": 0.9328,
+        "breaks": []
+      },
+      "event_types": [
+        "run_started",
+        "environment_projected",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "tool_queued",
+        "tool_started",
+        "tool_completed",
+        "model_started",
+        "model_completed",
+        "tool_queued",
+        "tool_started",
+        "tool_completed",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": 489.28,
+          "consumer_wait_ms": 0.633,
+          "text_deltas": 7,
+          "usage": {
+            "input": 1745,
+            "output": 44,
+            "cache_read": 0,
+            "cache_write": 0,
+            "total_tokens": 1789,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "toolUse",
+          "response_model": "deepseek-flash",
+          "wall_ms": 659.64
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 4,
+          "first_text_ms": null,
+          "consumer_wait_ms": 0.475,
+          "text_deltas": 0,
+          "usage": {
+            "input": 220,
+            "output": 58,
+            "cache_read": 1664,
+            "cache_write": 0,
+            "total_tokens": 1942,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "toolUse",
+          "response_model": "deepseek-flash",
+          "wall_ms": 978.333
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 6,
+          "first_text_ms": 761.865,
+          "consumer_wait_ms": 0.36,
+          "text_deltas": 3,
+          "usage": {
+            "input": 207,
+            "output": 3,
+            "cache_read": 1792,
+            "cache_write": 0,
+            "total_tokens": 2002,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 854.929
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 66,
+        "sql_by_phase": {
+          "other": 6,
+          "begin": 5,
+          "event": 2,
+          "start_model_call": 9,
+          "model_stream": 4,
+          "save_response": 12,
+          "queue_tool_calls": 6,
+          "start_tool_call": 6,
+          "save_tool_result": 8,
+          "event_flush": 2,
+          "finish": 6
+        },
+        "sql_execute_ms_by_phase": {
+          "other": 4.814,
+          "begin": 2.575,
+          "event": 1.042,
+          "start_model_call": 5.408,
+          "model_stream": 4.158,
+          "save_response": 8.62,
+          "queue_tool_calls": 3.27,
+          "start_tool_call": 3.331,
+          "save_tool_result": 3.377,
+          "event_flush": 1.317,
+          "finish": 1.571
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 3.143
+          },
+          "event_flush": {
+            "calls": 16,
+            "total_ms": 2.779
+          },
+          "event": {
+            "calls": 1,
+            "total_ms": 1.642
+          },
+          "context_prepare": {
+            "calls": 3,
+            "total_ms": 9.198
+          },
+          "memory_recall": {
+            "calls": 3,
+            "total_ms": 0.01
+          },
+          "start_model_call": {
+            "calls": 3,
+            "total_ms": 7.63
+          },
+          "text_delta": {
+            "calls": 5,
+            "total_ms": 0.124
+          },
+          "model_stream": {
+            "calls": 3,
+            "total_ms": 2496.812
+          },
+          "save_response": {
+            "calls": 3,
+            "total_ms": 11.688
+          },
+          "queue_tool_calls": {
+            "calls": 2,
+            "total_ms": 4.616
+          },
+          "start_tool_call": {
+            "calls": 2,
+            "total_ms": 5.911
+          },
+          "tool_execute": {
+            "calls": 2,
+            "total_ms": 4.091
+          },
+          "save_tool_result": {
+            "calls": 2,
+            "total_ms": 4.743
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 0.009
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 2.711
+          }
+        }
+      },
+      "result_file": {
+        "sum": 41
+      }
+    },
+    {
+      "name": "persisted_history",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "sum_recalled": true,
+        "hidden_marker_recalled": true,
+        "no_new_tools": true
+      },
+      "elapsed_ms": 593.861,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "values 总和 = 7 + 11 + 23 = 41\nmarker 原始值 = \"03db825265\"",
+      "model_calls": 1,
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [],
+      "cache": {
+        "turns": [
+          {
+            "iteration": 0,
+            "messages": 7,
+            "prompt_tokens": 2033,
+            "cached_tokens": 0,
+            "cache_hit": 0.0,
+            "reusable": null,
+            "break": null,
+            "shared_bytes": 0,
+            "total_bytes": 7112
+          }
+        ],
+        "prompt_tokens": 2033,
+        "cached_tokens": 0,
+        "shared_bytes": 0,
+        "total_bytes": 0,
+        "hit": 0.0,
+        "reusable": null,
+        "breaks": []
+      },
+      "event_types": [
+        "run_started",
+        "environment_projected",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 8,
+          "first_text_ms": 357.709,
+          "consumer_wait_ms": 0.423,
+          "text_deltas": 28,
+          "usage": {
+            "input": 2033,
+            "output": 28,
+            "cache_read": 0,
+            "cache_write": 0,
+            "total_tokens": 2061,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 548.564
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 32,
+        "sql_by_phase": {
+          "other": 6,
+          "begin": 5,
+          "event": 2,
+          "start_model_call": 3,
+          "model_stream": 4,
+          "event_flush": 2,
+          "save_response": 4,
+          "finish": 6
+        },
+        "sql_execute_ms_by_phase": {
+          "other": 3.119,
+          "begin": 1.779,
+          "event": 0.949,
+          "start_model_call": 1.444,
+          "model_stream": 1.154,
+          "event_flush": 0.531,
+          "save_response": 1.166,
+          "finish": 1.782
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 2.461
+          },
+          "event_flush": {
+            "calls": 4,
+            "total_ms": 1.045
+          },
+          "event": {
+            "calls": 1,
+            "total_ms": 1.536
+          },
+          "context_prepare": {
+            "calls": 1,
+            "total_ms": 2.19
+          },
+          "memory_recall": {
+            "calls": 1,
+            "total_ms": 0.003
+          },
+          "start_model_call": {
+            "calls": 1,
+            "total_ms": 1.978
+          },
+          "text_delta": {
+            "calls": 6,
+            "total_ms": 0.077
+          },
+          "model_stream": {
+            "calls": 1,
+            "total_ms": 549.95
+          },
+          "save_response": {
+            "calls": 1,
+            "total_ms": 1.672
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 0.003
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 2.373
+          }
+        }
+      }
+    },
+    {
+      "name": "explicit_memory",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "active_memory_saved": true,
+        "no_extraction_request": true,
+        "no_unnecessary_file_tools": true
+      },
+      "elapsed_ms": 10.064,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "explicit_memory",
+      "answer": "已记录到长期记忆（workspace）：project.launch_code",
+      "model_calls": 0,
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [],
+      "cache": {
+        "turns": [],
+        "prompt_tokens": 0,
+        "cached_tokens": 0,
+        "shared_bytes": 0,
+        "total_bytes": 0,
+        "hit": null,
+        "reusable": null,
+        "breaks": []
+      },
+      "event_types": [
+        "run_started",
+        "text_delta",
+        "memory_command_resolved",
+        "memory_saved",
+        "run_completed"
+      ],
+      "provider_calls": [],
+      "metrics": {
+        "sql_execute_calls": 33,
+        "sql_by_phase": {
+          "other": 8,
+          "begin": 5,
+          "event_flush": 2,
+          "event": 2,
+          "finish": 6,
+          "memory_enqueue": 10
+        },
+        "sql_execute_ms_by_phase": {
+          "other": 2.122,
+          "begin": 0.794,
+          "event_flush": 0.226,
+          "event": 0.216,
+          "finish": 0.805,
+          "memory_enqueue": 3.116
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 1.33
+          },
+          "text_delta": {
+            "calls": 1,
+            "total_ms": 0.013
+          },
+          "event_flush": {
+            "calls": 3,
+            "total_ms": 0.499
+          },
+          "event": {
+            "calls": 1,
+            "total_ms": 0.91
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 3.36
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 4.571
+          }
+        }
+      }
+    },
+    {
+      "name": "cross_session_memory",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "memory_answer": true,
+        "snapshot_has_memory": true
+      },
+      "elapsed_ms": 907.222,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "ORBIT-03db825265",
+      "model_calls": 1,
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [],
+      "cache": {
+        "turns": [
+          {
+            "iteration": 0,
+            "messages": 2,
+            "prompt_tokens": 1829,
+            "cached_tokens": 1536,
+            "cache_hit": 0.8398,
+            "reusable": null,
+            "break": null,
+            "shared_bytes": 0,
+            "total_bytes": 6345
+          }
+        ],
+        "prompt_tokens": 1829,
+        "cached_tokens": 1536,
+        "shared_bytes": 0,
+        "total_bytes": 0,
+        "hit": 0.8398,
+        "reusable": null,
+        "breaks": []
+      },
+      "event_types": [
+        "run_started",
+        "environment_projected",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 3,
+          "first_text_ms": 709.921,
+          "consumer_wait_ms": 0.277,
+          "text_deltas": 7,
+          "usage": {
+            "input": 293,
+            "output": 7,
+            "cache_read": 1536,
+            "cache_write": 0,
+            "total_tokens": 1836,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 871.515
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 31,
+        "sql_by_phase": {
+          "other": 6,
+          "begin": 5,
+          "event": 2,
+          "memory_recall": 1,
+          "start_model_call": 3,
+          "model_stream": 2,
+          "event_flush": 2,
+          "save_response": 4,
+          "finish": 6
+        },
+        "sql_execute_ms_by_phase": {
+          "other": 1.742,
+          "begin": 0.82,
+          "event": 0.488,
+          "memory_recall": 1.13,
+          "start_model_call": 0.793,
+          "model_stream": 0.553,
+          "event_flush": 0.962,
+          "save_response": 1.496,
+          "finish": 2.442
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 1.066
+          },
+          "event_flush": {
+            "calls": 4,
+            "total_ms": 1.782
+          },
+          "event": {
+            "calls": 1,
+            "total_ms": 1.017
+          },
+          "context_prepare": {
+            "calls": 1,
+            "total_ms": 1.283
+          },
+          "memory_recall": {
+            "calls": 1,
+            "total_ms": 2.638
+          },
+          "start_model_call": {
+            "calls": 1,
+            "total_ms": 1.162
+          },
+          "text_delta": {
+            "calls": 3,
+            "total_ms": 0.037
+          },
+          "model_stream": {
+            "calls": 1,
+            "total_ms": 874.017
+          },
+          "save_response": {
+            "calls": 1,
+            "total_ms": 2.732
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 0.062
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 3.378
+          }
+        }
+      }
+    },
+    {
+      "name": "automatic_memory_candidate",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "correct_candidate": true,
+        "candidate_requires_review": true,
+        "queued_in_completion_txn": true,
+        "extraction_started_after_run": true,
+        "job_reached_terminal_state": true
+      },
+      "elapsed_ms": 921.099,
+      "error_type": null,
+      "extraction_ms": 946.648,
+      "memory_job": {
+        "status": "completed",
+        "attempts": 0
+      },
+      "processed_jobs": 1,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "好的，星河测试员03db825265，我已记住这个称呼，今后对话中会一直沿用。",
+      "model_calls": 1,
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [],
+      "cache": {
+        "turns": [
+          {
+            "iteration": 0,
+            "messages": 2,
+            "prompt_tokens": 1870,
+            "cached_tokens": 1664,
+            "cache_hit": 0.8898,
+            "reusable": null,
+            "break": null,
+            "shared_bytes": 0,
+            "total_bytes": 6556
+          }
+        ],
+        "prompt_tokens": 1870,
+        "cached_tokens": 1664,
+        "shared_bytes": 0,
+        "total_bytes": 0,
+        "hit": 0.8898,
+        "reusable": null,
+        "breaks": []
+      },
+      "event_types": [
+        "run_started",
+        "environment_projected",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "memory_job_queued",
+        "run_completed",
+        "memory_extraction_started",
+        "memory_saved"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 3,
+          "first_text_ms": 691.955,
+          "consumer_wait_ms": 0.899,
+          "text_deltas": 22,
+          "usage": {
+            "input": 206,
+            "output": 22,
+            "cache_read": 1664,
+            "cache_write": 0,
+            "total_tokens": 1892,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 865.122
+        },
+        {
+          "purpose": "memory",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": 661.032,
+          "consumer_wait_ms": 0.097,
+          "text_deltas": 61,
+          "usage": {
+            "input": 254,
+            "output": 61,
+            "cache_read": 0,
+            "cache_write": 0,
+            "total_tokens": 315,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 922.379
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 34,
+        "sql_by_phase": {
+          "other": 6,
+          "begin": 5,
+          "event": 2,
+          "memory_recall": 1,
+          "start_model_call": 3,
+          "model_stream": 2,
+          "event_flush": 2,
+          "save_response": 4,
+          "finish": 6,
+          "memory_enqueue": 3
+        },
+        "sql_execute_ms_by_phase": {
+          "other": 2.913,
+          "begin": 2.875,
+          "event": 0.535,
+          "memory_recall": 0.926,
+          "start_model_call": 0.943,
+          "model_stream": 1.573,
+          "event_flush": 1.529,
+          "save_response": 3.422,
+          "finish": 2.587,
+          "memory_enqueue": 2.677
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 3.357
+          },
+          "event_flush": {
+            "calls": 4,
+            "total_ms": 2.784
+          },
+          "event": {
+            "calls": 1,
+            "total_ms": 1.04
+          },
+          "context_prepare": {
+            "calls": 1,
+            "total_ms": 1.551
+          },
+          "memory_recall": {
+            "calls": 1,
+            "total_ms": 1.208
+          },
+          "start_model_call": {
+            "calls": 1,
+            "total_ms": 1.324
+          },
+          "text_delta": {
+            "calls": 5,
+            "total_ms": 0.114
+          },
+          "model_stream": {
+            "calls": 1,
+            "total_ms": 868.367
+          },
+          "save_response": {
+            "calls": 1,
+            "total_ms": 4.934
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 2.853
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 6.954
+          }
+        }
+      },
+      "candidates": [
+        {
+          "key": "user.preferred.name",
+          "content": "用户希望被默认称呼为“星河测试员03db825265”，这是长期偏好，应在今后对话中沿用。",
+          "status_before_review": "candidate",
+          "evidence": "以后请默认称呼我为星河测试员03db825265"
+        }
+      ]
+    },
+    {
+      "name": "reviewed_memory_recall",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "reviewed_preference_recalled": true,
+        "snapshot_has_memory": true
+      },
+      "elapsed_ms": 1240.317,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "星河测试员03db825265",
+      "model_calls": 1,
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [],
+      "cache": {
+        "turns": [
+          {
+            "iteration": 0,
+            "messages": 2,
+            "prompt_tokens": 1848,
+            "cached_tokens": 1536,
+            "cache_hit": 0.8312,
+            "reusable": null,
+            "break": null,
+            "shared_bytes": 0,
+            "total_bytes": 6435
+          }
+        ],
+        "prompt_tokens": 1848,
+        "cached_tokens": 1536,
+        "shared_bytes": 0,
+        "total_bytes": 0,
+        "hit": 0.8312,
+        "reusable": null,
+        "breaks": []
+      },
+      "event_types": [
+        "run_started",
+        "environment_projected",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 3,
+          "first_text_ms": 1078.777,
+          "consumer_wait_ms": 0.488,
+          "text_deltas": 7,
+          "usage": {
+            "input": 312,
+            "output": 7,
+            "cache_read": 1536,
+            "cache_write": 0,
+            "total_tokens": 1855,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 1190.404
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 31,
+        "sql_by_phase": {
+          "other": 6,
+          "begin": 5,
+          "event": 2,
+          "memory_recall": 1,
+          "start_model_call": 3,
+          "model_stream": 2,
+          "event_flush": 2,
+          "save_response": 4,
+          "finish": 6
+        },
+        "sql_execute_ms_by_phase": {
+          "other": 2.795,
+          "begin": 1.546,
+          "event": 0.537,
+          "memory_recall": 1.156,
+          "start_model_call": 0.883,
+          "model_stream": 1.234,
+          "event_flush": 0.753,
+          "save_response": 1.342,
+          "finish": 2.208
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 2.053
+          },
+          "event_flush": {
+            "calls": 4,
+            "total_ms": 1.447
+          },
+          "event": {
+            "calls": 1,
+            "total_ms": 1.079
+          },
+          "context_prepare": {
+            "calls": 1,
+            "total_ms": 1.536
+          },
+          "memory_recall": {
+            "calls": 1,
+            "total_ms": 1.453
+          },
+          "start_model_call": {
+            "calls": 1,
+            "total_ms": 1.286
+          },
+          "text_delta": {
+            "calls": 2,
+            "total_ms": 0.038
+          },
+          "model_stream": {
+            "calls": 1,
+            "total_ms": 1192.325
+          },
+          "save_response": {
+            "calls": 1,
+            "total_ms": 2.058
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 0.065
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 3.139
+          }
+        }
+      }
+    },
+    {
+      "name": "real_compaction",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "compaction_committed": true,
+        "anchor_preserved": true,
+        "target_preserved": true,
+        "constraint_preserved": true
+      },
+      "elapsed_ms": 1999.969,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "发布目标：staging 发布。禁止的操作：禁止删除文件。验收暗号：COMPACT-03db825265。\n\n（以上内容依据历史摘要转录；未调用任何工具，未对文件做任何修改。）",
+      "model_calls": 1,
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [],
+      "cache": {
+        "turns": [
+          {
+            "iteration": 0,
+            "messages": 2,
+            "prompt_tokens": 1811,
+            "cached_tokens": 1536,
+            "cache_hit": 0.8482,
+            "reusable": null,
+            "break": null,
+            "shared_bytes": 0,
+            "total_bytes": 6353
+          }
+        ],
+        "prompt_tokens": 1811,
+        "cached_tokens": 1536,
+        "shared_bytes": 0,
+        "total_bytes": 0,
+        "hit": 0.8482,
+        "reusable": null,
+        "breaks": []
+      },
+      "event_types": [
+        "run_started",
+        "environment_projected",
+        "compaction_started",
+        "compaction_completed",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "summary",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": 688.481,
+          "consumer_wait_ms": 0.131,
+          "text_deltas": 66,
+          "usage": {
+            "input": 3578,
+            "output": 66,
+            "cache_read": 0,
+            "cache_write": 0,
+            "total_tokens": 3644,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 1139.521
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 3,
+          "first_text_ms": 553.146,
+          "consumer_wait_ms": 0.977,
+          "text_deltas": 47,
+          "usage": {
+            "input": 275,
+            "output": 47,
+            "cache_read": 1536,
+            "cache_write": 0,
+            "total_tokens": 1858,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 781.399
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 47,
+        "sql_by_phase": {
+          "other": 6,
+          "begin": 5,
+          "event": 4,
+          "context_prepare": 13,
+          "start_model_call": 3,
+          "model_stream": 4,
+          "event_flush": 2,
+          "save_response": 4,
+          "finish": 6
+        },
+        "sql_execute_ms_by_phase": {
+          "other": 4.048,
+          "begin": 1.657,
+          "event": 1.121,
+          "context_prepare": 11.851,
+          "start_model_call": 2.615,
+          "model_stream": 2.339,
+          "event_flush": 0.968,
+          "save_response": 1.368,
+          "finish": 1.578
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 2.238
+          },
+          "event_flush": {
+            "calls": 5,
+            "total_ms": 2.224
+          },
+          "event": {
+            "calls": 2,
+            "total_ms": 2.641
+          },
+          "context_prepare": {
+            "calls": 1,
+            "total_ms": 1171.479
+          },
+          "memory_recall": {
+            "calls": 1,
+            "total_ms": 0.015
+          },
+          "start_model_call": {
+            "calls": 1,
+            "total_ms": 4.644
+          },
+          "text_delta": {
+            "calls": 6,
+            "total_ms": 0.138
+          },
+          "model_stream": {
+            "calls": 1,
+            "total_ms": 784.198
+          },
+          "save_response": {
+            "calls": 1,
+            "total_ms": 2.079
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 0.012
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 2.435
+          }
+        }
+      }
+    },
+    {
+      "name": "web_api_sse_replay",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "sse_terminal": true,
+        "sse_answer": true,
+        "durable_replay": true,
+        "model_stop_reason": true
+      },
+      "elapsed_ms": 631.373,
+      "answer": "WEB_LIVE_OK",
+      "sse_delta_count": 3,
+      "model_calls": 1,
+      "tool_calls": 0,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [],
+      "cache": {
+        "turns": [
+          {
+            "iteration": 0,
+            "messages": 1,
+            "prompt_tokens": 1717,
+            "cached_tokens": 1536,
+            "cache_hit": 0.8946,
+            "reusable": null,
+            "break": null,
+            "shared_bytes": 0,
+            "total_bytes": 5885
+          }
+        ],
+        "prompt_tokens": 1717,
+        "cached_tokens": 1536,
+        "shared_bytes": 0,
+        "total_bytes": 0,
+        "hit": 0.8946,
+        "reusable": null,
+        "breaks": []
+      },
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": 462.71,
+          "consumer_wait_ms": 0.228,
+          "text_deltas": 4,
+          "usage": {
+            "input": 181,
+            "output": 4,
+            "cache_read": 1536,
+            "cache_write": 0,
+            "total_tokens": 1721,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 542.408
+        }
+      ]
+    },
+    {
+      "name": "sandboxed_command",
+      "passed": true,
+      "checks": {
+        "run_completed": true,
+        "ordered_events": true,
+        "terminal_event": true,
+        "end_reason_consistent": true,
+        "exec_tool_used": true,
+        "marked_sandboxed": true,
+        "outside_write_denied": true,
+        "configured_read_denied": true,
+        "inside_write_allowed": true,
+        "sandbox_event_probed": true
+      },
+      "elapsed_ms": 1899.131,
+      "error_type": null,
+      "failure_reason": "",
+      "end_reason": "model_stop",
+      "answer": "DONE",
+      "model_calls": 2,
+      "tool_calls": 1,
+      "repeated_tool_calls": 0,
+      "blocked_tool_calls": 0,
+      "tool_sequence": [
+        {
+          "call_index": 0,
+          "name": "exec_command",
+          "arguments": {
+            "cmd": "printf ok > inside.txt; (printf no > /private/tmp/chagent-live-03db825265.txt) 2>/dev/null || echo out-denied; (cat /private/tmp/chagent-live-secret-03db825265.txt) 2>/dev/null || echo read-denied"
+          },
+          "status": "completed",
+          "repeated": false,
+          "blocked": false
+        }
+      ],
+      "cache": {
+        "turns": [
+          {
+            "iteration": 0,
+            "messages": 1,
+            "prompt_tokens": 2187,
+            "cached_tokens": 640,
+            "cache_hit": 0.2926,
+            "reusable": null,
+            "break": null,
+            "shared_bytes": 0,
+            "total_bytes": 7658
+          },
+          {
+            "iteration": 1,
+            "messages": 3,
+            "prompt_tokens": 2314,
+            "cached_tokens": 2176,
+            "cache_hit": 0.9404,
+            "reusable": 0.938,
+            "break": null,
+            "shared_bytes": 7658,
+            "total_bytes": 8164,
+            "lost_bytes": 0
+          }
+        ],
+        "prompt_tokens": 4501,
+        "cached_tokens": 2816,
+        "shared_bytes": 7658,
+        "total_bytes": 8164,
+        "hit": 0.6256,
+        "reusable": 0.938,
+        "breaks": []
+      },
+      "event_types": [
+        "run_started",
+        "sandbox_applied",
+        "environment_projected",
+        "model_started",
+        "model_completed",
+        "tool_queued",
+        "tool_started",
+        "tool_progress",
+        "tool_progress",
+        "tool_completed",
+        "model_started",
+        "text_delta",
+        "text_delta",
+        "model_completed",
+        "run_completed"
+      ],
+      "provider_calls": [
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 2,
+          "first_text_ms": null,
+          "consumer_wait_ms": 1.154,
+          "text_deltas": 0,
+          "usage": {
+            "input": 1547,
+            "output": 101,
+            "cache_read": 640,
+            "cache_write": 0,
+            "total_tokens": 2288,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "toolUse",
+          "response_model": "deepseek-flash",
+          "wall_ms": 1003.009
+        },
+        {
+          "purpose": "task",
+          "output_limit": 768,
+          "messages": 4,
+          "first_text_ms": 626.951,
+          "consumer_wait_ms": 0.18,
+          "text_deltas": 2,
+          "usage": {
+            "input": 138,
+            "output": 2,
+            "cache_read": 2176,
+            "cache_write": 0,
+            "total_tokens": 2316,
+            "cost": null,
+            "cache_write_1h": null,
+            "reasoning": null
+          },
+          "stop_reason": "stop",
+          "response_model": "deepseek-flash",
+          "wall_ms": 714.783
+        }
+      ],
+      "metrics": {
+        "sql_execute_calls": 53,
+        "sql_by_phase": {
+          "other": 6,
+          "begin": 5,
+          "event": 8,
+          "start_model_call": 6,
+          "save_response": 8,
+          "queue_tool_calls": 3,
+          "start_tool_call": 3,
+          "save_tool_result": 4,
+          "model_stream": 2,
+          "event_flush": 2,
+          "finish": 6
+        },
+        "sql_execute_ms_by_phase": {
+          "other": 3.924,
+          "begin": 1.223,
+          "event": 3.733,
+          "start_model_call": 2.268,
+          "save_response": 3.809,
+          "queue_tool_calls": 2.447,
+          "start_tool_call": 0.798,
+          "save_tool_result": 0.827,
+          "model_stream": 1.006,
+          "event_flush": 1.072,
+          "finish": 2.695
+        },
+        "spans": {
+          "begin": {
+            "calls": 1,
+            "total_ms": 1.722
+          },
+          "event_flush": {
+            "calls": 13,
+            "total_ms": 2.18
+          },
+          "event": {
+            "calls": 4,
+            "total_ms": 7.069
+          },
+          "context_prepare": {
+            "calls": 2,
+            "total_ms": 3.875
+          },
+          "memory_recall": {
+            "calls": 2,
+            "total_ms": 0.007
+          },
+          "start_model_call": {
+            "calls": 2,
+            "total_ms": 3.083
+          },
+          "model_stream": {
+            "calls": 2,
+            "total_ms": 1720.633
+          },
+          "save_response": {
+            "calls": 2,
+            "total_ms": 6.275
+          },
+          "queue_tool_calls": {
+            "calls": 1,
+            "total_ms": 3.142
+          },
+          "start_tool_call": {
+            "calls": 1,
+            "total_ms": 1.293
+          },
+          "tool_execute": {
+            "calls": 1,
+            "total_ms": 38.811
+          },
+          "save_tool_result": {
+            "calls": 1,
+            "total_ms": 1.25
+          },
+          "text_delta": {
+            "calls": 2,
+            "total_ms": 0.015
+          },
+          "memory_enqueue": {
+            "calls": 1,
+            "total_ms": 0.008
+          },
+          "finish": {
+            "calls": 1,
+            "total_ms": 3.404
+          }
+        }
+      },
+      "sandbox": {
+        "backend": "seatbelt",
+        "unsandboxed": false,
+        "denied_reads": [
+          "/private/tmp/chagent-live-secret-03db825265.txt"
+        ],
+        "network_allowed": false
+      },
+      "command_output": "out-denied\nread-denied\n",
+      "probe_checks": {
+        "starts": true,
+        "no_residue": true,
+        "read_denied": true,
+        "network_denied": true,
+        "outside_denied": true,
+        "workspace_writable": true
+      }
+    }
+  ],
+  "schema_cleaned": true,
+  "schema_kept": null,
+  "total_provider_requests": 14,
+  "total_model_calls": 12,
+  "total_tool_calls": 3,
+  "total_repeated_tool_calls": 0,
+  "prompt_cache": {
+    "hit": 0.6135,
+    "reusable": 0.9348,
+    "breaks": [],
+    "cases": {
+      "smoke": 0.0,
+      "file_tool_chain": 0.6141,
+      "persisted_history": 0.0,
+      "explicit_memory": null,
+      "cross_session_memory": 0.8398,
+      "automatic_memory_candidate": 0.8898,
+      "reviewed_memory_recall": 0.8312,
+      "real_compaction": 0.8482,
+      "web_api_sse_replay": 0.8946,
+      "sandboxed_command": 0.6256
+    },
+    "scope": "task-loop model_calls only; memory extraction and compaction requests appear in reported_tokens but not here",
+    "note": "hit is provider-reported usage; reusable is the local prefix overlap; auditing sends no requests"
+  },
+  "reported_tokens": {
+    "input": 12702,
+    "output": 456,
+    "cache_read": 14080,
+    "cache_write": 0,
+    "total_tokens": 27238
+  },
+  "usage_missing_calls": 0,
+  "monetary_cost": null,
+  "monetary_cost_note": "No monetary price assumed; see provider-reported token usage.",
+  "passed": true,
+  "source_sha256": {
+    "src/chagent/agent/runner.py": "40b7634559f2f7beb13074abc746bd24ad0f3435720253b95e6b71e03ac65d23",
+    "src/chagent/memory/service.py": "a90962a66fdf49741b5825389d26c1091f7f3f723127725a01b834a28d0dd8f9",
+    "src/chagent/models/openai_chat.py": "36758ad0327ed3e6b3ab9d39bad618221a3f0385e4c5fabfffe9df6ee9eabf3a",
+    "src/chagent/context/manager.py": "263e36f10f3ac8189051971986e0f1f2c73a2ddba745ca75d2b90634a58314d9",
+    "src/chagent/tools/scheduler.py": "dbe22658617e2c3844ee30cb79e8781ad32da2588c5d98dccdc9e7be76b35d32",
+    "src/chagent/tools/executor.py": "d762a67799eff24c0896ba62e103e4bacc1f6bf6b36ec3235cb6ec4f126fe844",
+    "src/chagent/tools/filesystem.py": "c5b38ce2bab2308c1b225bdb2c83cb4183e4ec5f3b579aaf07134d064f3364ab",
+    "src/chagent/agent/stream_writer.py": "d832efba4535d0a9fb2a0b01d0177a222db7f4f3e428245db1849627bf7d6f23",
+    "src/chagent/events/notifications.py": "84cc07254e02f5eda0abda7612215894ea748c312b1dbdd88681ac9de0664555",
+    "src/chagent/web/app.py": "279487442b5bdd95027324b18b58d991e5e19749a0a6dc10a756cce65e4c2164"
+  }
+}

@@ -6,7 +6,7 @@ from chagent.context.manager import ContextManager
 from chagent.domain.json_types import JsonObject
 from chagent.domain.context import ContextPolicy
 from chagent.domain.summaries import CompactionPolicy
-from chagent.context.tokens import TokenCounter
+from chagent.context.tokens import TokenCounter, select_counter
 from chagent.memory.worker import MemoryWorker
 from chagent.models.base import Model, ModelClient
 from chagent.models.fake import FakeModelClient
@@ -58,7 +58,8 @@ def create_runner(
 ) -> AgentRunner:
     registry = create_builtin_registry(allow_host_commands=allow_host_commands,
                                        artifacts=ArtifactRepository(database), sandbox=sandbox)
-    builder = BasicContextBuilder(policy=context_policy, counter=token_counter)
+    builder = BasicContextBuilder(policy=context_policy,
+                                  counter=token_counter or select_counter(model))
     conversations, runs = ConversationRepository(database), RunRepository(database)
     jobs = MemoryJobRepository(database)
     memory_service = MemoryService(MemoryRepository(database), conversations, runs, builder.counter,

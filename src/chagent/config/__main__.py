@@ -19,6 +19,7 @@ from psycopg.conninfo import conninfo_to_dict
 
 from chagent.config import Settings
 from chagent.config import dotenv
+from chagent.context.tokens import select_counter
 from chagent.diagnostics.behavior import describe as describe_behavior
 from chagent.domain.summaries import CompactionPolicy
 from chagent.models.settings import ModelConfigurationError, ModelSettings
@@ -44,6 +45,9 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
         sections["model"] = model.describe()
         sections["budgets"] = (f"context_window={model.context_window} max_tokens={model.max_tokens} "
                                f"request_timeout={model.request_timeout:g} run_timeout={model.run_timeout:g}")
+        # Which counter is in effect decides when compaction triggers; a fallback
+        # here is invisible in every other output.
+        sections["tokenizer"] = select_counter(model.model(), env).name
     except ModelConfigurationError as error:
         problems.append(f"model: {error}")
     if settings is not None:

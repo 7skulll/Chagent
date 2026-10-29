@@ -64,7 +64,7 @@ async def _run(
         # line is the one that explains why.
         if model_settings is not None:
             print(f"Resolved: {model_settings.describe()}", flush=True)
-        print(f"Behavior: {describe_behavior(settings, CompactionPolicy.from_env())}", flush=True)
+        print(f"Behavior: {describe_behavior(settings, CompactionPolicy.from_env(), runner.context.counter.name)}", flush=True)
         result = await runner.run(session_id, text)
         print(f"Model: {runner.model.provider}/{runner.model.id}" + (" (deterministic demo)" if client is None else ""))
         print(f"Session: {result.session_id}")

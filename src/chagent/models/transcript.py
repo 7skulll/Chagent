@@ -34,44 +34,61 @@ def normalize(request: ModelRequest) -> tuple[str, list[Tool], list[Message]]:
     return "\n\n".join([*instructions, *sections.values()]), list(tools.values()), messages
 
 
+def openai_tools(tools: list[Tool]) -> list[dict]:
+    """Tool declarations exactly as the chat-completions adapter sends them."""
+    return [{"type": "function", "function": {"name": tool.name, "description": tool.description,
+                                              "parameters": tool.parameters}} for tool in tools]
+
+
+def openai_message(message: Message, request: ModelRequest | None = None, *,
+                   reasoning_replay: bool = False) -> dict:
+    """One non-system message exactly as the chat-completions adapter sends it.
+
+    Shared with the token counter: an estimate that serializes a different shape
+    than the wire is how the byte counter ended up 4x high on English.
+    """
+    if isinstance(message, UserMessage):
+        content = message.content
+        if not isinstance(content, str):
+            content = [
+                {"type": "text", "text": block.text} if isinstance(block, TextContent) else
+                {"type": "image_url", "image_url": {"url": f"data:{block.mime_type};base64,{block.data}"}}
+                for block in content
+            ]
+        return {"role": "user", "content": content}
+    if isinstance(message, AssistantMessage):
+        text = "".join(block.text for block in message.content if isinstance(block, TextContent))
+        item = {"role": "assistant", "content": text or None}
+        calls = [block for block in message.content if isinstance(block, ToolCall)]
+        if calls:
+            item["tool_calls"] = [{
+                "id": call.id, "type": "function", "function": {
+                    "name": call.name, "arguments": json.dumps(call.arguments, ensure_ascii=False, allow_nan=False),
+                },
+            } for call in calls]
+        if (reasoning_replay and request is not None
+                and message.provider == request.model.provider and message.model == request.model.id):
+            reasoning = "".join(block.thinking for block in message.content if isinstance(block, ThinkingContent))
+            if reasoning:
+                item["reasoning_content"] = reasoning
+        return item
+    if isinstance(message, ToolResultMessage):
+        if any(isinstance(block, ImageContent) for block in message.content):
+            raise ValueError("Image tool results are not supported by the chat-completions adapter")
+        text = "\n".join(block.text for block in message.content)
+        if message.is_error:
+            text = "[Tool error]\n" + text
+        return {"role": "tool", "tool_call_id": message.tool_call_id, "content": text}
+    raise ValueError(f"Unsupported message for the chat-completions adapter: {message.role}")
+
+
 def openai_payload(request: ModelRequest, *, reasoning_replay: bool = False) -> dict:
     system, tools, history = normalize(request)
     messages = [{"role": "system", "content": system}] if system else []
-    for message in history:
-        if isinstance(message, UserMessage):
-            content = message.content
-            if not isinstance(content, str):
-                content = [
-                    {"type": "text", "text": block.text} if isinstance(block, TextContent) else
-                    {"type": "image_url", "image_url": {"url": f"data:{block.mime_type};base64,{block.data}"}}
-                    for block in content
-                ]
-            messages.append({"role": "user", "content": content})
-        elif isinstance(message, AssistantMessage):
-            text = "".join(block.text for block in message.content if isinstance(block, TextContent))
-            item = {"role": "assistant", "content": text or None}
-            calls = [block for block in message.content if isinstance(block, ToolCall)]
-            if calls:
-                item["tool_calls"] = [{
-                    "id": call.id, "type": "function", "function": {
-                        "name": call.name, "arguments": json.dumps(call.arguments, ensure_ascii=False, allow_nan=False),
-                    },
-                } for call in calls]
-            if reasoning_replay and message.provider == request.model.provider and message.model == request.model.id:
-                reasoning = "".join(block.thinking for block in message.content if isinstance(block, ThinkingContent))
-                if reasoning:
-                    item["reasoning_content"] = reasoning
-            messages.append(item)
-        elif isinstance(message, ToolResultMessage):
-            if any(isinstance(block, ImageContent) for block in message.content):
-                raise ValueError("Image tool results are not supported by the chat-completions adapter")
-            text = "\n".join(block.text for block in message.content)
-            if message.is_error:
-                text = "[Tool error]\n" + text
-            messages.append({"role": "tool", "tool_call_id": message.tool_call_id, "content": text})
+    messages.extend(openai_message(message, request, reasoning_replay=reasoning_replay) for message in history)
     body = {"model": request.model.id, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
     if tools:
-        body["tools"] = [{"type": "function", "function": {"name": tool.name, "description": tool.description, "parameters": tool.parameters}} for tool in tools]
+        body["tools"] = openai_tools(tools)
     if request.temperature is not None:
         body["temperature"] = request.temperature
     return body

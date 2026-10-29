@@ -16,5 +16,10 @@ dependencies = [
     "uvicorn>=0.35,<1",
 ]
 
+[project.optional-dependencies]
+# A real BPE counter for context budgeting. Optional: without it the builder
+# falls back to the byte estimate and records that in the snapshot.
+tokenizer = ["tiktoken>=0.7,<1"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/chagent"]

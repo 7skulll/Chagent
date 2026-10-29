@@ -30,7 +30,10 @@ from chagent.tools.context import ToolContext
 
 # Six 2.4 KB tool results force compaction inside this window; the window also has
 # to hold the run-static environment snapshot, so it is not the bare minimum.
-LONG_RUN_WINDOW = 12_800
+# Sized so a 2.4 KB tool result plus the fixed prompt still leaves room for the
+# retained input. The named system sections added ~150 bytes of prefix; the
+# fixture follows the prompt rather than the prompt being trimmed to the fixture.
+LONG_RUN_WINDOW = 13_600
 
 
 class EmitTool(AgentTool):

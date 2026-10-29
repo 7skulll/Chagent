@@ -12,6 +12,7 @@ from psycopg.conninfo import make_conninfo
 from chagent.agent.runner import RunFailedError
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
+from chagent.domain.codec import message_from_dict
 from chagent.domain.messages import AssistantMessage, ToolResultMessage
 from chagent.domain.recovery import HEADER, MAX_FACTS, RecoveryFact, build_recovery_note
 from chagent.models.events import ErrorEvent
@@ -115,7 +116,7 @@ class RecoveryProjectionTests(unittest.IsolatedAsyncioTestCase):
 
         result = await create_demo_runner(self.database).run(self.session, "继续")
         row = await self.first_request(result.run_id)
-        system = row["request"]["messages"][0]["content"]
+        system = message_from_dict(row["request"]["messages"][0]).text()
         self.assertIn(HEADER, system)
         self.assertIn("write_file notes.txt", system)
         self.assertIn("committed (sha256", system)
@@ -139,7 +140,7 @@ class RecoveryProjectionTests(unittest.IsolatedAsyncioTestCase):
 
         result = await create_demo_runner(self.database).run(self.session, "继续")
         row = await self.first_request(result.run_id)
-        system = row["request"]["messages"][0]["content"]
+        system = message_from_dict(row["request"]["messages"][0]).text()
         self.assertIn(HEADER, system)
         self.assertIn("apply_patch notes.py — committed", system)
         self.assertEqual(row["context_snapshot"]["recovery_fact_count"], 1)
@@ -151,7 +152,7 @@ class RecoveryProjectionTests(unittest.IsolatedAsyncioTestCase):
                 "UPDATE tool_calls SET status = 'unknown' WHERE run_id = %s", (failed,))
 
         result = await create_demo_runner(self.database).run(self.session, "继续")
-        system = (await self.first_request(result.run_id))["request"]["messages"][0]["content"]
+        system = message_from_dict((await self.first_request(result.run_id))["request"]["messages"][0]).text()
         self.assertIn("write_file notes.txt — unknown; no result was committed", system)
 
     async def test_facts_stop_after_a_completed_run(self):
@@ -159,7 +160,7 @@ class RecoveryProjectionTests(unittest.IsolatedAsyncioTestCase):
         await create_demo_runner(self.database).run(self.session, "第一轮正常结束")
         result = await create_demo_runner(self.database).run(self.session, "第二轮")
         row = await self.first_request(result.run_id)
-        self.assertNotIn(HEADER, row["request"]["messages"][0]["content"])
+        self.assertNotIn(HEADER, message_from_dict(row["request"]["messages"][0]).text())
         self.assertEqual(row["context_snapshot"]["recovery_fact_count"], 0)
 
     async def test_repeated_writes_report_only_the_latest_attempt(self):
@@ -167,7 +168,7 @@ class RecoveryProjectionTests(unittest.IsolatedAsyncioTestCase):
         second = await self.fail_with_write(content="two\n", overwrite=True)
         result = await create_demo_runner(self.database).run(self.session, "继续")
         row = await self.first_request(result.run_id)
-        system = row["request"]["messages"][0]["content"]
+        system = message_from_dict(row["request"]["messages"][0]).text()
         self.assertEqual(system.count("write_file notes.txt"), 1)
         self.assertIn(str(second)[:8], system)
         self.assertNotIn(str(first)[:8], system)
@@ -177,5 +178,5 @@ class RecoveryProjectionTests(unittest.IsolatedAsyncioTestCase):
         await self.fail_with_tool("list_dir", {"path": "."})
         result = await create_demo_runner(self.database).run(self.session, "继续")
         row = await self.first_request(result.run_id)
-        self.assertNotIn(HEADER, row["request"]["messages"][0]["content"])
+        self.assertNotIn(HEADER, message_from_dict(row["request"]["messages"][0]).text())
         self.assertEqual(row["context_snapshot"]["recovery_fact_count"], 0)

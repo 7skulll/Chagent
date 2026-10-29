@@ -75,6 +75,17 @@ class SystemMessage:
     sections: dict[str, str | None] | None = None
     tools_added: list[Tool] | None = None
     tools_removed: list[ToolReference] | None = None
+
+    def text(self) -> str:
+        """The instructions as the provider sees them: content, then named sections.
+
+        Used by prompts, tests and the cache audit. ``normalize`` merges several
+        system messages by section name, so this is the per-message view only.
+        """
+        content = (self.content if isinstance(self.content, str)
+                   else "\n".join(block.text for block in self.content))
+        parts = [content, *(self.sections or {}).values()]
+        return "\n\n".join(part for part in parts if part)
     role: Literal["system"] = field(default="system", init=False)
 
 

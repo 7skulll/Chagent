@@ -89,7 +89,7 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
         # loads it once per run, so it costs at most one cache miss per run.
         # Moving it into a trailing message would let a model read it as a new
         # turn and act again instead of stopping.
-        self.assertIn("不要修改数据库", first.request.messages[0].content)
+        self.assertIn("不要修改数据库", first.request.messages[0].text())
 
     async def test_each_turn_extends_the_previous_request_without_rewriting_it(self):
         """A provider can only cache turns that survive verbatim into the next one."""
@@ -117,7 +117,7 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
         plain = await builder.build(history, self.model, [])
         built = await builder.build(history, self.model, tools, task_state=state)
         self.assertGreater(built.snapshot.token_estimate, plain.snapshot.token_estimate)
-        self.assertIn("不要修改数据库", built.request.messages[0].content)
+        self.assertIn("不要修改数据库", built.request.messages[0].text())
         self.assertEqual(built.snapshot.task_state_revision, 4)
         with self.assertRaises(ContextBudgetError):
             await builder.build(history, Model("test", "test", "fake", 300, 128), tools, task_state=state)
@@ -231,3 +231,58 @@ class CountingTests(unittest.IsolatedAsyncioTestCase):
         first.request.messages[-1].content[0].text = "mutated"
         second = await builder.build(history, self.model, [], current_run_id=history[-1].run_id, cache=cache)
         self.assertEqual(second.request.messages[-1].content[0].text, history[-1].message.content[0].text)
+
+
+class PromptSectionTests(unittest.IsolatedAsyncioTestCase):
+    """The system prompt is five named sections in a fixed order."""
+
+    def setUp(self):
+        self.model = Model("test", "test", "fake", 100_000, 128)
+
+    def history(self):
+        run = uuid4()
+        return [StoredMessage(uuid4(), 1, UserMessage("hi", 1), run)]
+
+    async def test_sections_are_named_and_ordered(self):
+        builder = BasicContextBuilder(policy=ContextPolicy(safety_tokens=0))
+        built = await builder.build(self.history(), self.model, [], task_state=TaskState(goal="ship"),
+                                    environment="Working directory: /tmp")
+        sections = built.request.messages[0].sections
+        self.assertEqual(list(sections), ["preamble", "tools", "rules", "environment", "state"])
+        self.assertEqual(built.request.messages[0].content, "")
+        self.assertEqual(sections["environment"], "Working directory: /tmp")
+        self.assertIn("ship", sections["state"])
+        # The wire text is the sections in order, so the label cannot drift from
+        # what the provider actually receives.
+        self.assertTrue(built.request.messages[0].text().startswith(sections["preamble"]))
+        self.assertLess(built.request.messages[0].text().index(sections["rules"]),
+                        built.request.messages[0].text().index(sections["state"]))
+
+    async def test_absent_run_facts_do_not_leave_empty_sections(self):
+        builder = BasicContextBuilder(policy=ContextPolicy(safety_tokens=0))
+        built = await builder.build(self.history(), self.model, [])
+        self.assertEqual(list(built.request.messages[0].sections), ["preamble", "tools", "rules"])
+
+    async def test_each_section_is_byte_identical_across_turns(self):
+        builder = BasicContextBuilder(policy=ContextPolicy(safety_tokens=0))
+        first = await builder.build(self.history(), self.model, [], task_state=TaskState(goal="ship"),
+                                    environment="Working directory: /tmp")
+        second = await builder.build(self.history(), self.model, [], task_state=TaskState(goal="ship"),
+                                     environment="Working directory: /tmp")
+        self.assertEqual(first.request.messages[0].sections, second.request.messages[0].sections)
+
+    async def test_snapshot_records_every_counter_separately(self):
+        class StubCounter:
+            name = "stub_bpe"
+            additive = True
+
+            def count(self, messages):
+                return 7 * len(messages)
+
+        builder = BasicContextBuilder(counter=StubCounter(), policy=ContextPolicy(safety_tokens=0))
+        built = await builder.build(self.history(), self.model, [])
+        self.assertEqual(built.snapshot.token_counter, "stub_bpe")
+        self.assertEqual(built.snapshot.token_estimate, built.snapshot.token_estimates["stub_bpe"])
+        self.assertIn("utf8_json_bytes_estimate", built.snapshot.token_estimates)
+        self.assertNotEqual(built.snapshot.token_estimates["utf8_json_bytes_estimate"],
+                            built.snapshot.token_estimates["stub_bpe"])

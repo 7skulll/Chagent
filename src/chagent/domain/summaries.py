@@ -19,6 +19,9 @@ class CompactionPolicy:
     max_calls: int = 8
     timeout: float = 60
     max_compactions_per_run: int = 4
+    # Newest tool results that must stay verbatim, never summarized: they are the
+    # evidence the model just acted on. 0 restores summarize-everything.
+    retained_tool_results: int = 2
 
     def __post_init__(self):
         if not 0 < self.keep_recent_ratio < self.trigger_ratio < 1:
@@ -29,6 +32,8 @@ class CompactionPolicy:
             raise ValueError("Compaction timeout must be finite and positive")
         if not 1 <= self.max_compactions_per_run <= 32:
             raise ValueError("Invalid per-run compaction limit")
+        if isinstance(self.retained_tool_results, bool) or not 0 <= self.retained_tool_results <= 64:
+            raise ValueError("Retained tool results must be an integer between 0 and 64")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "CompactionPolicy":
@@ -43,7 +48,8 @@ class CompactionPolicy:
                        max_summary_tokens=int(values.get("CHAGENT_COMPACTION_SUMMARY_TOKENS", "2048")),
                        max_calls=int(values.get("CHAGENT_COMPACTION_MAX_CALLS", "8")),
                        timeout=float(values.get("CHAGENT_COMPACTION_TIMEOUT", "60")),
-                       max_compactions_per_run=int(values.get("CHAGENT_COMPACTION_MAX_PER_RUN", "4")))
+                       max_compactions_per_run=int(values.get("CHAGENT_COMPACTION_MAX_PER_RUN", "4")),
+                       retained_tool_results=int(values.get("CHAGENT_COMPACTION_RETAINED_TOOL_RESULTS", "2")))
         except (ValueError, OverflowError):
             raise ValueError("Invalid compaction configuration") from None
 
