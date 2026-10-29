@@ -17,6 +17,7 @@ from chagent.storage.summaries import SummaryRepository
 from chagent.storage.artifacts import ArtifactRepository
 from chagent.tools.builtin import create_builtin_registry
 from chagent.tools.executor import ToolExecutor
+from chagent.tools.sandbox import Sandbox
 from chagent.domain.memories import MemoryPolicy
 from chagent.memory.service import MemoryService
 from chagent.storage.memories import MemoryRepository
@@ -31,6 +32,7 @@ def create_demo_runner(
     memory_policy: MemoryPolicy | None = None,
     max_tool_concurrency: int = 4,
     memory_worker_concurrency: int = 1,
+    sandbox: Sandbox | None = None,
 ) -> AgentRunner:
     return create_runner(
         database, Model(id="fake-echo", provider="local-test", api="fake", context_window=8192, max_tokens=512),
@@ -39,6 +41,7 @@ def create_demo_runner(
         memory_policy=memory_policy,
         max_tool_concurrency=max_tool_concurrency,
         memory_worker_concurrency=memory_worker_concurrency,
+        sandbox=sandbox,
     )
 
 
@@ -51,8 +54,10 @@ def create_runner(
     memory_policy: MemoryPolicy | None = None,
     max_tool_concurrency: int = 4,
     memory_worker_concurrency: int = 1,
+    sandbox: Sandbox | None = None,
 ) -> AgentRunner:
-    registry = create_builtin_registry(allow_host_commands=allow_host_commands, artifacts=ArtifactRepository(database))
+    registry = create_builtin_registry(allow_host_commands=allow_host_commands,
+                                       artifacts=ArtifactRepository(database), sandbox=sandbox)
     builder = BasicContextBuilder(policy=context_policy, counter=token_counter)
     conversations, runs = ConversationRepository(database), RunRepository(database)
     jobs = MemoryJobRepository(database)
@@ -69,6 +74,7 @@ def create_runner(
     )
     # One worker per runner: it reads model/client at call time, so a replaced
     # client (test doubles, provider switch) applies to extraction as well.
+    runner.sandbox = sandbox
     runner.memory_worker = MemoryWorker(
         jobs, memory_service, runner,
         concurrency=memory_worker_concurrency,

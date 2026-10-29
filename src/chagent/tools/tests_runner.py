@@ -18,6 +18,7 @@ from time import monotonic
 from chagent.domain.messages import JsonObject, TextContent
 from chagent.tools.base import AgentTool, AgentToolResult, AgentToolUpdateCallback
 from chagent.tools.context import ToolContext
+from chagent.tools.sandbox import Sandbox
 
 
 MAX_CAPTURE_BYTES = 262_144
@@ -124,7 +125,8 @@ def summarize_unittest(output: str) -> tuple[dict, list[dict]]:
 
 
 class RunTestsTool(AgentTool):
-    def __init__(self):
+    def __init__(self, sandbox: Sandbox | None = None):
+        self.sandbox = sandbox
         super().__init__(
             name="run_tests", label="Run tests",
             description="Run the project's test suite once and return a compact digest: counts plus the first "
@@ -153,9 +155,12 @@ class RunTestsTool(AgentTool):
         suite = detect_suite(workspace) if suite == "auto" else suite
         command = build_command(suite, workspace, params.get("selection"))
         timeout = params.get("timeout_ms", 120_000) / 1000
+        argv, sandbox_record = ["/bin/sh", "-c", " ".join(_quote(part) for part in command)], {}
+        if self.sandbox is not None:
+            argv, sandbox_record = await self.sandbox.wrap(argv, workspace)
         started = monotonic()
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
-            "/bin/sh", "-c", " ".join(_quote(part) for part in command), cwd=workspace,
+            *argv, cwd=workspace,
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT, start_new_session=True,
         ))
@@ -216,6 +221,7 @@ class RunTestsTool(AgentTool):
             details={"suite": suite, "command": command, "exit_code": process.returncode,
                      "duration_ms": round(duration, 1), "counts": counts,
                      "failures": failures[:20], "timed_out": timed_out,
+                     **({"sandbox": sandbox_record} if sandbox_record else {}),
                      "output": output[-MAX_CAPTURE_BYTES:]},
         )
 

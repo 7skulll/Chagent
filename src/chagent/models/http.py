@@ -131,8 +131,15 @@ class HTTPModelClient:
                 if not 200 <= response.status_code < 300:
                     hints = {401: "API key rejected", 403: "Access denied", 404: "Model or endpoint not found",
                              429: "Rate limit or quota exceeded"}
+                    reason = f"HTTP {response.status_code}: {hints.get(response.status_code, 'Provider request failed')}"
+                    # A generic key silently wins over the provider's own variable.
+                    # Say so, because the usual first move is to re-check a file
+                    # that was never the problem.
+                    if response.status_code == 401 and self.settings.shadowed_key_env:
+                        reason += (f" (CHAGENT_API_KEY is set and overrides {self.settings.shadowed_key_env}; "
+                                   "unset it to fall back to the named key)")
                     # Provider error bodies can echo credentials or request content.
-                    raise ModelProtocolError(f"HTTP {response.status_code}: {hints.get(response.status_code, 'Provider request failed')}")
+                    raise ModelProtocolError(reason)
                 if "text/event-stream" not in response.headers.get("content-type", "").lower():
                     raise ModelProtocolError("Expected a server-sent event response")
                 yield StartEvent(partial)

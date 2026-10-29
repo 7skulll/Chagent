@@ -37,6 +37,7 @@ from chagent.storage.memories import MemoryRepository
 from chagent.storage.migrate import migrate
 from chagent.web.app import WebRuntime, create_app
 from chagent.tools.echo import EchoTool
+from chagent.tools.sandbox import Sandbox, SandboxSettings, SeatbeltBackend
 
 
 class MeasuredClient:
@@ -84,13 +85,14 @@ class LiveSuite:
         self.memory = MemoryRepository(database)
         self.nonce = uuid4().hex[:10]
 
-    def runner(self, *, memory=False, extract=False, compact=False):
+    def runner(self, *, memory=False, extract=False, compact=False, host_commands=False, sandbox=None):
         model = self.selected.model()
         if compact:
             model.context_window = 14000
         return create_runner(self.database, model, self.client, timeout=90, max_turns=6,
                              memory_policy=MemoryPolicy(enabled=memory, extract=extract, timeout=25),
-                             compaction_policy=CompactionPolicy(enabled=compact, max_calls=3, timeout=45))
+                             compaction_policy=CompactionPolicy(enabled=compact, max_calls=3, timeout=45),
+                             allow_host_commands=host_commands, sandbox=sandbox)
 
     async def settle_memory(self, runner, run_id):
         """Process queued extraction outside the run, then re-read the stream.
@@ -279,6 +281,7 @@ class LiveSuite:
 
         await self.compaction_case()
         await self.web_case()
+        await self.sandbox_case()
 
     async def compaction_case(self):
         runner = self.runner(compact=True)
@@ -375,6 +378,54 @@ class LiveSuite:
         if not record["passed"]:
             summary["tool_sequence"] = record["tool_sequence"]
         print(json.dumps(summary, ensure_ascii=False), flush=True)
+
+    async def sandbox_case(self):
+        """The profile must hold while the model drives the tool, not just in unit tests.
+
+        The command is written so it always exits 0: each denied action is caught
+        and echoed, which makes the tool result itself the evidence. A run that
+        merely fails proves nothing about what was denied.
+        """
+        backend = SeatbeltBackend()
+        if not backend.available:
+            print(json.dumps({"case": "sandboxed_command", "skipped": "seatbelt backend unavailable"}), flush=True)
+            return
+        outside = Path("/private/tmp") / f"chagent-live-{self.nonce}.txt"
+        secret = Path("/private/tmp") / f"chagent-live-secret-{self.nonce}.txt"
+        secret.write_text("live-secret\n", encoding="utf-8")
+        try:
+            sandbox = Sandbox(SandboxSettings(mode="workspace-write", deny_read=(secret,)))
+            command = (f"printf ok > inside.txt; "
+                       f"(printf no > {outside}) 2>/dev/null || echo out-denied; "
+                       f"(cat {secret}) 2>/dev/null || echo read-denied")
+            runner = self.runner(host_commands=True, sandbox=sandbox)
+
+            async def verify(result, events, rows):
+                async with self.database.connection() as connection:
+                    cursor = await connection.execute(
+                        "SELECT name, result FROM tool_calls WHERE run_id = %s ORDER BY created_at, call_index",
+                        (result.run_id,))
+                    calls = await cursor.fetchall()
+                executed = next((call for call in calls if call["name"] == "exec_command"), None)
+                details = (executed["result"] or {}).get("details") or {}
+                applied = next((event for event in events if event["type"] == "sandbox_applied"), None)
+                return {"exec_tool_used": executed is not None,
+                        "marked_sandboxed": details.get("sandbox", {}).get("unsandboxed") is False,
+                        "outside_write_denied": "out-denied" in details.get("output", "") and not outside.exists(),
+                        "configured_read_denied": "read-denied" in details.get("output", ""),
+                        "inside_write_allowed": (self.workspace / "inside.txt").is_file(),
+                        "sandbox_event_probed": bool(applied) and applied["payload"].get("available") is True
+                                                  and all(applied["payload"].get("checks", {}).values())}, {
+                    "sandbox": details.get("sandbox"), "command_output": details.get("output"),
+                    "probe_checks": (applied or {}).get("payload", {}).get("checks")}
+
+            await self.run("sandboxed_command", runner,
+                           "必须调用一次 exec_command，参数 cmd 必须是下面这条命令（原样，不要修改）：\n"
+                           f"{command}\n"
+                           "然后只回答 DONE，不要调用其他工具。", verify=verify)
+        finally:
+            secret.unlink(missing_ok=True)
+            outside.unlink(missing_ok=True)
 
     async def events_case(self):
         first_call = len(self.client.calls)
@@ -496,6 +547,8 @@ async def main_async(args):
                                 await suite.events_case()
                             elif args.case == "scheduling":
                                 await suite.scheduling_case()
+                            elif args.case == "sandbox":
+                                await suite.sandbox_case()
                             elif args.case == "web":
                                 await suite.web_case()
                             else:
@@ -519,6 +572,10 @@ async def main_async(args):
         report["monetary_cost"] = None
         report["monetary_cost_note"] = "No monetary price assumed; see provider-reported token usage."
         expected = 9 if args.case == "all" else 6 if args.case == "core" else 2 if args.case == "events" else 1
+        # The sandbox case cannot run where the backend is missing, and a skip
+        # must not be counted as a pass; the expectation follows what ran.
+        if any(case["name"] == "sandboxed_command" for case in report["results"]):
+            expected += 1 if args.case == "all" else 0
         report["passed"] = len(report["results"]) == expected and all(case["passed"] for case in report["results"]) and "suite_error_type" not in report
         root = Path(__file__).resolve().parents[1]
         report["source_sha256"] = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -538,7 +595,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-calls", type=int, default=24)
-    parser.add_argument("--case", choices=("all", "core", "web", "explicit", "scheduling", "events"), default="all")
+    parser.add_argument("--case", choices=("all", "core", "web", "explicit", "scheduling", "events", "sandbox"), default="all")
     args = parser.parse_args()
     if not 1 <= args.max_calls <= 30:
         parser.error("--max-calls must be between 1 and 30")

@@ -131,6 +131,19 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(str(status), events[-1].error.error_message)
             self.assertNotIn("test-provider-secret", json.dumps(asdict(events[-1])))
 
+    async def test_rejected_key_names_the_variable_that_overrode_the_file(self):
+        settings = ModelSettings.from_env({"CHAGENT_PROVIDER": "deepseek", "CHAGENT_API_KEY": "stale",
+                                           "DEEPSEEK_API_KEY": "from-file"})
+        events, _ = await self.collect(settings, '{"error":"invalid"}', status=401)
+        message = events[-1].error.error_message
+        self.assertIn("CHAGENT_API_KEY", message)
+        self.assertIn("DEEPSEEK_API_KEY", message)
+        self.assertNotIn("stale", message)
+        self.assertNotIn("from-file", message)
+        # Without a shadowed variable the hint would be noise.
+        events, _ = await self.collect(self.settings(), '{"error":"invalid"}', status=401)
+        self.assertNotIn("overrides", events[-1].error.error_message)
+
     async def test_native_anthropic_tool_input_and_usage(self):
         settings = self.settings("anthropic")
         body = claude_sse(claude_events(

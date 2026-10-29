@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from chagent.agent.runner import AgentRunner, RunFailedError
 from chagent.bootstrap import create_demo_runner, create_runner
 from chagent.config import Settings
+from chagent.tools.sandbox import Sandbox
 from chagent.domain.codec import message_to_dict
 from chagent.models.factory import create_model_client
 from chagent.models.settings import ModelSettings
@@ -464,16 +465,19 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
         try:
             async with Database(configured) as database:
                 await migrate(database)
+                sandbox = Sandbox.from_settings(configured)
                 if selected is None:
                     runner = create_demo_runner(database, allow_host_commands=configured.allow_host_commands, max_turns=configured.max_turns,
                                                 max_tool_concurrency=configured.max_tool_concurrency,
-                                                memory_worker_concurrency=configured.memory_worker_concurrency)
+                                                memory_worker_concurrency=configured.memory_worker_concurrency,
+                                                sandbox=sandbox)
                 else:
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
                                            timeout=selected.run_timeout, max_turns=configured.max_turns,
                                            max_tool_concurrency=configured.max_tool_concurrency,
-                                           memory_worker_concurrency=configured.memory_worker_concurrency)
+                                           memory_worker_concurrency=configured.memory_worker_concurrency,
+                                           sandbox=sandbox)
                 app.state.runtime = WebRuntime(runner, workspace)
                 app.state.runtime.start_worker()
                 try:

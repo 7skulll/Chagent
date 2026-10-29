@@ -1,4 +1,4 @@
-"""One-shot POSIX host commands; cwd is scoped, the process is not sandboxed."""
+"""One-shot POSIX host commands; cwd is scoped and the child gets a profile."""
 
 import asyncio
 from contextlib import suppress
@@ -9,14 +9,25 @@ from time import monotonic
 from chagent.domain.messages import JsonObject, TextContent
 from chagent.tools.base import AgentTool, AgentToolResult, AgentToolUpdateCallback
 from chagent.tools.context import ToolContext
+from chagent.tools.sandbox import Sandbox
 from chagent.tools.workspace import WorkspaceFS
 
 
 class ExecCommandTool(AgentTool):
-    def __init__(self):
+    def __init__(self, sandbox: Sandbox | None = None):
+        self.sandbox = sandbox
+        confined = sandbox is not None and sandbox.enabled
         super().__init__(
             name="exec_command", label="Run command",
-            description="Run one non-interactive /bin/sh command on the host. This is not sandboxed. No background sessions or stdin. Output is bounded; exit status is reported.",
+            description=(
+                "Run one non-interactive /bin/sh command on the host inside the platform sandbox: writes stay "
+                "in the workspace and the user's temp directory, network is off unless the host allowed it, and "
+                "configured credential paths are unreadable. No background sessions or stdin. Output is "
+                "bounded; exit status is reported."
+                if confined else
+                "Run one non-interactive /bin/sh command on the host. This is not sandboxed. No background "
+                "sessions or stdin. Output is bounded; exit status is reported."
+            ),
             parameters={
                 "type": "object", "properties": {
                     "cmd": {"type": "string", "minLength": 1, "maxLength": 32_768},
@@ -41,10 +52,16 @@ class ExecCommandTool(AgentTool):
         with filesystem.directory(parts):
             pass
         cwd = filesystem.root.joinpath(*parts)
+        # The profile is built from the resolved root, which is what the kernel
+        # matches on; a symlinked workspace (/tmp -> /private/tmp) would
+        # otherwise produce a profile that denies even its own directory.
+        argv, sandbox_record = ["/bin/sh", "-c", params["cmd"]], {}
+        if self.sandbox is not None:
+            argv, sandbox_record = await self.sandbox.wrap(argv, filesystem.root)
         started = monotonic()
         # Shield spawn so cancellation cannot lose a successfully started child.
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
-            "/bin/sh", "-c", params["cmd"], cwd=cwd, stdin=asyncio.subprocess.DEVNULL,
+            *argv, cwd=cwd, stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
         ))
@@ -116,6 +133,7 @@ class ExecCommandTool(AgentTool):
             "output": text, "exit_code": process.returncode,
             "wall_time_seconds": monotonic() - started, "workdir": str(cwd),
             "truncated": truncated, "timed_out": timed_out,
+            **({"sandbox": sandbox_record} if sandbox_record else {}),
         }
         return AgentToolResult(
             content=[TextContent(f"Exit code: {process.returncode}\n{text}")], details=details,

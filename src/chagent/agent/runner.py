@@ -79,6 +79,8 @@ class AgentRunner:
         self.timeout = timeout
         self._tasks: dict[UUID, asyncio.Task] = {}
         self._states: dict[UUID, RunState] = {}
+        # Set by bootstrap; absent in tests that drive the loop directly.
+        self.sandbox = None
 
     def cancel(self, run_id: UUID) -> bool:
         task = self._tasks.get(run_id)
@@ -208,6 +210,10 @@ class AgentRunner:
             # The command is answered without a model, so nothing reads the
             # workspace: skipping the scan keeps it out of large trees' way.
             return state
+        if self.sandbox is not None:
+            # Run-static, like the environment snapshot: the probe is cached per
+            # policy, so this costs one subprocess sweep per process, not per run.
+            await self.runs.event(run_id, "sandbox_applied", await self.sandbox.audit(session.workspace))
         facts = await build_environment(session.workspace, context_window=self.model.context_window)
         await self.runs.event(run_id, "environment_projected", {
             "chars": len(facts.text), "tree_entries": facts.tree_entries,

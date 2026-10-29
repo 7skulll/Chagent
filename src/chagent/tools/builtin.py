@@ -9,17 +9,19 @@ from chagent.tools.search import GlobTool, GrepTool
 from chagent.tools.tests_runner import RunTestsTool
 from chagent.tools.artifacts import ReadArtifactTool
 from chagent.storage.artifacts import ArtifactRepository
+from chagent.tools.sandbox import Sandbox
 
 
-def create_builtin_registry(*, allow_host_commands: bool = False, artifacts: ArtifactRepository | None = None) -> ToolRegistry:
+def create_builtin_registry(*, allow_host_commands: bool = False, artifacts: ArtifactRepository | None = None,
+                            sandbox: Sandbox | None = None) -> ToolRegistry:
     registry = ToolRegistry()
     for tool in (EchoTool(), ListDirTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
                  GlobTool(), GrepTool(), ApplyPatchTool()):
         registry.register(tool)
     if allow_host_commands:
         # Both run host processes; the executor enforces the same switch.
-        registry.register(ExecCommandTool())
-        registry.register(RunTestsTool())
+        registry.register(ExecCommandTool(sandbox))
+        registry.register(RunTestsTool(sandbox))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
     return registry

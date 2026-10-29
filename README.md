@@ -74,7 +74,7 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   uv run python -m unittest discover -s tests -q
 ```
 
-数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **283 项通过**。
+数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **303 项通过**。
 
 真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求。结论与实测数据见[实施记录](docs/实施记录.md)与[执行效率优化](docs/执行效率优化.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
 

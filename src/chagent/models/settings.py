@@ -41,6 +41,11 @@ class ModelSettings:
     max_tokens: int = 8192
     request_timeout: float = 60
     run_timeout: float = 180
+    # Which variable supplied the key, and a named key that lost to
+    # ``CHAGENT_API_KEY``. Kept so a 401 can name the real cause instead of
+    # sending the reader to re-check a file that was already correct.
+    key_source: str = ""
+    shadowed_key_env: str = ""
 
     def __post_init__(self):
         if self.provider not in {*PRESETS, "custom"} or self.api not in {"openai-chat", "anthropic-messages"}:
@@ -62,6 +67,18 @@ class ModelSettings:
             raise ModelConfigurationError("Context budget must exceed output budget and safety margin")
         if any(not math.isfinite(value) or value <= 0 for value in (self.request_timeout, self.run_timeout)):
             raise ModelConfigurationError("Model timeouts must be finite and positive")
+
+    def describe(self) -> str:
+        """One line naming what will actually be used, without the key itself.
+
+        Ambient variables beat ``--env-file`` entries, so a stale value can make
+        a correct file look wrong. Printing the resolved pair is the cheapest
+        way to stop that from becoming a mystery.
+        """
+        source = self.key_source or "environment"
+        if self.shadowed_key_env:
+            source += f", overriding {self.shadowed_key_env}"
+        return f"{self.provider}/{self.model_id} ({self.api}) -> {self.base_url} | key {source}"
 
     def model(self) -> Model:
         return Model(self.model_id, self.provider, self.api, self.context_window, self.max_tokens, endpoint=self.base_url)
@@ -87,6 +104,7 @@ class ModelSettings:
         preset = PRESETS.get(provider)
         named_key = values.get(preset.key_env, "").strip() if preset else ""
         key = named_key if auto_selected else generic or named_key
+        key_source = (preset.key_env if auto_selected else ("CHAGENT_API_KEY" if generic else (preset.key_env if preset else "")))
         base_url = values.get("CHAGENT_BASE_URL", "").strip()
         if not base_url and provider == "openai":
             base_url = values.get("OPENAI_BASE_URL", "").strip()
@@ -100,6 +118,8 @@ class ModelSettings:
             return cls(
                 provider=provider, model_id=model, base_url=base_url, api_key=key,
                 api=preset.api if preset else "openai-chat",
+                key_source=key_source,
+                shadowed_key_env=(preset.key_env if (generic and named_key and preset) else ""),
                 context_window=int(values.get("CHAGENT_CONTEXT_WINDOW", "65536")),
                 max_tokens=int(values.get("CHAGENT_MAX_TOKENS", "8192")),
                 request_timeout=float(values.get("CHAGENT_MODEL_TIMEOUT", "60")),

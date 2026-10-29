@@ -33,6 +33,9 @@ def main():
         app = create_app(workspace=args.workspace, settings=Settings.from_env(), model_settings=selected, demo=args.demo)
     except (ValueError, OSError) as error:
         parser.error(str(error))
+    # Ambient variables win over --env-file, so name the resolved pair once.
+    if selected is not None:
+        print(f"Resolved: {selected.describe()}", flush=True)
     # Bound the wait for open SSE responses before lifespan cancels agent tasks.
     uvicorn.run(app, host="127.0.0.1", port=args.port, workers=1, timeout_graceful_shutdown=3)
 

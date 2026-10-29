@@ -9,6 +9,7 @@ from uuid import UUID
 
 from chagent.bootstrap import create_demo_runner, create_runner
 from chagent.config import Settings
+from chagent.tools.sandbox import Sandbox
 from chagent.domain.messages import TextContent
 from chagent.domain.json_types import JsonObject
 from chagent.storage.database import Database
@@ -40,20 +41,27 @@ async def _run(
     async with Database(settings) as database:
         await migrate(database)
         host_commands = allow_commands or settings.allow_host_commands
+        sandbox = Sandbox.from_settings(settings)
         if model_settings is None:
             runner = create_demo_runner(database, tool_name=tool or "echo", tool_arguments=arguments,
                                         allow_host_commands=host_commands, max_turns=settings.max_turns,
                                         max_tool_concurrency=settings.max_tool_concurrency,
-                                        memory_worker_concurrency=settings.memory_worker_concurrency)
+                                        memory_worker_concurrency=settings.memory_worker_concurrency,
+                                        sandbox=sandbox)
         else:
             assert client is not None
             runner = create_runner(database, model_settings.model(), client,
                                    allow_host_commands=host_commands, timeout=model_settings.run_timeout, max_turns=settings.max_turns,
                                    max_tool_concurrency=settings.max_tool_concurrency,
-                                   memory_worker_concurrency=settings.memory_worker_concurrency)
+                                   memory_worker_concurrency=settings.memory_worker_concurrency,
+                                   sandbox=sandbox)
         if session_id is None:
             session = await SessionManager(runner.conversations).create(workspace, title="新会话")
             session_id = session.id
+        # Printed before the run: a bad credential fails inside it, and this
+        # line is the one that explains why.
+        if model_settings is not None:
+            print(f"Resolved: {model_settings.describe()}", flush=True)
         result = await runner.run(session_id, text)
         print(f"Model: {runner.model.provider}/{runner.model.id}" + (" (deterministic demo)" if client is None else ""))
         print(f"Session: {result.session_id}")
