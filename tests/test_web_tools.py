@@ -1,8 +1,29 @@
-"""Outbound tools: one search provider, one text-only reader, both bounded."""
+"""Outbound tools against DeepSeek's Search and Fetch API (WD 批).
+
+WHAT CHANGED
+    W 批 shipped Tavily for search and a self-written HTML reader for fetch.
+    WD 批 replaced both with one provider, so the properties this file guards
+    changed shape: there is no local resolver check left to test (the request
+    leaves from the provider's network), no redirect-following decision (one
+    POST is the whole call), and no local 2 MB stream cap. What replaced them is
+    a status-code contract — 401/402/403/404/429/5xx each get their own message
+    — and a rendering budget measured against the real API, because the
+    provider's ``summary`` came back 4–5× longer than its documentation claims.
+
+WHAT IT PINS
+    1. The request: endpoint, bearer header, and only the fields this version
+       sends (``need_content`` is deliberately absent).
+    2. The budget: per-result summary cut, total cut, and no ``summary`` or
+       ``content`` in ``details`` (details are stored twice).
+    3. The error mapping, because "retry" and "top up your balance" are
+       different instructions to a model.
+    4. The card fields the transcript draws (WK3): snippet, site name, date,
+       authority, score — including the provider's hex-encoded ``site_name``.
+"""
 
 import json
-from pathlib import Path
 import unittest
+from datetime import date
 
 import httpx
 
@@ -10,22 +31,13 @@ from chagent.config import Settings
 from chagent.diagnostics.behavior import describe
 from chagent.tools.builtin import create_builtin_registry
 from chagent.tools.web import (
-    MAX_BODY_BYTES, MAX_FETCH_CHARS, MAX_SEARCH_CHARS, WebAccess, WebFetchTool, WebSearchTool,
-    create_web_tools, html_to_text,
+    DEFAULT_COUNT, FETCH_ENDPOINT, MAX_RESPONSE_BYTES, MAX_SEARCH_CHARS, MAX_SUMMARY_CHARS,
+    SEARCH_ENDPOINT, WebAccess, WebAccessError, WebFetchTool, WebSearchTool, create_web_tools,
 )
 
 
-def search_payload(*, results=2, content="excerpt text"):
-    return {
-        "answer": "A short summary.",
-        "results": [{"title": f"Title {index}", "url": f"https://example.com/{index}",
-                     "content": content, "score": 0.9 - index / 100}
-                    for index in range(results)],
-    }
-
-
 def transport(handler, calls=None):
-    """A transport that records every request it hands back a response for."""
+    """Mock transport that records the requests it was asked to make."""
     def wrapped(request):
         if calls is not None:
             calls.append(request)
@@ -37,160 +49,219 @@ def answer(payload, status=200):
     return httpx.Response(status, content=json.dumps(payload).encode())
 
 
+def search_payload(count=2, summary_chars=120):
+    return {"results": [
+        {"rerank_score": 2.4, "title": f"Result {index}",
+         "url": f"https://example.com/{index}",
+         "snippet": f"snippet {index}",
+         "summary": "summary text " * (summary_chars // 13 + 1),
+         "content": "", "site_name": f"Site {index}", "site_icon": None,
+         "date": "2026-03-01T16:00:00+00:00", "authority": 3}
+        for index in range(count)
+    ]}
+
+
+def fetch_payload(chars=200):
+    return {"title": "Example article", "content": "# Example article\n\n" + "body " * (chars // 5)}
+
+
 class WebSearchTests(unittest.IsolatedAsyncioTestCase):
-    async def search(self, handler, *, params=None, key="tvly-secret", calls=None):
-        tool = WebSearchTool(key, transport=transport(handler, calls))
+    async def search(self, handler, *, params=None, key="ds-secret", calls=None, today=None):
+        tool = WebSearchTool(key, transport=transport(handler, calls),
+                             today=today or (lambda: date(2026, 10, 30)))
         return await tool.execute("c1", params if params is not None else {"query": "python 3.14 release"})
 
-    async def test_results_carry_source_urls_and_excerpts(self):
+    async def test_request_goes_to_the_documented_endpoint_with_only_the_fields_we_send(self):
+        calls = []
+        await self.search(lambda request: answer(search_payload()), calls=calls)
+        request = calls[0]
+        self.assertEqual(str(request.url), SEARCH_ENDPOINT)
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.headers["authorization"], "Bearer ds-secret")
+        body = json.loads(request.content)
+        self.assertEqual(body, {"query": "python 3.14 release", "count": DEFAULT_COUNT})
+        # need_content would return whole pages for every result; this batch
+        # deliberately leaves it off until measurement justifies the cost.
+        self.assertNotIn("need_content", body)
+
+    async def test_results_carry_urls_excerpts_and_card_fields(self):
         result = await self.search(lambda request: answer(search_payload()))
         text = result.content[0].text
         self.assertIn("python 3.14 release", text)
         self.assertIn("https://example.com/0", text)
-        self.assertIn("excerpt text", text)
-        self.assertIn("A short summary.", text)
+        self.assertIn("2026-03-01", text)
         self.assertFalse(result.is_error)
-        self.assertEqual(len(result.details["results"]), 2)
-        # The transcript draws a source card from these, so each row carries the
-        # excerpt it shows and the URL it opens — not just a score.
-        first = result.details["results"][0]
-        self.assertEqual(first["url"], "https://example.com/0")
-        self.assertIn("excerpt text", first["snippet"])
+        rows = result.details["results"]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["url"], "https://example.com/0")
+        self.assertEqual(rows[0]["site_name"], "Site 0")
+        self.assertEqual(rows[0]["date"], "2026-03-01")
+        self.assertEqual(rows[0]["authority"], 3)
+        self.assertEqual(rows[0]["score"], 2.4)
+        self.assertTrue(rows[0]["snippet"].startswith("snippet 0"))
 
-    async def test_the_key_is_sent_as_a_bearer_header_and_never_echoed(self):
-        calls = []
-        result = await self.search(lambda request: answer(search_payload()), calls=calls)
-        self.assertEqual(calls[0].headers["authorization"], "Bearer tvly-secret")
-        self.assertNotIn("tvly-secret", result.content[0].text)
-        self.assertNotIn("tvly-secret", json.dumps(result.details))
+    async def test_details_never_carry_the_long_text(self):
+        """summary and content are for the model once; details are stored twice."""
+        result = await self.search(lambda request: answer(search_payload(summary_chars=3000)))
+        rows = result.details["results"]
+        self.assertNotIn("summary", rows[0])
+        self.assertNotIn("content", rows[0])
+        self.assertLessEqual(len(result.details["results"][0]["snippet"]), 240)
+        self.assertLess(len(json.dumps(result.details)), 2000)
 
-    async def test_recency_switches_to_the_news_topic_with_a_day_window(self):
+    async def test_the_rendered_excerpt_is_cut_per_result_and_in_total(self):
+        big = await self.search(lambda request: answer(search_payload(count=8, summary_chars=4000)))
+        self.assertLessEqual(len(big.content[0].text), MAX_SEARCH_CHARS + 200)
+        self.assertTrue(big.details["truncated"] or len(big.content[0].text) <= MAX_SEARCH_CHARS)
+        # A single result may not eat the whole budget either.
+        one = await self.search(lambda request: answer(search_payload(count=1, summary_chars=4000)))
+        body = one.content[0].text
+        self.assertLessEqual(len(body), MAX_SUMMARY_CHARS + 400)
+
+    async def test_recency_becomes_query_syntax_from_the_host_clock(self):
         calls = []
         await self.search(lambda request: answer(search_payload()), calls=calls,
-                          params={"query": "jdk", "recency": "week"})
+                          params={"query": "release notes", "recency": "week"})
         body = json.loads(calls[0].content)
-        self.assertEqual(body["topic"], "news")
-        self.assertEqual(body["days"], 7)
+        # 2026-10-30 minus 7 days. The model cannot know today's date, so the
+        # relative window is resolved here instead of being asked for in a
+        # provider-specific field.
+        self.assertEqual(body["query"], "release notes after:2026-10-23")
 
-    async def test_blank_query_is_refused_before_any_request(self):
+    async def test_search_operators_are_passed_through_untouched(self):
         calls = []
-        with self.assertRaises(ValueError):
-            await self.search(lambda request: answer(search_payload()),
-                              params={"query": "   "}, calls=calls)
-        self.assertEqual(calls, [])
+        raw = 'deepseek site:github.com OR site:huggingface.co lang:zh after:2025 "exact phrase" -ads'
+        await self.search(lambda request: answer(search_payload()), calls=calls, params={"query": raw})
+        self.assertEqual(json.loads(calls[0].content)["query"], raw)
 
-    async def test_rejected_key_becomes_an_actionable_message(self):
-        with self.assertRaises(PermissionError) as caught:
-            await self.search(lambda request: httpx.Response(401))
-        self.assertIn("CHAGENT_TAVILY_API_KEY", str(caught.exception))
-
-    async def test_rate_limit_and_outage_are_distinguished(self):
-        for status, expected in ((429, "rate limit"), (503, "unavailable")):
-            with self.subTest(status=status), self.assertRaises(RuntimeError) as caught:
-                await self.search(lambda request: httpx.Response(status))
-            self.assertIn(expected, str(caught.exception))
-
-    async def test_an_empty_result_set_is_reported_not_failed(self):
+    async def test_empty_results_are_reported_not_failed(self):
         result = await self.search(lambda request: answer({"results": []}))
         self.assertFalse(result.is_error)
         self.assertIn("No results", result.content[0].text)
         self.assertEqual(result.details["results"], [])
 
-    async def test_output_is_capped_and_the_cut_is_flagged(self):
-        # The provider can return more than it was asked for; the per-call cap is
-        # what keeps a surprise out of the context window.
-        result = await self.search(
-            lambda request: answer(search_payload(results=20, content="x" * 600)))
-        text = result.content[0].text
-        self.assertLessEqual(len(text), MAX_SEARCH_CHARS + 80)
-        self.assertTrue(result.details["truncated"])
-        self.assertIn("Truncated at", text)
+    async def test_each_status_gets_its_own_actionable_message(self):
+        cases = {
+            401: (PermissionError, "CHAGENT_SEARCH_API_KEY"),
+            402: (PermissionError, "balance"),
+            403: (PermissionError, "private"),
+            404: (WebAccessError, "no usable page"),
+            429: (WebAccessError, "retry after a pause"),
+            500: (WebAccessError, "retry after a pause"),
+            504: (WebAccessError, "retry after a pause"),
+            400: (WebAccessError, "HTTP 400"),
+        }
+        for status, (kind, needle) in cases.items():
+            with self.subTest(status=status):
+                with self.assertRaises(kind) as caught:
+                    await self.search(lambda request, code=status: answer({}, code))
+                self.assertIn(needle, str(caught.exception))
+
+    async def test_a_body_that_is_not_json_is_a_protocol_error(self):
+        with self.assertRaises(WebAccessError):
+            await self.search(lambda request: httpx.Response(200, content=b"<html>nope</html>"))
+        with self.assertRaises(WebAccessError):
+            await self.search(lambda request: answer({"unexpected": True}))
+
+    async def test_an_oversized_response_is_refused_before_parsing(self):
+        with self.assertRaises(WebAccessError):
+            await self.search(lambda request: httpx.Response(
+                200, content=b'{"results":[]}' + b" " * MAX_RESPONSE_BYTES))
+
+    async def test_the_key_is_never_echoed(self):
+        result = await self.search(lambda request: answer(search_payload()), key="ds-hidden")
+        self.assertNotIn("ds-hidden", result.content[0].text)
+        self.assertNotIn("ds-hidden", json.dumps(result.details))
+        self.assertNotIn("ds-hidden", repr(result))
+        self.assertNotIn("ds-hidden", repr(WebAccess("ds-hidden")))
 
     async def test_a_repeat_query_inside_one_run_costs_one_request(self):
         calls = []
-        tool = WebSearchTool("tvly-secret",
-                             transport=transport(lambda request: answer(search_payload()), calls))
-        first = await tool.execute("c1", {"query": "same"})
-        second = await tool.execute("c2", {"query": "same"})
+        def handler(request):
+            return answer(search_payload())
+        tool = WebSearchTool("ds-secret", transport=transport(handler, calls))
+        first = await tool.execute("c1", {"query": "current release"})
+        second = await tool.execute("c2", {"query": "current release"})
         self.assertEqual(len(calls), 1)
-        self.assertNotIn("cached", first.details)
-        self.assertTrue(second.details["cached"])
+        self.assertTrue(second.details.get("cached"))
+        self.assertEqual(first.content[0].text, second.content[0].text)
+        # A different query is a different request.
+        await tool.execute("c3", {"query": "another release"})
+        self.assertEqual(len(calls), 2)
+
+    async def test_a_hex_encoded_site_name_is_decoded(self):
+        """Measured: the provider sometimes returns the label hex-encoded."""
+        payload = search_payload(count=1)
+        payload["results"][0]["site_name"] = "507974686f6e20646f63756d656e746174696f6e"
+        result = await self.search(lambda request: answer(payload))
+        self.assertEqual(result.details["results"][0]["site_name"], "Python documentation")
+
+    async def test_blank_query_is_refused_before_any_request(self):
+        calls = []
+        with self.assertRaises(ValueError):
+            await self.search(lambda request: answer(search_payload()), calls=calls, params={"query": "   "})
+        self.assertEqual(calls, [])
 
 
 class WebFetchTests(unittest.IsolatedAsyncioTestCase):
-    PAGE = (b"<html><head><title>t</title><style>body{color:red}</style></head>"
-            b"<body><h1>Heading</h1><p>First &amp; second</p><script>alert(1)</script>"
-            b"<p>Third</p></body></html>")
-
     async def fetch(self, handler, *, params=None, calls=None):
-        tool = WebFetchTool(transport=transport(handler, calls))
+        tool = WebFetchTool("ds-secret", transport=transport(handler, calls))
         return await tool.execute("c1", params if params is not None else {"url": "https://example.com/a"})
 
-    async def test_markup_is_stripped_and_scripts_are_dropped(self):
-        result = await self.fetch(lambda request: httpx.Response(
-            200, headers={"content-type": "text/html; charset=utf-8"}, content=self.PAGE))
-        text = result.content[0].text
-        self.assertIn("Heading", text)
-        self.assertIn("First & second", text)
-        self.assertIn("Third", text)
-        self.assertNotIn("alert(1)", text)
-        self.assertNotIn("color:red", text)
-        self.assertNotIn("<p>", text)
-
-    async def test_private_and_loopback_targets_are_refused_without_a_request(self):
+    async def test_markdown_comes_back_with_its_source(self):
         calls = []
-        for url in ("http://127.0.0.1:8080/admin", "http://localhost/", "http://10.0.0.1/",
-                    "http://[::1]/", "http://169.254.169.254/latest/meta-data"):
-            with self.subTest(url=url), self.assertRaises(PermissionError):
-                await self.fetch(lambda request: httpx.Response(200, content=b"x"),
-                                 params={"url": url}, calls=calls)
-        self.assertEqual(calls, [])
-
-    async def test_scheme_and_credentials_are_rejected(self):
-        for url in ("file:///etc/passwd", "ftp://example.com/x", "https://user:pw@example.com/"):
-            with self.subTest(url=url), self.assertRaises((ValueError, PermissionError)):
-                await self.fetch(lambda request: httpx.Response(200, content=b"x"), params={"url": url})
-
-    async def test_a_redirect_is_reported_instead_of_followed(self):
-        result = await self.fetch(lambda request: httpx.Response(
-            302, headers={"location": "https://example.com/b"}))
-        self.assertIn("Redirected to https://example.com/b", result.content[0].text)
-        self.assertEqual(result.details["status"], 302)
-
-    async def test_non_text_content_is_refused(self):
-        with self.assertRaises(RuntimeError) as caught:
-            await self.fetch(lambda request: httpx.Response(
-                200, headers={"content-type": "image/png"}, content=b"\x89PNG"))
-        self.assertIn("not text", str(caught.exception))
-
-    async def test_http_errors_surface_the_status(self):
-        with self.assertRaises(RuntimeError) as caught:
-            await self.fetch(lambda request: httpx.Response(404))
-        self.assertIn("404", str(caught.exception))
+        result = await self.fetch(lambda request: answer(fetch_payload()), calls=calls)
+        self.assertEqual(str(calls[0].url), FETCH_ENDPOINT)
+        self.assertEqual(json.loads(calls[0].content), {"url": "https://example.com/a"})
+        text = result.content[0].text
+        self.assertIn("https://example.com/a", text)
+        self.assertIn("Example article", text)
+        self.assertIn("# Example article", text)
+        self.assertEqual(result.details["format"], "markdown")
+        self.assertFalse(result.details["truncated"])
 
     async def test_long_pages_are_cut_at_max_chars(self):
-        result = await self.fetch(lambda request: httpx.Response(
-            200, headers={"content-type": "text/plain"}, content=b"a" * 30_000),
-            params={"url": "https://example.com/big", "max_chars": 2000})
+        result = await self.fetch(lambda request: answer(fetch_payload(chars=40_000)),
+                                  params={"url": "https://example.com/a", "max_chars": 1000})
         self.assertTrue(result.details["truncated"])
-        self.assertEqual(result.details["chars"], 2000)
+        self.assertLessEqual(len(result.content[0].text), 1000 + 200)
+        self.assertIn("cut at max_chars=1000", result.content[0].text)
 
-    async def test_oversized_bodies_are_capped_while_streaming(self):
-        result = await self.fetch(lambda request: httpx.Response(
-            200, headers={"content-type": "text/plain"}, content=b"a" * (MAX_BODY_BYTES + 5_000)),
-            params={"url": "https://example.com/huge", "max_chars": MAX_FETCH_CHARS})
-        self.assertTrue(result.details["body_capped"])
+    async def test_an_empty_extraction_is_a_failure_not_an_empty_answer(self):
+        """A 200 with no text would be read as "the page says nothing"."""
+        with self.assertRaises(WebAccessError) as caught:
+            await self.fetch(lambda request: answer({"title": "", "content": "  "}))
+        self.assertIn("no extractable text", str(caught.exception))
 
-    async def test_plain_text_is_returned_without_extraction(self):
-        result = await self.fetch(lambda request: httpx.Response(
-            200, headers={"content-type": "text/plain"}, content=b"line one\nline two"))
-        self.assertIn("line one", result.content[0].text)
+    async def test_a_blocked_url_reports_the_provider_policy(self):
+        body = {"error": {"message": "URL access denied (request_id: x)", "type": "permission_error",
+                          "param": None, "code": "invalid_request_error"}}
+        with self.assertRaises(PermissionError) as caught:
+            await self.fetch(lambda request: answer(body, 403))
+        self.assertIn("private", str(caught.exception))
 
+    async def test_a_page_that_cannot_be_read_reports_every_cause(self):
+        with self.assertRaises(WebAccessError) as caught:
+            await self.fetch(lambda request: answer({}, 404))
+        message = str(caught.exception)
+        for needle in ("unavailable", "refused", "content type", "extractable"):
+            self.assertIn(needle, message)
 
-class HtmlTests(unittest.TestCase):
-    def test_entities_are_decoded_and_blank_lines_collapsed(self):
-        text = html_to_text("<div>a &lt; b</div><div></div><div></div><div>c</div>")
-        self.assertEqual(text, "a < b\n\nc")
+    async def test_scheme_and_credentials_are_rejected_without_a_request(self):
+        calls = []
+        for url in ("file:///etc/passwd", "javascript:alert(1)", "https://user:pw@example.com/x"):
+            with self.subTest(url=url):
+                with self.assertRaises((ValueError, PermissionError)):
+                    await self.fetch(lambda request: answer(fetch_payload()), calls=calls,
+                                     params={"url": url})
+        self.assertEqual(calls, [])
+
+    async def test_timeouts_are_reported_as_such(self):
+        def handler(request):
+            raise httpx.ReadTimeout("too slow", request=request)
+        with self.assertRaises(WebAccessError) as caught:
+            await self.fetch(handler)
+        self.assertIn("timed out", str(caught.exception))
 
 
 class WebAccessTests(unittest.TestCase):
@@ -199,53 +270,37 @@ class WebAccessTests(unittest.TestCase):
         names = [item.name for item in create_builtin_registry(mode="work", web=WebAccess()).definitions()]
         self.assertNotIn("web_search", names)
 
-    def test_a_key_registers_both_tools_alongside_host_commands(self):
-        registry = create_builtin_registry(mode="code", allow_host_commands=True, web=WebAccess("tvly-k"))
+    def test_a_key_registers_both_tools_alongside_the_work_face(self):
+        registry = create_builtin_registry(mode="work", web=WebAccess("ds-k"))
         names = [item.name for item in registry.definitions()]
-        self.assertIn("web_search", names)
-        self.assertIn("web_fetch", names)
-        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(names, ["glob", "grep", "list_dir", "read_file", "web_fetch", "web_search"])
+        declaration = registry.get("web_search").declaration()
+        self.assertEqual(declaration.parameters["required"], ["query"])
+        # need_content is not offered in this batch on purpose.
+        self.assertNotIn("need_content", declaration.parameters["properties"])
 
-    def test_the_key_is_not_in_the_settings_repr(self):
-        settings = Settings(web_access="tavily", tavily_api_key="tvly-hidden")
-        self.assertNotIn("tvly-hidden", repr(settings))
+    def test_web_access_needs_neither_a_workspace_nor_host_commands(self):
+        tool = create_web_tools(WebAccess("ds-k"))[0]
+        self.assertFalse(tool.requires_workspace)
+        self.assertFalse(tool.requires_host_execution)
 
-    def test_enabling_tavily_without_a_key_fails_loudly(self):
+    def test_enabling_search_without_a_key_fails_loudly_at_startup(self):
         with self.assertRaises(ValueError) as caught:
-            Settings(web_access="tavily")
-        self.assertIn("CHAGENT_TAVILY_API_KEY", str(caught.exception))
+            Settings(web_access="deepseek")
+        self.assertIn("CHAGENT_SEARCH_API_KEY", str(caught.exception))
 
-    def test_unknown_backends_are_rejected(self):
+    def test_the_removed_provider_is_refused_with_a_reason(self):
+        """An old .env must not silently talk to a different provider."""
+        with self.assertRaises(ValueError) as caught:
+            Settings(web_access="tavily", search_api_key="whatever")
+        self.assertIn("deepseek", str(caught.exception))
         with self.assertRaises(ValueError):
             Settings(web_access="bing")
 
-    def test_environment_round_trip_and_the_behavior_line(self):
-        settings = Settings.from_env({"CHAGENT_WEB_ACCESS": "tavily",
-                                      "CHAGENT_TAVILY_API_KEY": " tvly-from-env "})
-        self.assertEqual(settings.tavily_api_key, "tvly-from-env")
-        self.assertIn("web=tavily", describe(settings))
-        self.assertIn("web=off", describe(Settings()))
-
-
-class RegistryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_web_tools_need_neither_a_workspace_nor_host_commands(self):
-        from chagent.domain.messages import ToolCall
-        from chagent.tools.executor import ToolExecutor
-
-        registry = create_builtin_registry(mode="work", web=WebAccess("tvly-k"))
-        tool = registry.get("web_fetch")
-        self.assertFalse(tool.requires_workspace)
-        self.assertFalse(tool.requires_host_execution)
-        # Loopback is refused by the tool itself, which proves the call got past
-        # the executor's host-command gate without that gate being open.
-        result = await ToolExecutor(registry).execute(ToolCall("c1", "web_fetch", {"url": "http://127.0.0.1/"}))
-        self.assertTrue(result.is_error)
-        self.assertIn("PermissionError", result.content[0].text)
-
-
-class IsolationTests(unittest.TestCase):
-    def test_the_module_does_not_depend_on_the_workspace_layer(self):
-        # Independence from WorkspaceFS is what lets these tools work in a run
-        # with no workspace at all.
-        source = Path("src/chagent/tools/web.py").read_text(encoding="utf-8")
-        self.assertNotIn("WorkspaceFS", source)
+    def test_the_search_key_falls_back_to_the_provider_key(self):
+        settings = Settings.from_env({"CHAGENT_WEB_ACCESS": "deepseek", "DEEPSEEK_API_KEY": "sk-provider"})
+        self.assertEqual(settings.search_api_key, "sk-provider")
+        explicit = Settings.from_env({"CHAGENT_WEB_ACCESS": "deepseek", "DEEPSEEK_API_KEY": "sk-provider",
+                                      "CHAGENT_SEARCH_API_KEY": " sk-search "})
+        self.assertEqual(explicit.search_api_key, "sk-search")
+        self.assertIn("web=deepseek", describe(explicit))

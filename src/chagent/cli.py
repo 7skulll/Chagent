@@ -68,7 +68,7 @@ async def _run(
         sandbox = Sandbox.from_settings(settings)
         approval = ApprovalPolicy.from_settings(settings)
         # Outbound access is its own decision, independent of host commands.
-        web = WebAccess(settings.tavily_api_key) if settings.web_access != "off" else None
+        web = WebAccess(settings.search_api_key) if settings.web_access != "off" else None
         if model_settings is None:
             runner = create_demo_runner(database, tool_name=tool or "echo", tool_arguments=arguments,
                                         allow_host_commands=host_commands, max_turns=settings.max_turns,

@@ -1,0 +1,95 @@
+{
+  "recorded_at_utc": "2026-10-30T09:13:35.237475+00:00",
+  "provider": "deepseek",
+  "endpoints": {
+    "search": "https://api.deepseek.com/v1/tools/search",
+    "fetch": "https://api.deepseek.com/v1/tools/fetch"
+  },
+  "budgets": {
+    "search_chars": 8000,
+    "fetch_chars": 20000
+  },
+  "key_source": "CHAGENT_SEARCH_API_KEY",
+  "results": [
+    {
+      "name": "search",
+      "passed": true,
+      "elapsed_ms": 483.5,
+      "query": {
+        "query": "python 3.13 新特性 有哪些",
+        "count": 5
+      },
+      "sent_query": "python 3.13 新特性 有哪些",
+      "result_count": 5,
+      "text_chars": 4046,
+      "text_truncated": false,
+      "text_head": "Results for 'python 3.13 新特性 有哪些' (5 shown, at most 5)\n[1] Python 3.13 有什么新变化\nhttps://docs.python.org/zh-cn/3/whatsnew/3.13.html\nTaskGroup 在外部的取消操作与内部的取消操作发生冲突时的行为。\n...\nExceptionGroup 的情况，现在它将调用父任务的 cancel() 方法。\n...\n这些更改的一个附加好处是现在任务组会保留取消操作计数 (\n...\n为了处理某些边界情况，现在\n...\n名为\ncreate_task 的函数和方法新增了一个 **kwargs 参数，它会被传递给任务构造器。 这项更改是在 3.13.3 意外添加的，并且破坏了自定义任务工厂函数的 API 约定。\n...\n在 3.13.4 及之后的发布版中旧的工厂约定再次被遵守（直到 3",
+      "details_chars": 2232,
+      "cards": [
+        {
+          "title": "Python 3.13 有什么新变化",
+          "url": "https://docs.python.org/zh-cn/3/whatsnew/3.13.html",
+          "site_name": "Python documentation",
+          "date": null,
+          "authority": 4,
+          "score": 2.429729461669922,
+          "snippet_chars": 157
+        },
+        {
+          "title": "Python 3.13 有什麼新功能",
+          "url": "https://docs.python.org/zh-tw/3.13/whatsnew/3.13.html#whatsnew313-free-threaded-cpython",
+          "site_name": "Python documentation",
+          "date": null,
+          "authority": 4,
+          "score": 2.382854461669922,
+          "snippet_chars": 240
+        },
+        {
+          "title": "파이썬 3.13의 새로운 기능에 대해 알아봅시다",
+          "url": "https://docs.python.org/ko/3.16/whatsnew/3.13.html",
+          "site_name": "Python documentation",
+          "date": null,
+          "authority": 4,
+          "score": 2.351604461669922,
+          "snippet_chars": 229
+        },
+        {
+          "title": "Python 3.13 有什麼新功能¶ - Python 3.13 有什麼新功能¶",
+          "url": "https://python.github.io/python-docs-zh-tw/pr-preview/pr-1102/whatsnew/3.13.html#index-21#1",
+          "site_name": "python.github.io",
+          "date": null,
+          "authority": 4,
+          "score": 2.320354461669922,
+          "snippet_chars": 240
+        },
+        {
+          "title": "PEP 762 – 替换默认的 REPL",
+          "url": "https://peps.pythonlang.cn/pep-0762/#acknowledgments",
+          "site_name": "pythonlang.cn",
+          "date": null,
+          "authority": 4,
+          "score": 2.117229461669922,
+          "snippet_chars": 107
+        }
+      ],
+      "quality": {
+        "score_ge_1_5": 5,
+        "authority_ge_3": 5,
+        "dated": 0,
+        "named_site": 5
+      }
+    },
+    {
+      "name": "fetch",
+      "passed": true,
+      "url": "https://docs.python.org/zh-cn/3/whatsnew/3.13.html",
+      "elapsed_ms": 232.1,
+      "text_chars": 12116,
+      "source_chars": 65105,
+      "markdown": true,
+      "has_headings": true,
+      "truncated": true,
+      "head": "[https://docs.python.org/zh-cn/3/whatsnew/3.13.html — 65105 characters, cut at max_chars=12000]\nPython 3.13 有什么新变化\n\n# Python 3.13 有什么新变化¶\n\n- 编者:\n\nAdam Turner 和 Thomas Wouters\n\n本文介绍了 Python 3.13 相比 3.12 增加的新特性。 Python 3.13 已于 2024 年 10 月 7 日发布。 要获取详细信息，可参阅 更新日志。\n\n参见\n\nPEP 719 -- Python 3.13 发布计划\n\n## 摘"
+    }
+  ]
+}

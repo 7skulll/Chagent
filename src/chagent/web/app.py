@@ -283,7 +283,7 @@ async def config(current: Current):
         "approval_grace": settings.approval_unwatched_grace,
         "host_commands": settings.allow_host_commands,
         "web_access": settings.web_access,
-        "web_key": "set" if settings.tavily_api_key.strip() else "missing",
+        "web_key": "set" if settings.search_api_key.strip() else "missing",
         "compaction": policy.enabled, "tokenizer": tokenizer,
         "max_turns": settings.max_turns, "max_tool_concurrency": settings.max_tool_concurrency,
         "max_processes": settings.max_processes, "process_timeout": settings.process_timeout,
@@ -737,7 +737,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
             async with Database(configured) as database:
                 await migrate(database)
                 sandbox = Sandbox.from_settings(configured)
-                web = WebAccess(configured.tavily_api_key) if configured.web_access != "off" else None
+                web = WebAccess(configured.search_api_key) if configured.web_access != "off" else None
                 if selected is None:
                     runner = create_demo_runner(database, allow_host_commands=configured.allow_host_commands, max_turns=configured.max_turns,
                                                 max_tool_concurrency=configured.max_tool_concurrency,

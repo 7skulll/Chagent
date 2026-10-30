@@ -129,7 +129,14 @@ const MESSAGES = [
     {type: "toolCall", name: "web_search", arguments: {query: "x"}}]}},
   {id: "m3", sequence: 3, run_id: RUN, superseded_by: null, message: {role: "toolResult", tool_name: "web_search",
     is_error: false, content: [{type: "text", text: "结果正文"}],
-    details: {query: "x", results: [{title: "示例站", url: "https://example.com/a", snippet: "摘要文字"}]}}},
+    details: {query: "x", results: [{title: "示例站", url: "https://example.com/a", snippet: "摘要文字",
+                                     site_name: "示例站点", date: "2026-03-01", authority: 3, score: 2.4}]}}},
+  // WD 批: the fetch tool's details no longer carry a status code, so a card must
+  // come from {"url", "title", "format"} alone.
+  {id: "m6", sequence: 6, run_id: RUN, superseded_by: null, message: {role: "toolResult", tool_name: "web_fetch",
+    is_error: false, content: [{type: "text", text: "页面正文"}],
+    details: {url: "https://docs.example.org/page", title: "文档页", format: "markdown",
+              chars: 900, truncated: false}}},
   {id: "m4", sequence: 4, run_id: RUN, superseded_by: RUN2, message: {role: "assistant", content: [{type: "text", text: "被替换的回答"}]}},
   {id: "m5", sequence: 5, run_id: RUN2, superseded_by: null, message: {role: "assistant", content: [{type: "text", text: "```js\nconst a = 1 < 2;\n```"}]}},
 ];
@@ -164,13 +171,15 @@ setTimeout(() => {
   const article = count => `found ${count}`;
   const check = (condition, problem) => { if (!condition) problems.push(problem); };
   const articles = messages.children.filter(node => node.tagName === "ARTICLE");
-  check(articles.length === 4, "expected four message articles, " + article(articles.length));
+  check(articles.length === 5, "expected five message articles, " + article(articles.length));
   check(text.includes("<h1>标题</h1>"), "markdown heading was not rendered");
   check(text.includes("clamped") && text.includes("read-more"), "a long answer was not folded");
   check(text.includes("superseded-fold"), "a replaced answer was not folded");
   check(text.includes("code-block") && text.includes("data-copy-code"), "fenced code lost its copy control");
   check(text.includes("依据"), "the sources block is missing");
   check(text.includes("example.com/a"), "the search source card is missing");
+  check(text.includes("示例站点"), "the provider's site label is not used on the card");
+  check(text.includes("docs.example.org/page"), "a fetched page is not cited");
   check(text.includes("project.db"), "the injected memory is not cited");
   check(!text.includes("<script"), "model output produced a script tag");
   const actions = () => messages.querySelectorAll(".message-actions").flatMap(row => row.children);

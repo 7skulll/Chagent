@@ -166,12 +166,15 @@ function collectSources(runId, message) {
   if (message.tool_name === "web_search" && Array.isArray(details.results)) {
     for (const row of details.results) {
       if (!row || typeof row.url !== "string" || bucket.web.some(item => item.url === row.url)) continue;
-      bucket.web.push({title: row.title || row.url, url: row.url, snippet: row.snippet || ""});
+      // site_name is the provider's own label and is better than a parsed host.
+      bucket.web.push({title: row.title || row.url, url: row.url, snippet: row.snippet || "",
+                       site: row.site_name || ""});
     }
-  } else if (message.tool_name === "web_fetch" && typeof details.url === "string"
-             && Number(details.status) < 400) {
+  } else if (message.tool_name === "web_fetch" && typeof details.url === "string") {
+    // A failed fetch never reaches here: it is an error result with no details.
     if (!bucket.web.some(item => item.url === details.url)) {
-      bucket.web.push({title: details.url, url: details.url, snippet: ""});
+      bucket.web.push({title: details.title || details.url, url: details.url, snippet: "",
+                       site: hostOf(details.url)});
     }
   } else if (message.tool_name === "read_file" && details.format === "document"
              && typeof details.path === "string") {
@@ -204,7 +207,7 @@ function appendSources(node, runId) {
     const link = document.createElement("a");
     link.href = item.url; link.target = "_blank"; link.rel = "noopener noreferrer";
     link.textContent = item.title;
-    card.append(link, textNode("span", hostOf(item.url), "source-host"));
+    card.append(link, textNode("span", item.site || hostOf(item.url), "source-host"));
     if (item.snippet) card.append(textNode("p", item.snippet, "source-snippet"));
     details.append(card);
   }
