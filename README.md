@@ -4,6 +4,8 @@
 
 能力：会话与显式任务状态、上下文预算与自动摘要（可选真 tokenizer，缺省回退字节估算）、运行级环境快照、大工具输出产物化、用户／工作区长期记忆（`/remember` 由本地命令直接回答，不经过模型）、文件检索、一次调用多处编辑与多文件补丁、PDF／Word／Excel 直接读取与网页上传、宿主命令与测试运行、跨调用存活的长命令会话（`exec_command` 的 `yield_time_ms` + `process` 分次读／写 stdin／杀进程组）、联网检索与正文抓取（`web_search` + `web_fetch`，默认关闭）、重复调用拦截（无进展时以 `repeated_tool_call` 结束）、宿主命令审批（`CHAGENT_APPROVAL`，网页确认卡或 CLI 交互式提问）、可切换工作区的网页流式对话与事件回放。
 
+工具面按会话的**模式**裁剪（`sessions.mode`）：`work` 是默认且本构建唯一启用的模式，只读（`list_dir`／`read_file`／`glob`／`grep`／产物，联网另开开关），没有写文件、没有宿主命令；写与执行属于 `code`，需要 `CHAGENT_CODE_MODE=on` 才会被构造，且排在[启用门槛](docs/执行边界设计.md) §14.4 之后。没注册的工具模型调不到，界面隐藏按钮不算约束。
+
 整体设计与模块划分见[设计总览](docs/设计总览.md)。
 
 ## 运行
@@ -141,7 +143,7 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   uv run python -m unittest discover -s tests -q
 ```
 
-数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **455 项**：本机 445 通过、**10 项 `test_sandbox` 跳过**——`sandbox-exec` 存在但在这个嵌套环境里拒绝应用 profile（exit 71），模块级 canary 探测到之后把整类用例标为 `skipped` 并带上原因。跳过不是通过：沙箱能力以[执行边界设计](docs/执行边界设计.md) §10.4 的能力表为准，在允许 seatbelt 的机器上这 10 项会真正执行。
+数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **489 项**，本机实测 489 通过、0 跳过。`test_sandbox` 的 10 项是否执行取决于环境：在允许 seatbelt 的机器上（本机即如此）它们真正运行；在 `sandbox-exec` 拒绝应用 profile 的嵌套环境里（exit 71），模块级 canary 会把整类用例标为 `skipped` 并带上原因。跳过不是通过：沙箱能力以[执行边界设计](docs/执行边界设计.md) §10.4 的能力表为准，在允许 seatbelt 的机器上这 10 项会真正执行。
 
 真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/bench_write_path.py`。链路报告为每个用例带上本地计算的 `cache{hit,reusable,breaks}`（不额外请求），失败时可用 `--keep-schema docs/diagnostics` 保留一次性 schema，再用 `report_prompt_cache.py --schema <名称>` 事后审计。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求；`scripts/report_token_estimates.py` 对同一批请求比较本地 token 估算与供应商实际用量。结论与实测数据见[实施记录](docs/实施记录.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
 
