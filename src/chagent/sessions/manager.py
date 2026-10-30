@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from uuid import UUID
 
-from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState
+from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState, validate_mode
 from chagent.domain.json_types import JsonObject
 from chagent.storage.repositories import ConversationRepository
 
@@ -16,12 +16,12 @@ class SessionManager:
     def __init__(self, repository: ConversationRepository):
         self.repository = repository
 
-    async def create(self, workspace: Path, title: str = "") -> Session:
+    async def create(self, workspace: Path, title: str = "", *, mode: str = "work") -> Session:
         workspace = workspace.expanduser().resolve(strict=True)
         if not workspace.is_dir():
             raise NotADirectoryError("Workspace must be a directory")
         title = self._title(title)
-        identity = await self.repository.create_session(workspace, title)
+        identity = await self.repository.create_session(workspace, title, validate_mode(mode))
         return await self.get(identity)
 
     async def get(self, session_id: UUID) -> Session:

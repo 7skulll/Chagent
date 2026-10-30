@@ -75,7 +75,9 @@ class WebRuntime:
         self.workspace = workspace.resolve(strict=True)
         if not self.workspace.is_dir():
             raise NotADirectoryError("Workspace must be a directory")
-        self.settings = settings
+        # Resolved once: the mode gate below is a policy decision, and reading it
+        # per request could let the environment change under a running server.
+        self.settings = settings or Settings.from_env()
         self.compaction = compaction
         self.sessions = SessionManager(runner.conversations)
         self.approvals = ApprovalRepository(runner.runs.database, runner.runs)
@@ -233,7 +235,11 @@ api = APIRouter(prefix="/api", responses={code: {"model": ErrorResponse} for cod
 
 @api.get("/info", response_model=AppInfo, tags=["本地 Agent"])
 async def info(current: Current):
-    return {"workspace": current.workspace, "provider": current.runner.model.provider, "model": current.runner.model.id}
+    return {"workspace": current.workspace, "provider": current.runner.model.provider,
+            "model": current.runner.model.id,
+            # Whether ``code`` can be chosen is a build property, not a preference.
+            "default_mode": current.settings.default_mode,
+            "code_mode": current.settings.code_mode}
 
 
 @api.get("/workspaces", response_model=WorkspacePage, tags=["本地 Agent"])
@@ -260,9 +266,13 @@ async def open_workspace(value: WorkspaceCreate, current: Current):
 @api.get("/config", response_model=ConfigView, tags=["本地 Agent"])
 async def config(current: Current):
     """The resolved switches, so the browser is not blind to what the CLI prints."""
-    settings = current.settings or Settings.from_env()
+    settings = current.settings
     policy = current.compaction or CompactionPolicy.from_env()
     tokenizer = current.runner.context.counter.name
+    # ``tools`` is the count of the face new sessions actually get: the demo
+    # harness has one face, so the default-mode lookup falls back to it.
+    faces = current.runner.tool_faces or {}
+    tools = len((faces.get(settings.default_mode) or current.runner.tools).registry.definitions())
     return {
         "provider": current.runner.model.provider, "model": current.runner.model.id,
         "run_timeout": current.runner.timeout,
@@ -275,7 +285,8 @@ async def config(current: Current):
         "compaction": policy.enabled, "tokenizer": tokenizer,
         "max_turns": settings.max_turns, "max_tool_concurrency": settings.max_tool_concurrency,
         "max_processes": settings.max_processes, "process_timeout": settings.process_timeout,
-        "tools": len(current.runner.tools.registry.definitions()),
+        "default_mode": settings.default_mode, "code_mode": settings.code_mode,
+        "tools": tools,
         "behavior": describe_behavior(settings, policy, tokenizer),
     }
 
@@ -377,7 +388,11 @@ async def usage(current: Current, days: Annotated[int, Query(ge=1, le=90)] = 7):
 
 @api.post("/sessions", response_model=Session, status_code=201, tags=["会话"])
 async def create_session(value: SessionCreate, current: Current):
-    return await current.sessions.create(current.root(value.workspace), value.title)
+    """Mode is chosen once, here, and only if this build can serve it."""
+    mode = value.mode or current.settings.default_mode
+    if mode == "code" and not current.settings.code_mode:
+        raise HTTPException(409, "本构建未开启 code 模式（CHAGENT_CODE_MODE=off）")
+    return await current.sessions.create(current.root(value.workspace), value.title, mode=mode)
 
 
 @api.post("/uploads", response_model=UploadView, status_code=201, tags=["会话"])
@@ -435,7 +450,13 @@ async def context_detail(session_id: UUID, current: Current):
 
 @api.post("/sessions/{session_id}/runs", response_model=RunAccepted, status_code=202, tags=["运行"])
 async def send(session_id: UUID, value: RunCreate, current: Current):
-    await current.session(session_id)
+    session = await current.session(session_id)
+    # Two refusals that must not become a silent downgrade: a run inherits the
+    # session's mode, and a mode this build does not enable cannot be honoured.
+    if value.mode is not None and value.mode != session.mode:
+        raise HTTPException(409, "运行继承会话模式，不能按 run 切换")
+    if session.mode == "code" and not current.settings.code_mode:
+        raise HTTPException(409, "本构建未开启 code 模式（CHAGENT_CODE_MODE=off）")
     return {"run_id": await current.start(session_id, value.text), "session_id": session_id}
 
 
@@ -689,6 +710,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                 else:
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
+                                           code_mode=configured.code_mode,
                                            timeout=selected.run_timeout, max_turns=configured.max_turns,
                                            max_tool_concurrency=configured.max_tool_concurrency,
                                            memory_worker_concurrency=configured.memory_worker_concurrency,

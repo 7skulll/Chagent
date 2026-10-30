@@ -180,7 +180,7 @@ class ReadDocumentTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temporary.cleanup)
         self.workspace = Path(self.temporary.name)
         self.context = ToolContext(self.workspace)
-        self.executor = ToolExecutor(create_builtin_registry())
+        self.executor = ToolExecutor(create_builtin_registry(mode="code"))
 
     async def read(self, **params):
         return await self.executor.execute(ToolCall("call", "read_file", params), context=self.context)

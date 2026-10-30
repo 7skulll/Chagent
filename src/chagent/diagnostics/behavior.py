@@ -20,6 +20,9 @@ def describe(settings: Settings, compaction: CompactionPolicy | None = None,
     grace = f"{settings.approval_unwatched_grace:g}s" if settings.approval_unwatched_grace else "off"
     line = (f"sandbox={sandbox}"
             f" approval={settings.approval}/unwatched={grace}"
+            # The mode decides whether write and host tools exist at all, so it
+            # belongs before the switches that only matter inside code.
+            f" mode={settings.default_mode} code={'on' if settings.code_mode else 'off'}"
             f" host_commands={'on' if settings.allow_host_commands else 'off'}"
             # The one path that leaves the machine is worth naming on the same
             # line as the one that confines it.
@@ -32,3 +35,29 @@ def describe(settings: Settings, compaction: CompactionPolicy | None = None,
     # Which counter is authoritative decides when compaction triggers, so it is
     # part of the behaviour, not an implementation detail.
     return line + (f" tokenizer={tokenizer}" if tokenizer else "")
+
+
+def describe_warnings(settings: Settings) -> list[str]:
+    """Settings that look enabled but cannot apply in this build.
+
+    ``CHAGENT_CODE_MODE=off`` registers only the work face, so every switch that
+    governs writes or host execution is inert. Printing that at startup is the
+    difference between "the setting did nothing" and "the setting silently didn't
+    work".
+    """
+    if settings.code_mode:
+        return []
+    warnings = []
+    if settings.allow_host_commands:
+        warnings.append(
+            "CHAGENT_ALLOW_HOST_COMMANDS=true is inert while CHAGENT_CODE_MODE=off: "
+            "no session can use the code face, so no host command is registered.")
+    if settings.sandbox != "off":
+        warnings.append(
+            f"CHAGENT_SANDBOX={settings.sandbox} is inert while CHAGENT_CODE_MODE=off: "
+            "the sandbox confines host commands, and none are registered.")
+    if settings.approval != "never":
+        warnings.append(
+            f"CHAGENT_APPROVAL={settings.approval} is inert while CHAGENT_CODE_MODE=off: "
+            "only host commands are approved, and none are registered.")
+    return warnings

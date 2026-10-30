@@ -52,12 +52,12 @@ class BuiltinSurfaceTests(unittest.TestCase):
     """``echo`` is a probe tool; the live surface must not spend a slot on it."""
 
     def test_echo_is_not_registered_by_default(self):
-        registry = create_builtin_registry()
+        registry = create_builtin_registry(mode="code")
         self.assertIsNone(registry.get("echo"))
         self.assertEqual({tool.name for tool in registry.definitions()},
                          {"list_dir", "read_file", "write_file", "edit_file", "glob", "grep", "apply_patch"})
 
     def test_demo_path_opts_in(self):
-        registry = create_builtin_registry(include_echo=True)
+        registry = create_builtin_registry(mode="code", include_echo=True)
         self.assertIsNotNone(registry.get("echo"))
         self.assertEqual(len(registry.definitions()), 8)

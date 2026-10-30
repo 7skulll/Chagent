@@ -28,6 +28,35 @@ from chagent.tools.approvals import ApprovalBroker
 from chagent.tools.policy import ApprovalPolicy
 
 
+def _tool_faces(
+    database: Database, *, code_mode: bool, allow_host_commands: bool,
+    sandbox: Sandbox | None, processes: ProcessManager, web: WebAccess | None,
+    include_echo: bool, single_face: bool = False,
+) -> dict[str, ToolExecutor]:
+    """One executor per enabled mode, built once per runner.
+
+    Two layers, as the design requires: the registry omits the tools a mode may
+    not use, and the executor is bound to that registry so a call naming an
+    absent tool is an unknown tool rather than a permission decision.
+
+    ``single_face`` is for the deterministic harness only: it names a tool, so it
+    keeps the code face and the runner never resolves by session mode.
+    """
+    if single_face:
+        modes = ("code",)
+    else:
+        modes = ("work", "code") if code_mode else ("work",)
+    faces = {}
+    for mode in modes:
+        registry = create_builtin_registry(
+            mode=mode, allow_host_commands=allow_host_commands,
+            artifacts=ArtifactRepository(database), sandbox=sandbox,
+            processes=processes, web=web, include_echo=include_echo,
+        )
+        faces[mode] = ToolExecutor(registry, allow_host_commands=allow_host_commands)
+    return faces
+
+
 def create_demo_runner(
     database: Database, *, tool_name: str = "echo", tool_arguments: JsonObject | None = None,
     allow_host_commands: bool = False,
@@ -60,8 +89,14 @@ def create_demo_runner(
         approval_decider=approval_decider, approval_remote=approval_remote,
         process_wall_timeout=process_wall_timeout, max_processes=max_processes,
         web=web,
-        # The demo client calls a tool by name, and ``echo`` is the neutral one
-        # that needs no filesystem: this is the only path that gets it.
+        # The deterministic client calls one tool by name and a probe must be able
+        # to name a write tool against a repository-created (work) session, so
+        # this harness keeps the full face. Mode gating is a property of sessions
+        # a model drives; it is asserted on ``create_runner`` and on
+        # ``create_builtin_registry``, not here.
+        code_mode=True, single_face=True,
+        # ``echo`` is the neutral tool that needs no filesystem: this is the only
+        # path that gets it.
         include_echo=True,
     )
 
@@ -85,13 +120,18 @@ def create_runner(
     max_processes: int = 4,
     web: WebAccess | None = None,
     include_echo: bool = False,
+    code_mode: bool = False,
+    single_face: bool = False,
 ) -> AgentRunner:
     # One manager per runner: process ownership is per run, and the runner is
     # the only object that knows when a run ends.
     processes = ProcessManager(wall_timeout=process_wall_timeout, max_per_run=max_processes)
-    registry = create_builtin_registry(allow_host_commands=allow_host_commands,
-                                       artifacts=ArtifactRepository(database), sandbox=sandbox,
-                                       processes=processes, web=web, include_echo=include_echo)
+    faces = _tool_faces(database, code_mode=code_mode, allow_host_commands=allow_host_commands,
+                        sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
+                        single_face=single_face)
+    # The runner's own executor is the fallback for callers that build a runner
+    # without faces; a single-face harness has nothing to resolve.
+    default_face = faces.get("work") or next(iter(faces.values()))
     builder = BasicContextBuilder(policy=context_policy,
                                   counter=token_counter or select_counter(model))
     conversations, runs = ConversationRepository(database), RunRepository(database)
@@ -100,8 +140,7 @@ def create_runner(
                                    policy=memory_policy, jobs=jobs)
     runner = AgentRunner(
         model=model, client=client, context=builder,
-        tools=ToolExecutor(registry, allow_host_commands=allow_host_commands),
-        conversations=conversations, runs=runs,
+        tools=(faces.get("code") or default_face) if single_face else default_face,        conversations=conversations, runs=runs,
         context_manager=ContextManager(builder, conversations, runs, SummaryRepository(database), policy=compaction_policy),
         memory_service=memory_service,
         timeout=timeout, max_turns=max_turns,
@@ -115,6 +154,8 @@ def create_runner(
         decider=approval_decider, remote=approval_remote, grace=approval_grace,
     )
     runner.scheduler.sandbox_mode = sandbox.settings.mode if sandbox is not None else "off"
+    # Per-session mode resolution: a single face harness has nothing to resolve.
+    runner.tool_faces = None if single_face else faces
     # One worker per runner: it reads model/client at call time, so a replaced
     # client (test doubles, provider switch) applies to extraction as well.
     runner.sandbox = sandbox

@@ -18,7 +18,7 @@ import httpx
 import uvicorn
 
 from chagent.config import Settings
-from chagent.diagnostics.behavior import describe as describe_behavior
+from chagent.diagnostics.behavior import describe as describe_behavior, describe_warnings
 from chagent.domain.summaries import CompactionPolicy
 from chagent.models.settings import ModelSettings
 from chagent.web.app import create_app
@@ -125,6 +125,8 @@ def main():
     if selected is not None:
         print(f"Resolved: {selected.describe()}", flush=True)
     print(f"Behavior: {describe_behavior(settings, compaction)}", flush=True)
+    for warning in describe_warnings(settings):
+        print(f"Warning: {warning}", flush=True)
     print(f"Chagent 网页：{url}（工作区 {Path(args.workspace).expanduser().resolve()}）", flush=True)
     if not args.no_open:
         open_later(url)

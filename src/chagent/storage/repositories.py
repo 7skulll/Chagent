@@ -16,7 +16,7 @@ from chagent.domain.json_types import JsonObject
 from chagent.domain.messages import AssistantMessage, Message, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.recovery import MAX_TARGET, SIDE_EFFECT_TOOLS, RecoveryFact
 from chagent.domain.runs import RunEndReason, RunStatus, StoredMessage, terminal_reason
-from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState
+from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState, validate_mode
 from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError, StateConflictError
 from chagent.storage.database import Database
 from chagent.storage.artifacts import ArtifactRepository, INLINE_BYTES
@@ -36,8 +36,9 @@ class ConversationRepository:
     def __init__(self, database: Database):
         self.database = database
 
-    async def create_session(self, workspace: Path, title: str = "") -> UUID:
+    async def create_session(self, workspace: Path, title: str = "", mode: str = "work") -> UUID:
         root = str(workspace.expanduser().resolve())
+        mode = validate_mode(mode)
         session_id = uuid4()
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
@@ -47,8 +48,8 @@ class ConversationRepository:
             )
             workspace_id = (await cursor.fetchone())["id"]
             await connection.execute(
-                "INSERT INTO sessions (id, workspace_id, title) VALUES (%s, %s, %s)",
-                (session_id, workspace_id, title),
+                "INSERT INTO sessions (id, workspace_id, title, mode) VALUES (%s, %s, %s, %s)",
+                (session_id, workspace_id, title, mode),
             )
             await connection.execute("INSERT INTO task_states (session_id) VALUES (%s)", (session_id,))
         return session_id
@@ -57,7 +58,8 @@ class ConversationRepository:
     def _session(row: DictRow) -> Session:
         return Session(
             id=row["id"], workspace_id=row["workspace_id"], workspace=Path(row["root_path"]),
-            title=row["title"], created_at=row["created_at"], updated_at=row["updated_at"], archived_at=row["archived_at"],
+            title=row["title"], created_at=row["created_at"], updated_at=row["updated_at"],
+            archived_at=row["archived_at"], mode=row["mode"],
         )
 
     async def get_session(self, session_id: UUID) -> Session:

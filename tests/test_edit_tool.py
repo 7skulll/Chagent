@@ -76,7 +76,7 @@ class EditToolTests(unittest.IsolatedAsyncioTestCase):
         self.workspace = Path(self.temporary.name) / "project"
         self.workspace.mkdir()
         self.context = ToolContext(self.workspace)
-        self.executor = ToolExecutor(create_builtin_registry())
+        self.executor = ToolExecutor(create_builtin_registry(mode="code"))
 
     def write(self, name: str, text: str) -> None:
         (self.workspace / name).write_text(text, encoding="utf-8")

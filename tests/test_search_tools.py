@@ -29,7 +29,7 @@ class SearchToolTests(unittest.IsolatedAsyncioTestCase):
         (self.workspace / ".git" / "config").write_text("discount=ignored\n", encoding="utf-8")
         (self.workspace / "blob.bin").write_bytes(b"discount\x00\x01\x02")
         self.context = ToolContext(self.workspace)
-        self.executor = ToolExecutor(create_builtin_registry())
+        self.executor = ToolExecutor(create_builtin_registry(mode="code"))
 
     async def call(self, name, **arguments):
         return await self.executor.execute(ToolCall("test-call", name, arguments), context=self.context)

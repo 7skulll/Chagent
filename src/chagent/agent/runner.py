@@ -73,6 +73,10 @@ class AgentRunner:
         self.memory_service = memory_service
         self.memory_worker = memory_worker
         self.tools = tools
+        #: One executor per enabled mode. The runner resolves the face once per
+        #: run from the session row, so two concurrent runs in different modes
+        #: cannot see each other's tools.
+        self.tool_faces: dict[str, ToolExecutor] | None = None
         self.conversations = conversations
         self.runs = runs
         self.scheduler = ToolScheduler(runs, max_concurrency=max_tool_concurrency)
@@ -217,6 +221,19 @@ class AgentRunner:
         except RunOwnershipLost as error:
             raise RunFailedError(run_id, str(error), "storage_error") from error
 
+    def executor_for(self, mode: str | None) -> ToolExecutor:
+        """The tool face one run may use, chosen once and never switched.
+
+        A session whose mode is not enabled in this build is refused at the HTTP
+        layer before any run exists; reaching the fallback here means the row was
+        written by a build that had the mode on, and the safe face is the right
+        answer rather than a crash in the middle of a run.
+        """
+        faces = self.tool_faces
+        if faces is None:
+            return self.tools
+        return faces.get(mode or "work") or faces["work"]
+
     async def _load_state(self, run_id: UUID, session_id: UUID) -> RunState:
         session = await self.conversations.get_session(session_id)
         history = await self.conversations.messages(session_id, current_run=run_id, project_artifacts=True)
@@ -270,14 +287,18 @@ class AgentRunner:
 
     async def _loop(self, state: RunState, budget=None) -> RunResult:
         run_id, session_id = state.run_id, state.session.id
+        # Resolved once: a run inherits its session's mode and may not switch it,
+        # so the tool declarations in the prompt and the executing face agree for
+        # the whole run.
+        executor = self.executor_for(state.session.mode)
         tool_context = ToolContext(
             workspace=state.session.workspace, session_id=session_id, run_id=run_id,
         )
         for iteration in range(self.max_turns):
             state.iteration = iteration
-            if state.tool_revision != self.tools.registry.revision:
-                state.tools = self.tools.registry.definitions()
-                state.tool_revision = self.tools.registry.revision
+            if state.tool_revision != executor.registry.revision:
+                state.tools = executor.registry.definitions()
+                state.tool_revision = executor.registry.revision
                 state.context_revision += 1
             try:
                 if self.context_manager is not None:
@@ -318,7 +339,7 @@ class AgentRunner:
             if len({call.id for call in calls}) != len(calls):
                 raise RunExecutionError("Duplicate tool call IDs in one response", "model_protocol_error")
             batch = await self.scheduler.execute_batch(calls, context=tool_context, model_call_id=model_call_id,
-                                                        executor=self.tools, on_committed=state.append_committed,
+                                                        executor=executor, on_committed=state.append_committed,
                                                         budget=budget)
             if batch.stalled:
                 # The model was already told the call is unchanged; repeating it

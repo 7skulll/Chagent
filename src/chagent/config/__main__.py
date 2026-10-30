@@ -55,6 +55,11 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
         configured = [item for item in settings.sandbox_deny_read.split(":") if item.strip()]
         sections["behavior"] = (describe_behavior(settings, compaction) if compaction is not None
                                else "unavailable")
+        # The tool face a session gets is a build decision, so it is printed next
+        # to the switches it makes inert.
+        sections["modes"] = (f"default={settings.default_mode} "
+                            f"code={'on' if settings.code_mode else 'off'} "
+                            f"enabled={','.join(settings.enabled_modes)}")
         sections["sandbox"] = (f"mode={settings.sandbox} network={str(settings.sandbox_network).lower()} "
                                f"deny_read={len(configured) or len(DEFAULT_DENY_READ)} "
                                f"writable_tmp={str(settings.sandbox_writable_tmp).lower()}")

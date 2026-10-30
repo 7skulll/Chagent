@@ -29,7 +29,7 @@ class ApplyPatchToolTests(unittest.IsolatedAsyncioTestCase):
         (self.workspace / "app" / "pricing.py").write_text(SOURCE, encoding="utf-8")
         (self.workspace / "app" / "invoice.py").write_text("from app.pricing import foo\n", encoding="utf-8")
         self.context = ToolContext(self.workspace)
-        self.executor = ToolExecutor(create_builtin_registry())
+        self.executor = ToolExecutor(create_builtin_registry(mode="code"))
 
     async def call(self, text: str):
         return await self.executor.execute(ToolCall("test-call", "apply_patch", {"patch": text}),

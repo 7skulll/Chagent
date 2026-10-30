@@ -168,7 +168,9 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         for asset in ("app.js", "style.css"):
             self.assertEqual((await self.client.get(f"/static/{asset}")).status_code, 200)
         info = (await self.client.get("/api/info")).json()
-        self.assertEqual(set(info), {"workspace", "provider", "model"})
+        self.assertEqual(set(info), {"workspace", "provider", "model", "default_mode", "code_mode"})
+        self.assertEqual(info["default_mode"], "work")
+        self.assertFalse(info["code_mode"])
 
     async def test_provider_failure_is_displayable_and_next_turn_recovers(self):
         class ErrorClient:
@@ -604,6 +606,37 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         # A read-only page must never become a way to read a credential back out.
         self.assertNotIn("postgres", json.dumps(value))
         self.assertNotIn("api_key", json.dumps(value))
+
+    async def test_work_mode_is_the_only_face_this_build_serves(self):
+        """The mode is refused, not downgraded, and a run inherits it."""
+        config = (await self.client.get("/api/config")).json()
+        self.assertEqual(config["default_mode"], "work")
+        self.assertFalse(config["code_mode"])
+
+        refused = await self.client.post("/api/sessions", json={"title": "要写文件", "mode": "code"})
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertIn("CHAGENT_CODE_MODE", refused.text)
+        unknown = await self.client.post("/api/sessions", json={"title": "x", "mode": "admin"})
+        self.assertEqual(unknown.status_code, 400, unknown.text)
+
+        identity = await self.create_session("默认会话")
+        detail = (await self.client.get(f"/api/sessions/{identity}")).json()
+        self.assertEqual(detail["mode"], "work")
+        # A run may not switch the face its session was created with.
+        mismatch = await self.client.post(f"/api/sessions/{identity}/runs",
+                                          json={"text": "写", "mode": "code"})
+        self.assertEqual(mismatch.status_code, 409, mismatch.text)
+        agree = await self.client.post(f"/api/sessions/{identity}/runs",
+                                       json={"text": "读", "mode": "work"})
+        self.assertEqual(agree.status_code, 202, agree.text)
+        await self.wait_run(agree.json()["run_id"])
+
+    async def test_a_code_session_is_refused_when_the_build_switch_is_off(self):
+        """A row written by a code-enabled build must not keep working here."""
+        identity = await self.runner.conversations.create_session(self.workspace, mode="code")
+        response = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "继续"})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(await self.runner.runs.latest(identity), None)
 
 
 @unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")

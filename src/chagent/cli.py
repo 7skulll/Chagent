@@ -17,7 +17,7 @@ from uuid import UUID
 
 from chagent.bootstrap import create_demo_runner, create_runner
 from chagent.config import Settings
-from chagent.diagnostics.behavior import describe as describe_behavior
+from chagent.diagnostics.behavior import describe as describe_behavior, describe_warnings
 from chagent.domain.summaries import CompactionPolicy
 from chagent.tools.sandbox import Sandbox
 from chagent.tools.web import WebAccess
@@ -82,7 +82,9 @@ async def _run(
         else:
             assert client is not None
             runner = create_runner(database, model_settings.model(), client,
-                                   allow_host_commands=host_commands, timeout=model_settings.run_timeout, max_turns=settings.max_turns,
+                                   allow_host_commands=host_commands,
+                                   code_mode=settings.code_mode,
+                                   timeout=model_settings.run_timeout, max_turns=settings.max_turns,
                                    max_tool_concurrency=settings.max_tool_concurrency,
                                    memory_worker_concurrency=settings.memory_worker_concurrency,
                                    sandbox=sandbox, approval_policy=approval,
@@ -91,7 +93,8 @@ async def _run(
                                    process_wall_timeout=settings.process_timeout,
                                    max_processes=settings.max_processes, web=web)
         if session_id is None:
-            session = await SessionManager(runner.conversations).create(workspace, title="新会话")
+            session = await SessionManager(runner.conversations).create(
+                workspace, title="新会话", mode=settings.default_mode)
             session_id = session.id
         # Printed before the run: a bad credential fails inside it, and this
         # line is the one that explains why.
@@ -100,6 +103,8 @@ async def _run(
         # The CLI flag can enable host commands on its own; the line must show
         # what the run will actually do, not only what the environment said.
         print(f"Behavior: {describe_behavior(replace(settings, allow_host_commands=host_commands), CompactionPolicy.from_env(), runner.context.counter.name)}", flush=True)
+        for warning in describe_warnings(settings):
+            print(f"Warning: {warning}", flush=True)
         result = await runner.run(session_id, text)
         print(f"Model: {runner.model.provider}/{runner.model.id}" + (" (deterministic demo)" if client is None else ""))
         print(f"Session: {result.session_id}")

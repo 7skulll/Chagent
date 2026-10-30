@@ -29,6 +29,9 @@ class SessionCreate(InputModel):
     title: Annotated[StrictStr, Field(max_length=200)] = "新会话"
     # Absent means the workspace the server was started in.
     workspace: Annotated[StrictStr, Field(min_length=1, max_length=4096)] | None = None
+    #: Absent means the build's default mode. ``code`` in a work-only build is
+    #: refused with 409 rather than downgraded: the caller must know what it got.
+    mode: Literal["work", "code"] | None = None
 
 
 class SessionEdit(InputModel):
@@ -57,6 +60,10 @@ class SessionEdit(InputModel):
 
 class RunCreate(InputModel):
     text: Annotated[StrictStr, Field(min_length=1, max_length=16000)]
+    #: Accepted only to be refused when it disagrees with the session: a run
+    #: inherits the mode, and switching it mid-conversation would make the tool
+    #: declarations in the prompt differ from the face that executes.
+    mode: Literal["work", "code"] | None = None
 
     @field_validator("text")
     @classmethod
@@ -126,6 +133,9 @@ class AppInfo(BaseModel):
     workspace: Path
     provider: str
     model: str
+    #: The tool face new sessions get, and whether ``code`` can be chosen at all.
+    default_mode: Literal["work", "code"]
+    code_mode: bool
 
 
 class WorkspaceView(BaseModel):
@@ -166,6 +176,9 @@ class ConfigView(BaseModel):
     max_processes: int
     process_timeout: float
     tools: int
+    #: Resolved mode face: what new sessions get, and whether code exists here.
+    default_mode: Literal["work", "code"]
+    code_mode: bool
     behavior: str
 
 
@@ -262,6 +275,7 @@ class SessionDetail(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    mode: Literal["work", "code"]
     latest_run: RunView | None
 
 

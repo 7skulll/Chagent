@@ -191,11 +191,11 @@ class HtmlTests(unittest.TestCase):
 class WebAccessTests(unittest.TestCase):
     def test_no_key_registers_nothing(self):
         self.assertEqual(create_web_tools(WebAccess()), [])
-        names = [item.name for item in create_builtin_registry(web=WebAccess()).definitions()]
+        names = [item.name for item in create_builtin_registry(mode="work", web=WebAccess()).definitions()]
         self.assertNotIn("web_search", names)
 
     def test_a_key_registers_both_tools_alongside_host_commands(self):
-        registry = create_builtin_registry(allow_host_commands=True, web=WebAccess("tvly-k"))
+        registry = create_builtin_registry(mode="code", allow_host_commands=True, web=WebAccess("tvly-k"))
         names = [item.name for item in registry.definitions()]
         self.assertIn("web_search", names)
         self.assertIn("web_fetch", names)
@@ -227,7 +227,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         from chagent.domain.messages import ToolCall
         from chagent.tools.executor import ToolExecutor
 
-        registry = create_builtin_registry(web=WebAccess("tvly-k"))
+        registry = create_builtin_registry(mode="work", web=WebAccess("tvly-k"))
         tool = registry.get("web_fetch")
         self.assertFalse(tool.requires_workspace)
         self.assertFalse(tool.requires_host_execution)

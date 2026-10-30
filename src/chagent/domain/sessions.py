@@ -7,6 +7,21 @@ from uuid import UUID
 
 from chagent.domain.runs import StoredMessage
 
+#: The two tool faces a session can be created with. Only ``work`` is enabled in
+#: this build; see ``Settings.enabled_modes`` for the build-level switch.
+SESSION_MODES = ("work", "code")
+
+
+def validate_mode(mode: str) -> str:
+    """Reject an unknown mode instead of falling back to the safe one.
+
+    A silent downgrade would let a caller believe it got the write face when it
+    did not, which is the same class of mistake as hiding a tool in the UI.
+    """
+    if mode not in SESSION_MODES:
+        raise ValueError(f"Session mode must be one of {SESSION_MODES}")
+    return mode
+
 
 @dataclass(slots=True)
 class Session:
@@ -17,6 +32,8 @@ class Session:
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None = None
+    #: Chosen once at creation and immutable per run; the run inherits it.
+    mode: str = "work"
 
 
 @dataclass(slots=True)

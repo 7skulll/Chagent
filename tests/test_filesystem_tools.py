@@ -19,7 +19,7 @@ class FilesystemToolTests(unittest.IsolatedAsyncioTestCase):
         self.workspace = self.root / "project"
         self.workspace.mkdir()
         self.context = ToolContext(self.workspace)
-        self.executor = ToolExecutor(create_builtin_registry())
+        self.executor = ToolExecutor(create_builtin_registry(mode="code"))
 
     async def call(self, name, **arguments):
         return await self.executor.execute(ToolCall("test-call", name, arguments), context=self.context)

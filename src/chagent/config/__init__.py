@@ -42,6 +42,13 @@ class Settings:
     # gate on leaving the machine.
     web_access: str = "off"
     tavily_api_key: str = field(default="", repr=False)
+    #: Build-level switch for the write/execute face. ``off`` means no session can
+    #: select ``code`` and the code face is never constructed at all: the model
+    #: cannot call a tool that was not registered.
+    code_mode: bool = False
+    #: Mode new sessions get. A build that cannot honour it refuses to start
+    #: rather than silently creating work sessions.
+    default_mode: str = "work"
 
     def __post_init__(self) -> None:
         if not self.database_url.strip():
@@ -82,6 +89,12 @@ class Settings:
             raise ValueError("CHAGENT_PROCESS_TIMEOUT must be finite and positive")
         if self.web_access not in {"off", "tavily"}:
             raise ValueError("CHAGENT_WEB_ACCESS must be off or tavily")
+        if self.default_mode not in {"work", "code"}:
+            raise ValueError("CHAGENT_DEFAULT_MODE must be work or code")
+        if self.default_mode == "code" and not self.code_mode:
+            # Honouring it would mean registering the code face, which the build
+            # switch forbids; degrading it would make the setting a lie.
+            raise ValueError("CHAGENT_DEFAULT_MODE=code requires CHAGENT_CODE_MODE=on")
         # Fail loudly here rather than registering a tool that fails on its
         # first call: an enabled-but-keyless switch is a configuration mistake.
         if self.web_access == "tavily" and not self.tavily_api_key.strip():
@@ -95,12 +108,20 @@ class Settings:
                 "CHAGENT_MEMORY_WORKER_CONCURRENCY must leave one connection for runs "
                 "(at most CHAGENT_DB_POOL_MAX_SIZE - 1)")
 
+    @property
+    def enabled_modes(self) -> tuple[str, ...]:
+        """Modes this process can actually serve, default first."""
+        return ("work", "code") if self.code_mode else ("work",)
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
         values = os.environ if env is None else env
         allow_commands = values.get("CHAGENT_ALLOW_HOST_COMMANDS", "false").lower()
         if allow_commands not in {"true", "false"}:
             raise ValueError("CHAGENT_ALLOW_HOST_COMMANDS must be true or false")
+        code_mode = values.get("CHAGENT_CODE_MODE", "off").strip().lower()
+        if code_mode not in {"on", "off"}:
+            raise ValueError("CHAGENT_CODE_MODE must be on or off")
         sandbox_network = values.get("CHAGENT_SANDBOX_NETWORK", "false").lower()
         if sandbox_network not in {"true", "false"}:
             raise ValueError("CHAGENT_SANDBOX_NETWORK must be true or false")
@@ -128,4 +149,6 @@ class Settings:
             process_timeout=float(values.get("CHAGENT_PROCESS_TIMEOUT", "600")),
             web_access=values.get("CHAGENT_WEB_ACCESS", "off").strip().lower(),
             tavily_api_key=values.get("CHAGENT_TAVILY_API_KEY", "").strip(),
+            code_mode=code_mode == "on",
+            default_mode=values.get("CHAGENT_DEFAULT_MODE", "work").strip().lower(),
         )

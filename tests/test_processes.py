@@ -199,7 +199,7 @@ class ProcessSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.owned(context.run_id), [])
 
     async def test_a_session_without_a_manager_is_refused(self):
-        executor = ToolExecutor(create_builtin_registry(allow_host_commands=True), allow_host_commands=True)
+        executor = ToolExecutor(create_builtin_registry(mode="code", allow_host_commands=True), allow_host_commands=True)
         result = await executor.execute(
             ToolCall("c", "exec_command", {"cmd": "true", "yield_time_ms": 100}),
             context=self.context())
@@ -208,15 +208,15 @@ class ProcessSessionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_registry_exposes_process_only_with_host_commands(self):
         manager = ProcessManager()
-        self.assertIsNone(create_builtin_registry().get("process"))
-        registry = create_builtin_registry(allow_host_commands=True, processes=manager)
+        self.assertIsNone(create_builtin_registry(mode="code").get("process"))
+        registry = create_builtin_registry(mode="code", allow_host_commands=True, processes=manager)
         self.assertIsNotNone(registry.get("process"))
         self.assertIs(registry.get("exec_command").processes, manager)
         # The tool surface stays inside the documented cap of twelve.
         self.assertLessEqual(len(registry.definitions()), 12)
 
     async def test_read_requires_a_process_id_and_list_does_not(self):
-        executor = ToolExecutor(create_builtin_registry(allow_host_commands=True,
+        executor = ToolExecutor(create_builtin_registry(mode="code", allow_host_commands=True,
                                                        processes=ProcessManager()),
                                 allow_host_commands=True)
         context = self.context()

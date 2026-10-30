@@ -64,7 +64,7 @@ class RunTestsToolTests(unittest.IsolatedAsyncioTestCase):
         # Deliberately no tests/__init__.py: the common bare layout must work.
         (self.workspace / "tests" / "test_pricing.py").write_text(TEST_MODULE, encoding="utf-8")
         self.context = ToolContext(self.workspace)
-        self.executor = ToolExecutor(create_builtin_registry(allow_host_commands=True),
+        self.executor = ToolExecutor(create_builtin_registry(mode="code", allow_host_commands=True),
                                      allow_host_commands=True)
 
     async def call(self, **arguments):
@@ -112,7 +112,7 @@ class RunTestsToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(filtered.details["counts"], {"passed": 1, "failed": 0, "errors": 0})
 
     async def test_host_execution_is_required(self):
-        executor = ToolExecutor(create_builtin_registry(allow_host_commands=True))
+        executor = ToolExecutor(create_builtin_registry(mode="code", allow_host_commands=True))
         result = await executor.execute(ToolCall("test-call", "run_tests", {}), context=self.context)
         self.assertTrue(result.is_error)
         self.assertIn("disabled", result.content[0].text)

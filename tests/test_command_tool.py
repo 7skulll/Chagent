@@ -21,7 +21,7 @@ class CommandToolTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.context = ToolContext(self.root)
-        self.executor = ToolExecutor(create_builtin_registry(allow_host_commands=True), allow_host_commands=True)
+        self.executor = ToolExecutor(create_builtin_registry(mode="code", allow_host_commands=True), allow_host_commands=True)
 
     def python(self, source):
         return f"{shlex.quote(sys.executable)} -c {shlex.quote(source)}"
@@ -30,8 +30,8 @@ class CommandToolTests(unittest.IsolatedAsyncioTestCase):
         return await self.executor.execute(ToolCall("cmd", "exec_command", arguments), context=self.context)
 
     async def test_host_execution_requires_trusted_enablement(self):
-        self.assertIsNone(create_builtin_registry().get("exec_command"))
-        executor = ToolExecutor(create_builtin_registry(allow_host_commands=True))
+        self.assertIsNone(create_builtin_registry(mode="code").get("exec_command"))
+        executor = ToolExecutor(create_builtin_registry(mode="code", allow_host_commands=True))
         result = await executor.execute(ToolCall("cmd", "exec_command", {"cmd": "printf should-not-run"}), context=self.context)
         self.assertTrue(result.is_error)
         self.assertIn("disabled", result.content[0].text)
