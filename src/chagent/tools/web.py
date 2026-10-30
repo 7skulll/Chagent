@@ -35,6 +35,9 @@ MAX_BODY_BYTES = 2_000_000
 #: wall clock; this bounds what one call costs in the context window.
 MAX_SEARCH_CHARS = 8_000
 MAX_SNIPPET_CHARS = 600
+#: What a source card shows. Shorter than the model-visible excerpt because it
+#: is stored with the tool call and rendered in a 300px column.
+DETAIL_SNIPPET_CHARS = 240
 MAX_FETCH_CHARS = 20_000
 MAX_SUMMARY_CHARS = 800
 #: Repeat queries inside one run are answered from memory: a provider credit is
@@ -292,7 +295,11 @@ class WebSearchTool(AgentTool):
             text = text[:MAX_SEARCH_CHARS].rstrip() + f"\n\n[Truncated at {MAX_SEARCH_CHARS} characters]"
         details: JsonObject = {
             "query": query, "backend": "tavily", "max_results": max_results, "truncated": truncated,
+            # The excerpt is repeated here so the transcript can draw a source
+            # card without re-parsing the rendered text. Bounded separately:
+            # details are persisted with the tool call.
             "results": [{"title": _normalize(str(row.get("title") or ""))[:200], "url": row["url"],
+                         "snippet": _normalize(str(row.get("content") or ""))[:DETAIL_SNIPPET_CHARS],
                          "score": row.get("score")} for row in rows],
         }
         return text, details

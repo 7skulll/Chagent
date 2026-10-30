@@ -9,6 +9,7 @@ from uuid import UUID
 
 from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState, validate_mode
 from chagent.domain.json_types import JsonObject
+from chagent.domain.runs import StoredMessage
 from chagent.storage.repositories import ConversationRepository
 
 
@@ -50,6 +51,10 @@ class SessionManager:
 
     async def messages(self, session_id: UUID, *, before: int | None = None, limit: int = 100) -> MessagePage:
         return await self.repository.message_page(session_id, before=before, limit=limit)
+
+    async def message(self, session_id: UUID, message_id: UUID) -> StoredMessage | None:
+        """One transcript record, used to resolve what a replacement replaces."""
+        return await self.repository.message_record(session_id, message_id)
 
     async def task_state(self, session_id: UUID) -> TaskState:
         return await self.repository.task_state(session_id)

@@ -165,7 +165,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         home = await self.client.get("/")
         self.assertIn("Chagent", home.text)
         self.assertIn("frame-ancestors 'none'", home.headers["content-security-policy"])
-        for asset in ("app.js", "style.css"):
+        for asset in ("app.js", "markdown.js", "style.css"):
             self.assertEqual((await self.client.get(f"/static/{asset}")).status_code, 200)
         info = (await self.client.get("/api/info")).json()
         self.assertEqual(set(info), {"workspace", "provider", "model", "default_mode", "code_mode"})
@@ -637,6 +637,127 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "继续"})
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(await self.runner.runs.latest(identity), None)
+
+    # -- WK2: 改得动 ------------------------------------------------------
+
+    async def test_regenerate_retires_the_old_answer_but_keeps_it_readable(self):
+        """The transcript stays append-only; only replay stops seeing the old turn."""
+        identity = await self.create_session("重新生成")
+        first = (await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "第一轮"})).json()["run_id"]
+        await self.wait_run(first)
+        page = (await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"]
+        answers = [item for item in page if item["message"]["role"] == "assistant"]
+        self.assertTrue(answers, page)
+        target = answers[-1]
+        users_before = len([item for item in page if item["message"]["role"] == "user"])
+
+        response = await self.client.post(f"/api/sessions/{identity}/runs",
+                                          json={"regenerate_from": target["id"]})
+        self.assertEqual(response.status_code, 202, response.text)
+        second = response.json()["run_id"]
+        self.assertEqual((await self.wait_run(second))["status"], "completed")
+
+        after = (await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"]
+        retired = {item["id"]: item for item in after if item["superseded_by"]}
+        # Everything from the replaced answer onwards is retired, not deleted.
+        self.assertIn(target["id"], retired)
+        self.assertEqual(retired[target["id"]]["superseded_by"], second)
+        self.assertTrue(all(item["sequence"] >= target["sequence"] for item in retired.values()))
+        self.assertTrue(all(item["superseded_by"] == second for item in retired.values()))
+        # The old answer's text is still there to compare against.
+        self.assertEqual(retired[target["id"]]["message"], target["message"])
+        # A regeneration writes no second copy of the question.
+        users_after = len([item for item in after if item["message"]["role"] == "user"])
+        self.assertEqual(users_after, users_before)
+
+        # The model's replay is the linear story: retired rows are not in it.
+        replay = await self.runner.conversations.messages(UUID(identity), current_run=UUID(second))
+        self.assertNotIn(target["id"], {str(item.id) for item in replay})
+        self.assertTrue(replay)
+        self.assertEqual(replay[-1].run_id, UUID(second))
+
+    async def test_edit_resends_without_rewriting_the_original(self):
+        identity = await self.create_session("编辑重发")
+        first = (await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "原来的问题"})).json()["run_id"]
+        await self.wait_run(first)
+        page = (await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"]
+        original = next(item for item in page if item["message"]["role"] == "user")
+
+        response = await self.client.post(f"/api/sessions/{identity}/runs",
+                                          json={"text": "改过的问题", "edit_message_id": original["id"]})
+        self.assertEqual(response.status_code, 202, response.text)
+        second = response.json()["run_id"]
+        await self.wait_run(second)
+
+        after = (await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"]
+        retired = next(item for item in after if item["id"] == original["id"])
+        self.assertEqual(retired["superseded_by"], second)
+        # The original text is preserved verbatim, not overwritten in place.
+        self.assertEqual(retired["message"]["content"], "原来的问题")
+        new_users = [item for item in after if item["message"]["role"] == "user" and not item["superseded_by"]]
+        self.assertEqual([item["message"]["content"] for item in new_users], ["改过的问题"])
+        self.assertEqual(new_users[0]["run_id"], second)
+
+        replay = await self.runner.conversations.messages(UUID(identity), current_run=UUID(second))
+        self.assertEqual([item.message.content for item in replay if item.message.role == "user"], ["改过的问题"])
+
+    async def test_replacement_targets_are_checked_before_a_run_exists(self):
+        identity = await self.create_session("替换目标")
+        other = await self.create_session("别的会话")
+        run = (await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "问题"})).json()["run_id"]
+        await self.wait_run(run)
+        page = (await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"]
+        user = next(item for item in page if item["message"]["role"] == "user")
+        answer = next(item for item in page if item["message"]["role"] == "assistant")
+
+        # Regenerating a question or editing an answer names the wrong kind of record.
+        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",
+                          json={"regenerate_from": user["id"]})).status_code, 400)
+        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",
+                          json={"text": "改", "edit_message_id": answer["id"]})).status_code, 400)
+        # A message of another session is not addressable through this one.
+        self.assertEqual((await self.client.post(f"/api/sessions/{other}/runs",
+                          json={"regenerate_from": answer["id"]})).status_code, 404)
+        # Both replacement shapes at once is a malformed request, not a merge.
+        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",
+                          json={"text": "x", "regenerate_from": answer["id"],
+                                "edit_message_id": user["id"]})).status_code, 400)
+        # A regeneration carries no text; an empty ordinary message is still refused.
+        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",
+                          json={"text": "  "})).status_code, 400)
+        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",
+                          json={})).status_code, 400)
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"], page)
+
+    # -- WK3: 有出处 ------------------------------------------------------
+
+    async def test_sources_report_the_memories_a_run_was_given(self):
+        """Memory is not a message, so it has its own read path."""
+        identity = await self.create_session("依据")
+        # A manually written memory is active on arrival; only an extracted
+        # candidate waits for review. Pinned ones are injected without a keyword
+        # match, which is what makes this independent of recall scoring.
+        (await self.client.post("/api/memories",
+         json={"key": "project.database", "content": "使用 PostgreSQL", "pinned": True}))
+        run = (await self.client.post(f"/api/sessions/{identity}/runs",
+               json={"text": "这次会话的数据存在哪里"})).json()["run_id"]
+        await self.wait_run(run)
+
+        sources = (await self.client.get(f"/api/sessions/{identity}/sources")).json()
+        entry = next(item for item in sources["runs"] if item["run_id"] == run)
+        keys = [memory["key"] for memory in entry["memories"]]
+        self.assertIn("project.database", keys)
+        memory = next(item for item in entry["memories"] if item["key"] == "project.database")
+        # The card shows the text that was actually injected, not just the key.
+        self.assertEqual(memory["content"], "使用 PostgreSQL")
+        self.assertEqual(memory["scope"], "workspace")
+
+        # A session with no runs has nothing to report, not an error.
+        idle = await self.create_session("没有运行")
+        self.assertEqual((await self.client.get(f"/api/sessions/{idle}/sources")).json(), {"runs": []})
+        # A deleted memory stops being cited: the card reflects what was injected,
+        # not what the key once said.
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}/sources")).status_code, 200)
 
 
 @unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")

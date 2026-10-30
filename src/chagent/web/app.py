@@ -48,7 +48,8 @@ from chagent.sessions.errors import StateConflictError
 from chagent.web.schemas import (ActiveRunPage, AppInfo, ApprovalDecision, ArtifactPage, Cancellation,
     CancelRequest, ConfigView, ContextView, DailyUsageView, ErrorResponse, MemoryCreate, MemoryDetail, MemoryEdit,
     MemoryPage, MemoryReview, MessagePage, RevisionRequest, RunAccepted, RunCreate, RunView, SessionCreate,
-    SessionDetail, SessionEdit, SessionPage, UploadView, UsageView, WorkspaceCreate, WorkspacePage, WorkspaceView)
+    SessionDetail, SessionEdit, SessionPage, SessionSources, UploadView, UsageView, WorkspaceCreate, WorkspacePage,
+    WorkspaceView)
 from chagent.web.uploads import save as save_upload
 from chagent.domain.sessions import Session
 from chagent.domain.memories import Memory
@@ -160,14 +161,15 @@ class WebRuntime:
         # A waiting run keeps status=running; the projection tells the UI why.
         return {**run, **await self.approvals.waiting_for(identity)}
 
-    async def start(self, session_id: UUID, text: str) -> UUID:
+    async def start(self, session_id: UUID, text: str, *, supersede_from: int | None = None) -> UUID:
         if self.closing:
             raise HTTPException(503, "Server is shutting down")
         started = asyncio.get_running_loop().create_future()
 
         async def drive():
             try:
-                await self.runner.run(session_id, text, on_started=started.set_result)
+                await self.runner.run(session_id, text, supersede_from=supersede_from,
+                                      on_started=started.set_result)
             except asyncio.CancelledError:
                 if not started.done():
                     started.cancel()
@@ -422,6 +424,7 @@ async def history(session_id: UUID, current: Current, limit: MessageLimit = 100,
             payload["details"] = None
         return payload
     return {"items": [{"id": item.id, "sequence": item.sequence, "run_id": item.run_id,
+                        "superseded_by": item.superseded_by,
                         "message": visible(item.message)} for item in page.items], "next_before": page.next_before}
 
 
@@ -457,7 +460,42 @@ async def send(session_id: UUID, value: RunCreate, current: Current):
         raise HTTPException(409, "运行继承会话模式，不能按 run 切换")
     if session.mode == "code" and not current.settings.code_mode:
         raise HTTPException(409, "本构建未开启 code 模式（CHAGENT_CODE_MODE=off）")
-    return {"run_id": await current.start(session_id, value.text), "session_id": session_id}
+    supersede_from = await _replacement_point(current, session_id, value)
+    return {"run_id": await current.start(session_id, value.text or "", supersede_from=supersede_from),
+            "session_id": session_id}
+
+
+async def _replacement_point(current: WebRuntime, session_id: UUID, value: RunCreate) -> int | None:
+    """Which transcript record a regeneration or an edit starts over from.
+
+    The sequence, not the id: retirement is a suffix, and a message cannot be
+    replaced without the turns that followed it going stale too. Both refusals
+    are 400 rather than 404: the session exists, the message does not belong to
+    the kind of record the request names.
+    """
+    target_id = value.regenerate_from or value.edit_message_id
+    if target_id is None:
+        return None
+    record = await current.sessions.message(session_id, target_id)
+    if record is None:
+        raise HTTPException(404, "消息不属于这个会话")
+    expected = "assistant" if value.regenerate_from is not None else "user"
+    if record.message.role != expected:
+        raise HTTPException(400, "重新生成针对回答，编辑针对你自己的消息")
+    if record.superseded_by is not None:
+        raise HTTPException(409, "这条消息已经被替换过，刷新后再试")
+    return record.sequence
+
+
+@api.get("/sessions/{session_id}/sources", response_model=SessionSources, tags=["上下文与产物"])
+async def session_sources(session_id: UUID, current: Current):
+    """The memories each run of this session was given, for its 依据 section.
+
+    One request per session rather than one per answer: memory is not a message,
+    so the transcript cannot rebuild it from what it already has.
+    """
+    await current.session(session_id)
+    return {"runs": await current.runner.conversations.run_memory_references(session_id)}
 
 
 @api.get("/runs", response_model=ActiveRunPage, tags=["运行"])
@@ -581,8 +619,10 @@ async def events(run_id: UUID, request: Request, current: Current, after: Sequen
 
 
 async def asset(name: str = "index.html"):
-    media = {"index.html": "text/html", "app.js": "text/javascript", "style.css": "text/css",
-             "api-docs.html": "text/html", "api-docs.js": "text/javascript"}
+    # An allow-list, not a directory read: the route must not become a way to
+    # fetch anything else that happens to sit next to the page.
+    media = {"index.html": "text/html", "app.js": "text/javascript", "markdown.js": "text/javascript",
+             "style.css": "text/css", "api-docs.html": "text/html", "api-docs.js": "text/javascript"}
     if name not in media:
         raise HTTPException(404)
     return Response(files("chagent.web").joinpath("static", name).read_bytes(), media_type=media[name],

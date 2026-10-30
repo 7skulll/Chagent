@@ -207,9 +207,16 @@ body.sidebar-collapsed .sidebar{display:none}
 
 #conversation{flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;
   padding:var(--sp-5) max(var(--sp-5), calc((100% - var(--measure)) / 2));scrollbar-width:thin;
-  scrollbar-color:var(--line) transparent}
+  scrollbar-color:var(--line) transparent;position:relative}
 #messages:empty{display:none}
 #live:empty{display:none}
+/* Following the stream is the default; scrolling up hands control back to the
+   reader, and this is how they get it back. */
+.jump-latest{position:sticky;bottom:var(--sp-2);z-index:2;align-self:center;margin-top:calc(-1 * var(--sp-5));
+  min-height:28px;padding:0 var(--sp-3);border:1px solid var(--line);border-radius:var(--r-full);
+  background:var(--bg);box-shadow:var(--shadow-1);font-size:var(--text-meta);color:var(--ink-2)}
+.jump-latest:hover{background:var(--surface);color:var(--ink)}
+.jump-latest:active{background:var(--surface-2)}
 
 /* 空状态：标记、一句边界说明、三个起手式。空会话是这个工具的第一屏，
    所以它要能直接开工，而不是一块灰色像章加一句话。 */
@@ -252,6 +259,100 @@ body.sidebar-collapsed .sidebar{display:none}
 .tool-note{margin-left:auto;flex:none;color:var(--ink-4);font-variant-numeric:tabular-nums}
 .message pre{max-height:300px;overflow:auto;margin:var(--sp-1) 0 0;font-family:var(--font-mono);
   font-size:var(--text-label);line-height:1.6;white-space:pre-wrap}
+
+/* ---------- 回答正文：Markdown 子集（WK1） ---------- */
+/* Rendered prose is laid out by its blocks, so it must not inherit pre-wrap from
+   the plain-text path; a user message keeps its own newlines. */
+.message .content.md{white-space:normal}
+.content.md>:first-child{margin-top:0}
+.content.md>:last-child{margin-bottom:0}
+.content.md p{margin:0 0 var(--sp-3)}
+.content.md h1,.content.md h2,.content.md h3,.content.md h4{
+  margin:var(--sp-5) 0 var(--sp-2);line-height:var(--leading-tight);font-weight:650;letter-spacing:-.01em}
+.content.md h1{font-size:var(--text-title)}
+.content.md h2{font-size:var(--text-strong)}
+.content.md h3,.content.md h4{font-size:var(--text-body)}
+.content.md ul,.content.md ol{margin:0 0 var(--sp-3);padding-left:var(--sp-5)}
+.content.md li{margin:var(--sp-1) 0}
+.content.md li>ul,.content.md li>ol{margin:var(--sp-1) 0}
+.content.md blockquote{margin:0 0 var(--sp-3);padding:var(--sp-1) var(--sp-3);border-left:2px solid var(--line);
+  color:var(--ink-2)}
+.content.md blockquote p:last-child{margin-bottom:0}
+.content.md hr{margin:var(--sp-4) 0;border:0;border-top:1px solid var(--line-soft)}
+.content.md a{color:var(--accent);text-decoration:none;border-bottom:1px solid color-mix(in oklch, var(--accent) 35%, transparent);
+  overflow-wrap:anywhere}
+.content.md a:hover{color:var(--accent-hover);border-bottom-color:currentColor}
+.content.md a:active{color:var(--accent-hover)}
+.content.md strong{font-weight:650}
+.content.md code{font-family:var(--font-mono);font-size:.92em;padding:1px 4px;border-radius:var(--r-1);
+  background:var(--surface-2);color:var(--ink)}
+/* A wide table scrolls inside its own wrapper: the transcript never goes sideways. */
+.content.md .table-wrap{margin:0 0 var(--sp-3);overflow-x:auto;border:1px solid var(--line-soft);border-radius:var(--r-2)}
+.content.md table{width:100%;border-collapse:collapse;font-size:var(--text-label)}
+.content.md th{padding:var(--sp-2);border-bottom:1px solid var(--line);background:var(--surface);
+  font-weight:600;text-align:left;white-space:nowrap}
+.content.md td{padding:var(--sp-2);border-bottom:1px solid var(--line-soft);vertical-align:top}
+.content.md tr:last-child td{border-bottom:0}
+/* Code keeps its own horizontal scroll: wrapping code is worse than scrolling it. */
+.code-block{margin:0 0 var(--sp-3);border:1px solid var(--line-soft);border-radius:var(--r-2);
+  background:var(--surface);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2);
+  padding:2px var(--sp-2) 2px var(--sp-3);border-bottom:1px solid var(--line-soft)}
+.code-lang{font-family:var(--font-mono);font-size:var(--text-meta);color:var(--ink-3)}
+.code-copy{min-height:22px;padding:0 var(--sp-2);border-radius:var(--r-1);font-size:var(--text-meta);
+  color:var(--ink-3)}
+.code-copy:hover{background:var(--surface-2);color:var(--ink)}
+.code-block pre{max-height:420px;margin:0;padding:var(--sp-2) var(--sp-3);overflow:auto;white-space:pre;}
+.code-block pre code{padding:0;background:none;font-size:var(--text-label);line-height:1.65}
+/* A long answer keeps eight lines until the reader asks for the rest. */
+.content.md.clamped{position:relative;max-height:calc(8 * 1.75em);overflow:hidden}
+.content.md.clamped::after{content:"";position:absolute;inset:auto 0 0;height:var(--sp-6);
+  background:linear-gradient(to bottom, transparent, var(--bg))}
+.read-more{margin:calc(-1 * var(--sp-2)) 0 var(--sp-3);padding:0 var(--sp-1);font-size:var(--text-label);
+  color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
+.read-more:hover{color:var(--ink)}
+
+/* ---------- 消息动作（复制／重新生成／编辑） ---------- */
+.message-actions{display:flex;align-items:center;gap:var(--sp-1);margin-top:var(--sp-1);opacity:0;
+  transition:opacity var(--dur-micro) var(--ease)}
+.message:hover .message-actions,.message:focus-within .message-actions{opacity:1}
+.message-actions button{min-height:24px;padding:0 var(--sp-2);border-radius:var(--r-1);font-size:var(--text-meta);
+  color:var(--ink-3)}
+.message-actions button:hover{background:var(--surface-2);color:var(--ink)}
+.message-actions .danger:hover{background:var(--danger-soft);color:var(--danger)}
+/* A replaced turn stays readable but folded: it is history, not context. */
+.message.superseded{opacity:.8;margin-bottom:var(--sp-3)}
+.message.superseded>.content,.message.superseded>.superseded-body{display:none}
+.message.superseded details>.content,.message.superseded details>.superseded-body{margin-top:var(--sp-2)}
+.message details.superseded-fold{margin:0 0 var(--sp-3);padding:0;border-left:0}
+.message details.superseded-fold>summary{font-size:var(--text-meta);color:var(--ink-3)}
+.message-edit{display:flex;flex-direction:column;gap:var(--sp-2);width:min(100%, 34rem)}
+.message-edit textarea{width:100%;min-height:64px;max-height:260px;padding:var(--sp-2) var(--sp-3);
+  border:1px solid var(--line-strong);border-radius:var(--r-2);font-size:var(--text-body);line-height:1.6;
+  resize:vertical;background:var(--bg)}
+.message-edit-actions{display:flex;gap:var(--sp-2);justify-content:flex-end}
+.message-edit-actions button{min-height:var(--control);padding:0 var(--sp-3);border:1px solid var(--line);
+  border-radius:var(--r-2);font-size:var(--text-label);font-weight:600;color:var(--ink)}
+.message-edit-actions button:hover{background:var(--surface-2)}
+.message-edit-actions .primary{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}
+.message-edit-actions .primary:hover{background:var(--accent-hover)}
+
+/* ---------- 依据：搜索卡片与文档引用（WK3） ---------- */
+.sources{margin:var(--sp-2) 0 var(--sp-3);padding:var(--sp-1) var(--sp-3);border-left:2px solid var(--line);
+  font-size:var(--text-label)}
+.sources>summary{font-size:var(--text-meta);color:var(--ink-3)}
+.source-card{display:flex;flex-direction:column;gap:2px;margin-top:var(--sp-2)}
+.source-card a{font-weight:600;color:var(--accent);text-decoration:none;overflow-wrap:anywhere}
+.source-card a:hover{text-decoration:underline}
+.source-host{font-size:var(--text-meta);color:var(--ink-4)}
+.source-snippet{margin:0;color:var(--ink-2);line-height:var(--leading-ui);
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.source-doc{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--sp-1) var(--sp-2);margin-top:var(--sp-2);
+  color:var(--ink-2)}
+.source-doc code{font-family:var(--font-mono);font-size:var(--text-meta);color:var(--ink)}
+.source-pages{color:var(--ink-3);font-variant-numeric:tabular-nums}
+.source-memory{margin-top:var(--sp-2);color:var(--ink-2)}
+.source-memory strong{font-family:var(--font-mono);font-size:var(--text-meta);color:var(--ink)}
 .tool-status{margin:var(--sp-2) 0;padding:2px var(--sp-3);border-left:2px solid var(--line);
   font-size:var(--text-label);color:var(--ink-2)}
 .tool-status.failed{border-left-color:var(--danger-line);color:var(--danger)}
@@ -303,6 +404,36 @@ textarea#input:focus-visible{outline:0}
 .send-btn:active{background:var(--accent-hover)}
 .send-btn:disabled{background:var(--surface-2);color:var(--ink-3);cursor:not-allowed}
 .dock-hint{margin-top:var(--sp-2);text-align:center;font-size:var(--text-meta);color:var(--ink-3)}
+
+/* ---------- 上传队列（WK4） ---------- */
+/* One row per file: thumbnail or type mark, name, size, and its own state.
+   The queue is above the composer so a failed file never blocks typing. */
+.uploads{display:flex;flex-direction:column;gap:var(--sp-1);margin-bottom:var(--sp-2)}
+.uploads:empty{display:none}
+.upload-row{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-1) var(--sp-2);
+  border:1px solid var(--line-soft);border-radius:var(--r-2);background:var(--surface)}
+.upload-thumb{width:34px;height:34px;flex:none;display:grid;place-items:center;overflow:hidden;
+  border-radius:var(--r-1);background:var(--surface-2);color:var(--ink-3);font-size:var(--text-meta);
+  font-family:var(--font-mono);text-transform:uppercase}
+.upload-thumb img{width:100%;height:100%;object-fit:cover}
+.upload-facts{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.upload-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-label);color:var(--ink)}
+.upload-meta{font-size:var(--text-meta);color:var(--ink-3);font-variant-numeric:tabular-nums}
+.upload-meta.failed{color:var(--danger)}
+.upload-bar{width:100%;height:2px;margin-top:2px;border:0;border-radius:var(--r-full);
+  background:var(--surface-3);appearance:none;-webkit-appearance:none}
+.upload-bar::-webkit-progress-bar{height:2px;border-radius:var(--r-full);background:var(--surface-3)}
+.upload-bar::-webkit-progress-value{height:2px;border-radius:var(--r-full);background:var(--accent)}
+.upload-bar::-moz-progress-bar{height:2px;border-radius:var(--r-full);background:var(--accent)}
+.upload-row button{width:24px;height:24px;flex:none;display:grid;place-items:center;border-radius:var(--r-1);
+  font-size:var(--text-label);color:var(--ink-3)}
+.upload-row button:hover{background:var(--surface-2);color:var(--ink)}
+/* Dropping is a promise about where the file goes, so the target says so. */
+.chat.drop-target::after{content:"松开即可上传到当前工作区的 uploads/";position:absolute;inset:var(--sp-4);
+  z-index:5;display:grid;place-items:center;border:2px dashed var(--accent);border-radius:var(--r-3);
+  background:color-mix(in oklch, var(--accent-soft) 72%, transparent);color:var(--accent-hover);
+  font-size:var(--text-label);font-weight:600;pointer-events:none}
+.chat{position:relative}
 
 /* ---------- 右侧上下文面板 ---------- */
 .tools-panel{width:var(--tools-w);flex:0 0 var(--tools-w);display:flex;flex-direction:column;min-height:0;

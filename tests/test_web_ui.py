@@ -86,8 +86,9 @@ class WebSurfaceTests(unittest.TestCase):
     def test_button_surface_is_pinned(self):
         # 44 buttons minus the 24 Z1 deleted, plus Z2/Z3's session search toggle
         # and usage pill, and the usage dialog's close button; Z6 removed the
-        # rail's workspace button.
-        self.assertEqual(len(self.page.buttons), 22)
+        # rail's workspace button; WK1 added the "回到最新" scroll button, which
+        # only exists so a reader who scrolled up can rejoin the stream.
+        self.assertEqual(len(self.page.buttons), 23)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)

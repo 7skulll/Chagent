@@ -39,8 +39,15 @@ class RunState:
 
     @property
     def current_input(self) -> StoredMessage:
-        return next(item for item in self.history
-                    if item.run_id == self.run_id and isinstance(item.message, UserMessage))
+        """The question this run answers.
+
+        Normally the user message this run wrote. A regeneration writes none —
+        it re-asks a question already in the transcript — so the fallback is the
+        most recent user message, which is the one being answered again. That
+        keeps the input protected from compaction and keeps memory recall and
+        task-state handling reading the same text a first answer read.
+        """
+        return next(item for item in reversed(self.history) if isinstance(item.message, UserMessage))
 
     def append_committed(self, record: StoredMessage) -> None:
         if record.run_id != self.run_id or (self.history and record.sequence <= self.history[-1].sequence):

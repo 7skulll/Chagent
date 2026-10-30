@@ -148,6 +148,13 @@ def read_document(filesystem: WorkspaceFS, path: str, offset: int, limit: int) -
     return text_result(header + ("\n".join(rows) or "[Empty page]"), {
         "path": path, "sha256": digest, "format": "document", "total_blocks": len(blocks),
         "offset": offset, "next_offset": next_offset,
+        # Where each delivered block came from, so the transcript can say
+        # "文件名 · 第 3 页" without re-parsing the document. Positions only: the
+        # text is already in the content and a second copy would double the
+        # stored tool result.
+        "citations": [{"block": number, "page": block.page, "section": block.section,
+                       "chars": len(block.text)}
+                      for number, block in enumerate(selected, start=offset)],
     })
 
 

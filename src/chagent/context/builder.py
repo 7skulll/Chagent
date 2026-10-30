@@ -165,7 +165,10 @@ class BasicContextBuilder:
         if current_run_id is not None:
             current = {item.id for item in history if item.run_id == current_run_id}
             if not current:
-                raise ContextIntegrityError("Current run is missing from history")
+                # A regeneration writes no message of its own: it re-asks the
+                # question already in the transcript. The turn that must survive
+                # compaction is therefore the last one, not an empty set.
+                current = {item.id for item in groups[-1]}
             # Preserve whole user turns, even if their messages span IDs supplied by a caller.
             for group in groups:
                 if any(item.id in current for item in group):

@@ -94,15 +94,22 @@ class AgentRunner:
         # A second cancellation must not interrupt persistence of the terminal state.
         return (True if task.cancelling() else task.cancel()) if task is not None else False
 
-    async def run(self, session_id: UUID, text: str, *, on_started: Callable[[UUID], None] | None = None) -> RunResult:
-        if not text.strip():
+    async def run(self, session_id: UUID, text: str = "", *, supersede_from: int | None = None,
+                  on_started: Callable[[UUID], None] | None = None) -> RunResult:
+        """Drive one run to a terminal state.
+
+        ``supersede_from`` retires a suffix of the transcript in the same
+        transaction that opens the run: a regeneration passes it with no text
+        (the question is already there), an edit passes it with the new text.
+        """
+        if not text.strip() and supersede_from is None:
             raise ValueError("Input must not be empty")
         # Also recover on CLI entry and before a new web run is admitted.
         while await self.runs.reap_expired():
             pass
-        run_id = await self.runs.begin(
-            session_id, UserMessage(content=text, timestamp=time_ns() // 1_000_000),
-        )
+        message = (UserMessage(content=text, timestamp=time_ns() // 1_000_000)
+                   if text.strip() else None)
+        run_id = await self.runs.begin(session_id, message, supersede_from=supersede_from)
         task = asyncio.current_task()
         if task is not None:
             self._tasks[run_id] = task

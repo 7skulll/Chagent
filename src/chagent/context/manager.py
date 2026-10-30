@@ -52,7 +52,8 @@ class ContextManager:
         # Run-static facts; absent only when a caller drives the builder without
         # a run state, in which case the prompt keeps its bare form.
         environment = state.environment if state is not None else None
-        current_input = next(item for item in history if item.run_id == run_id and isinstance(item.message, UserMessage))
+        current_input = next(item for item in reversed(history) if isinstance(item.message, UserMessage))
+        owned = any(item.run_id == run_id for item in history)
 
         async def build(summary):
             return await self.builder.build(history, model, tools, task_state=task_state,
@@ -75,8 +76,15 @@ class ContextManager:
                 eligible.append([])
             eligible[-1].append(item)
         active = exchanges([item for item in history if item.run_id == run_id and item.sequence > boundary])
-        # Keep the newest complete exchange verbatim, together with the exact current input.
-        eligible.extend(active[:-1])
+        if active:
+            # Keep the newest complete exchange verbatim, together with the exact current input.
+            eligible.extend(active[:-1])
+        elif not owned and eligible:
+            # A regeneration owns no message of its own: the turn it answers is
+            # the tail of the history, so it is held out of the summarizable span
+            # exactly like an in-flight exchange. Otherwise the question could be
+            # left only inside a summary, which the builder refuses.
+            eligible.pop()
         if not eligible:
             return self._checked(baseline)
         progress = eligible[-1][-1].sequence
@@ -92,6 +100,11 @@ class ContextManager:
             covered = prefix[-1][-1].sequence
             kept = next(item for item in history if item.sequence > covered and not isinstance(item.message, SystemMessage))
             active_source = any(item.run_id == run_id for group in prefix for item in group)
+            if not owned:
+                # A regeneration owns no message of its own, so the turn being
+                # answered is the last one; it still must not be summarized away.
+                active_source = active_source or any(
+                    any(item.id == current_input.id for item in group) for group in prefix)
             active_source = active_source or (previous is not None and previous.source_run_id == run_id)
             return SessionSummary(
                 id=uuid4(), session_id=session_id, revision=revision,

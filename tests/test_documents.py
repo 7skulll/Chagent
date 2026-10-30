@@ -196,6 +196,19 @@ class ReadDocumentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("B3 [page 3]: Third", second.content[0].text)
         self.assertIn("Next offset: none", second.content[0].text)
 
+    async def test_document_reads_report_where_each_block_came_from(self):
+        """The transcript says \"文件名 · 第 3 页\" from these positions, not by
+        re-parsing the document a second time."""
+        (self.workspace / "policy.pdf").write_bytes(build_pdf([["First"], ["Second"], ["Third"]]))
+        result = await self.read(path="policy.pdf")
+        self.assertEqual(result.details["format"], "document")
+        self.assertEqual(result.details["path"], "policy.pdf")
+        self.assertEqual([item["page"] for item in result.details["citations"]], [1, 2, 3])
+        self.assertEqual([item["block"] for item in result.details["citations"]], [1, 2, 3])
+        # Positions only: the text is already in the content, and details are
+        # stored twice (tool_calls and the message) as it is.
+        self.assertNotIn("text", result.details["citations"][0])
+
     async def test_docx_table_arrives_with_its_header(self):
         (self.workspace / "rules.docx").write_bytes(build_docx(["Rules"], [["Item", "Limit"], ["Hotel", "500"]]))
         result = await self.read(path="rules.docx")

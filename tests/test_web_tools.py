@@ -51,6 +51,11 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("A short summary.", text)
         self.assertFalse(result.is_error)
         self.assertEqual(len(result.details["results"]), 2)
+        # The transcript draws a source card from these, so each row carries the
+        # excerpt it shows and the URL it opens — not just a score.
+        first = result.details["results"][0]
+        self.assertEqual(first["url"], "https://example.com/0")
+        self.assertIn("excerpt text", first["snippet"])
 
     async def test_the_key_is_sent_as_a_bearer_header_and_never_echoed(self):
         calls = []

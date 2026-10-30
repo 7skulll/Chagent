@@ -4,9 +4,20 @@ const $ = id => document.getElementById(id);
 const terminal = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const state = {session: null, run: null, source: null, version: 0, before: null, sessionCursor: null,
   busy: false, loading: false, workspace: null, archived: false, query: "", readonly: false,
-  active: new Map()};
+  active: new Map(), sources: new Map(), runMemories: new Map(), promptPrefix: ""};
 let liveText = null;
+// Streamed answer text, painted once per animation frame instead of per delta.
+let liveBuffer = "";
+let liveFrame = 0;
 const toolRows = new Map();
+// markdown.js is a separate file so it can be tested on its own; if it failed to
+// load, the answer is still shown, just as preformatted text.
+const markdown = window.ChagentMarkdown || (() => {
+  const escape = text => { const node = document.createElement("span"); node.textContent = String(text == null ? "" : text); return node.innerHTML; };
+  return {renderMarkdown: text => `<p>${escape(text)}</p>`, escapeHtml: escape};
+})();
+//: Answers longer than this open folded to their first eight lines.
+const CLAMP_CHARS = 2000;
 const ARCHIVED_HINT = "已归档，恢复后才能继续对话";
 // Under 960px the sidebar is a drawer over the chat, not a column beside it.
 const narrow = window.matchMedia("(max-width: 960px)");
@@ -31,7 +42,36 @@ function textNode(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
-function scrollBottom() { const view = $("conversation"); view.scrollTop = view.scrollHeight; }
+// ---------- 滚动跟随 ----------
+// Following the stream is the default. Scrolling up hands control back to the
+// reader — new text must not yank the page — and the button is how they return.
+const NEAR_BOTTOM = 96;
+let follow = true;
+function nearBottom() {
+  const view = $("conversation");
+  return view.scrollHeight - view.scrollTop - view.clientHeight < NEAR_BOTTOM;
+}
+function scrollBottom() {
+  const view = $("conversation");
+  view.scrollTop = view.scrollHeight;
+  follow = true;
+  $("jump-latest").hidden = true;
+}
+$("conversation").addEventListener("scroll", () => {
+  follow = nearBottom();
+  $("jump-latest").hidden = follow;
+});
+$("jump-latest").addEventListener("click", scrollBottom);
+
+function scheduleLiveFlush() {
+  if (liveFrame) return;
+  liveFrame = requestAnimationFrame(() => {
+    liveFrame = 0;
+    if (!liveText) return;
+    liveText.innerHTML = markdown.renderMarkdown(liveBuffer);
+    if (follow) scrollBottom();
+  });
+}
 // One place decides whether the composer accepts input: a run in flight, a
 // turn loading, and an archived session all block it for different reasons.
 function updateComposer() {
@@ -74,18 +114,214 @@ function renderStarters() {
 }
 renderStarters();
 
-function displayMessage(message, target = $("messages")) {
-  if (message.role === "system") return;
+// ---------- 消息渲染（WK1） ----------
+function plainText(message) {
+  const content = message.role === "toolResult" && message.artifact
+    ? [{type: "text", text: message.artifact.preview}] : message.content;
+  if (typeof content === "string") return content;
+  return (content || []).filter(block => block.type === "text").map(block => block.text).join("\n");
+}
+// Escaping happens inside markdown.js, before any structure is recognised, so
+// this is never fed raw model output as markup.
+function contentNode(text, prose) {
+  const node = document.createElement("div");
+  if (prose) { node.className = "content md"; node.innerHTML = markdown.renderMarkdown(text); }
+  else { node.className = "content"; node.textContent = text; }
+  return node;
+}
+// An answer over 2 000 characters is read in two passes: first eight lines, then
+// the whole thing. The button sits outside the clipped box, so it stays visible.
+function clampContent(node, text) {
+  if (text.length <= CLAMP_CHARS) return null;
+  const label = `展开全文（${text.length} 字）`;
+  node.classList.add("clamped");
+  const button = textNode("button", label, "read-more");
+  button.type = "button";
+  button.addEventListener("click", () => {
+    button.textContent = node.classList.toggle("clamped") ? label : "收起";
+  });
+  return button;
+}
+async function copyText(text, button) {
+  const label = button.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "已复制";
+    setTimeout(() => { button.textContent = label; }, 1200);
+  } catch {
+    showError(new Error("浏览器拒绝了剪贴板访问，请手动选中后复制"));
+  }
+}
+
+// ---------- 依据（WK3） ----------
+// Web results and document locators travel in the tool result's details, so the
+// transcript can rebuild them without another request. Memory is the exception:
+// it is not a message, so the session loads its run→memory map once.
+function collectSources(runId, message) {
+  if (message.role !== "toolResult" || !runId) return;
+  const details = message.details;
+  if (!details || typeof details !== "object") return;
+  let bucket = state.sources.get(runId);
+  if (!bucket) { bucket = {web: [], docs: []}; state.sources.set(runId, bucket); }
+  if (message.tool_name === "web_search" && Array.isArray(details.results)) {
+    for (const row of details.results) {
+      if (!row || typeof row.url !== "string" || bucket.web.some(item => item.url === row.url)) continue;
+      bucket.web.push({title: row.title || row.url, url: row.url, snippet: row.snippet || ""});
+    }
+  } else if (message.tool_name === "web_fetch" && typeof details.url === "string"
+             && Number(details.status) < 400) {
+    if (!bucket.web.some(item => item.url === details.url)) {
+      bucket.web.push({title: details.url, url: details.url, snippet: ""});
+    }
+  } else if (message.tool_name === "read_file" && details.format === "document"
+             && typeof details.path === "string") {
+    const citations = Array.isArray(details.citations) ? details.citations : [];
+    const existing = bucket.docs.find(item => item.path === details.path);
+    if (existing) existing.citations.push(...citations);
+    else bucket.docs.push({path: details.path, citations});
+  }
+}
+function hostOf(url) { try { return new URL(url).host; } catch { return ""; } }
+// "第 2、3 页" for a PDF, the heading path for a Word file, the sheet name for
+// Excel — whichever locator the parser actually produced.
+function locatorLabel(citations) {
+  const pages = [...new Set(citations.map(item => item.page).filter(page => page != null))];
+  if (pages.length) return `第 ${pages.join("、")} 页`;
+  const sections = [...new Set(citations.map(item => item.section).filter(Boolean))];
+  return sections.slice(0, 3).join(" · ");
+}
+function appendSources(node, runId) {
+  const bucket = state.sources.get(runId) || {web: [], docs: []};
+  const memories = state.runMemories.get(runId) || [];
+  const total = bucket.web.length + bucket.docs.length + memories.length;
+  // No sources, no card: an empty 依据 would be a promise with nothing behind it.
+  if (!total) return;
+  const details = document.createElement("details");
+  details.className = "sources";
+  details.append(textNode("summary", `依据 · ${total} 处`));
+  for (const item of bucket.web) {
+    const card = textNode("div", "", "source-card");
+    const link = document.createElement("a");
+    link.href = item.url; link.target = "_blank"; link.rel = "noopener noreferrer";
+    link.textContent = item.title;
+    card.append(link, textNode("span", hostOf(item.url), "source-host"));
+    if (item.snippet) card.append(textNode("p", item.snippet, "source-snippet"));
+    details.append(card);
+  }
+  for (const doc of bucket.docs) {
+    const row = textNode("div", "", "source-doc");
+    row.append(textNode("code", doc.path), textNode("span", locatorLabel(doc.citations), "source-pages"));
+    details.append(row);
+  }
+  for (const memory of memories) {
+    const row = textNode("div", "", "source-memory");
+    row.append(textNode("strong", `${memory.key} v${memory.revision}`),
+      textNode("span", memory.scope === "user" ? "用户偏好" : "工作区事实", "source-host"));
+    row.append(textNode("p", memory.content, "source-snippet"));
+    details.append(row);
+  }
+  node.append(details);
+}
+// Only the last assistant article of a run carries its 依据: a run may answer in
+// several model turns, and repeating the same list under each would be noise.
+function attachSources(nodes) {
+  const last = new Map();
+  for (const node of nodes) {
+    if (!node || !node.classList || !node.classList.contains("assistant") || !node.dataset.run) continue;
+    last.set(node.dataset.run, node);
+  }
+  for (const [runId, node] of last) appendSources(node, runId);
+}
+
+// ---------- 重新生成 / 编辑重发 / 重试（WK2） ----------
+async function requestRun(payload) {
+  const id = state.session;
+  if (!id || state.busy || state.loading || state.readonly) return;
+  clearError(); state.loading = true; updateComposer();
+  try {
+    await post(`/api/sessions/${id}/runs`, payload);
+    if (id === state.session) await openSession(id);
+  } catch (error) { showError(error); }
+  finally { state.loading = false; updateComposer(); }
+}
+function startEdit(node, message, meta) {
+  if (node.querySelector(".message-edit")) return;
+  const content = node.querySelector(".content");
+  const form = textNode("div", "", "message-edit");
+  const area = document.createElement("textarea");
+  area.value = plainText(message);
+  area.maxLength = 16000;
+  area.setAttribute("aria-label", "编辑这条消息后重发");
+  const actions = textNode("div", "", "message-edit-actions");
+  const cancel = textNode("button", "取消");
+  const send = textNode("button", "发送", "primary");
+  cancel.type = send.type = "button";
+  actions.append(cancel, send);
+  form.append(area, actions);
+  if (content) content.hidden = true;
+  node.append(form);
+  area.focus();
+  area.setSelectionRange(area.value.length, area.value.length);
+  const close = () => { form.remove(); if (content) content.hidden = false; };
+  cancel.addEventListener("click", close);
+  send.addEventListener("click", () => {
+    const text = area.value.trim();
+    if (!text) { area.focus(); return; }
+    close();
+    requestRun({text, edit_message_id: meta.id});
+  });
+  area.addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); close(); }
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); send.click(); }
+  });
+}
+function messageActions(message, meta, node) {
+  const row = textNode("div", "", "message-actions");
+  const copy = textNode("button", "复制");
+  copy.type = "button";
+  copy.addEventListener("click", () => copyText(plainText(message), copy));
+  row.append(copy);
+  // A replaced record is history: offering to replace it again would fork the
+  // transcript without a tree to hold the branches.
+  const actionable = meta.id && meta.run_id && !meta.superseded_by && !state.readonly && !state.busy;
+  if (message.role === "assistant" && actionable) {
+    const again = textNode("button", "重新生成");
+    again.type = "button";
+    again.addEventListener("click", () => requestRun({regenerate_from: meta.id}));
+    row.append(again);
+  }
+  if (message.role === "user" && meta.id && !meta.superseded_by && !state.readonly && !state.busy) {
+    const edit = textNode("button", "编辑");
+    edit.type = "button";
+    edit.addEventListener("click", () => startEdit(node, message, meta));
+    row.append(edit);
+  }
+  return row;
+}
+
+function displayMessage(message, target = $("messages"), meta = {}, live = false) {
+  if (message.role === "system") return null;
   const node = document.createElement("article");
   node.className = `message ${message.role === "user" ? "user" : "assistant"}`;
+  if (meta.id) node.dataset.messageId = meta.id;
+  if (meta.run_id) node.dataset.run = meta.run_id;
+  collectSources(meta.run_id, message);
   // The name stays for screen readers; on screen the bubble and the alignment
   // already say who is speaking, and repeating it above every message is noise.
   node.append(textNode("div", message.role === "user" ? "你" : message.role === "toolResult" ? "工具结果" : "Chagent", "role sr-only"));
   const content = message.role === "toolResult" && message.artifact
     ? [{type: "text", text: message.artifact.preview}] : message.content;
-  if (typeof content === "string") node.append(textNode("div", content, "content"));
+  // Only an answer is prose. A user message keeps the newlines it was typed
+  // with, and a tool result is data, not something to typographically improve.
+  const prose = message.role === "assistant";
+  const addText = text => {
+    const body = contentNode(text, prose);
+    node.append(body);
+    if (prose && !live) { const more = clampContent(body, text); if (more) node.append(more); }
+  };
+  if (typeof content === "string") addText(content);
   else for (const block of content || []) {
-    if (block.type === "text") node.append(textNode("div", block.text, "content"));
+    if (block.type === "text") addText(block.text);
     if (block.type === "toolCall") {
       const details = document.createElement("details");
       const summary = document.createElement("summary");
@@ -124,14 +360,37 @@ function displayMessage(message, target = $("messages")) {
     }
     node.append(details);
   }
-  if (message.error_message) node.append(textNode("div", message.error_message, "tool-status failed"));
+  if (message.error_message) {
+    node.append(textNode("div", message.error_message, "tool-status failed"));
+    // A failed turn keeps its question in the transcript, so retrying is the
+    // same request as regenerating that answer — no new user message is written.
+    if (meta.id && meta.run_id && !meta.superseded_by && !state.readonly) {
+      const retry = textNode("button", "重试", "quiet");
+      retry.type = "button";
+      retry.addEventListener("click", () => requestRun({regenerate_from: meta.id}));
+      node.append(retry);
+    }
+  }
+  if (!live) node.append(messageActions(message, meta, node));
   // Thinking is internal; only response text and tool records are displayed.
-  if (node.children.length > 1) target.append(node);
+  if (!live && !node.querySelector(".content, details, .tool-status")) return null;
+  if (meta.superseded_by) {
+    // Kept, not deleted: the old answer is what the reader compares against.
+    const fold = document.createElement("details");
+    fold.className = "superseded-fold";
+    fold.append(textNode("summary", message.role === "user" ? "已编辑的原文" : "被重新生成的回答"));
+    fold.append(node);
+    target.append(fold);
+    return fold;
+  }
+  target.append(node);
   return node;
 }
 function resetStream() {
   if (state.source) state.source.close();
   state.source = null; state.run = null; liveText = null; toolRows.clear(); $("live").replaceChildren();
+  liveBuffer = "";
+  if (liveFrame) { cancelAnimationFrame(liveFrame); liveFrame = 0; }
 }
 async function listSessions(append = false) {
   const params = new URLSearchParams();
@@ -229,10 +488,14 @@ async function openSession(id) {
   const version = ++state.version;
   resetStream(); clearError(); state.session = id; state.readonly = false; state.loading = true; setBusy(false);
   $("messages").replaceChildren(); $("empty").hidden = true;
+  state.sources = new Map(); state.runMemories = new Map();
   localStorage.setItem("chagent.session", id);
   for (const row of $("sessions").children) row.classList.toggle("active", row.dataset.id === id);
   try {
-    const [session, page] = await Promise.all([api(`/api/sessions/${id}`), api(`/api/sessions/${id}/messages`)]);
+    const [session, page, sources] = await Promise.all([
+      api(`/api/sessions/${id}`), api(`/api/sessions/${id}/messages`),
+      // Citations are an enhancement: a failure here must not cost the transcript.
+      api(`/api/sessions/${id}/sources`).catch(() => ({runs: []}))]);
     if (version !== state.version) return;
     $("session-title").textContent = session.title || "未命名会话";
     // An archived session is still readable; only new input is refused. The
@@ -241,12 +504,15 @@ async function openSession(id) {
     updateComposer();
     if (narrow.matches) applyCollapsed("sidebar", true);
     if (state.readonly) $("status").textContent = ARCHIVED_HINT;
+    state.runMemories = new Map((sources.runs || []).map(run => [run.run_id, run.memories || []]));
     const active = !state.readonly && session.latest_run && !terminal.has(session.latest_run.status) ? session.latest_run : null;
+    const nodes = [];
     for (const item of page.items) {
       // SSE replays the entire active run, so render only its user input from history.
       if (active && item.run_id === active.id && item.message.role !== "user") continue;
-      displayMessage(item.message);
+      nodes.push(displayMessage(item.message, $("messages"), item));
     }
+    attachSources(nodes);
     state.before = page.next_before; $("older").hidden = !state.before;
     $("empty").hidden = page.items.length > 0;
     if (active) connectRun(active.id, version);
@@ -385,7 +651,6 @@ function connectRun(runId, version) {
   const source = new EventSource(`/api/runs/${runId}/events`); state.source = source;
   source.addEventListener("update", event => {
     if (version !== state.version) return;
-    const nearBottom = $("conversation").scrollHeight - $("conversation").scrollTop - $("conversation").clientHeight < 100;
     const {type, payload} = JSON.parse(event.data);
     if (type === "memory_extraction_started") $("status").textContent = "正在整理记忆候选…";
     if (type === "memory_saved") {
@@ -405,10 +670,18 @@ function connectRun(runId, version) {
     if (type === "compaction_failed") {
       $("live").append(textNode("div", "压缩未完成，继续使用原有摘要和近期完整轮次。", "tool-status failed"));
     }
-    if (type === "model_started") { liveText = null; $("status").textContent = "正在思考…"; }
+    if (type === "model_started") { liveText = null; liveBuffer = ""; $("status").textContent = "正在思考…"; }
     if (type === "text_delta") {
-      if (!liveText) { const row = displayMessage({role: "assistant", content: ""}, $("live")); liveText = row.querySelector(".content"); }
-      liveText.append(document.createTextNode(payload.delta)); $("status").textContent = "正在生成…";
+      if (!liveText) {
+        const row = displayMessage({role: "assistant", content: ""}, $("live"), {}, true);
+        liveText = row && row.querySelector(".content");
+        liveBuffer = "";
+      }
+      liveBuffer += payload.delta;
+      // One repaint per frame, not per token: a 3 000-token answer would
+      // otherwise re-lay out the whole paragraph thousands of times.
+      scheduleLiveFlush();
+      $("status").textContent = "正在生成…";
     }
     if (type === "tool_queued" || type === "tool_started") {
       let tool = toolRows.get(payload.tool_call_id);
@@ -440,7 +713,7 @@ function connectRun(runId, version) {
         tool.row.classList.add("failed");
       }
     }
-    if (nearBottom) scrollBottom();
+    if (follow) scrollBottom();
   });
   source.addEventListener("end", () => {
     source.close();
@@ -501,6 +774,11 @@ $("composer").addEventListener("submit", async event => {
     const id = state.session;
     await post(`/api/sessions/${id}/runs`, {text});
     $("input").value = "";
+    state.promptPrefix = "";
+    // The files just sent are part of the message now; a failed one stays in the
+    // queue so it can be retried without retyping anything.
+    uploads.items = uploads.items.filter(item => item.status !== "done");
+    renderUploads();
     if (id === state.session) await openSession(id);
   } catch (error) { showError(error); }
   finally { state.loading = false; updateComposer(); }
@@ -515,38 +793,217 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// ---------- 上传（WK4） ----------
 // The file body is posted as-is: the endpoint takes raw bytes with any content
-// type, so a 20 MiB report never becomes a base64 string inside JSON.
-async function uploadFile(file) {
-  const response = await fetch(withWorkspace(`/api/uploads?name=${encodeURIComponent(file.name)}`), {
-    method: "POST",
-    headers: {"Content-Type": file.type || "application/octet-stream"},
-    body: file,
+// type, so a 20 MiB report never becomes a base64 string inside JSON. XHR is
+// used instead of fetch for one reason: upload progress events.
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+//: What read_file can actually open. Anything else is refused here rather than
+//: uploaded and then reported as unreadable three tool calls later.
+const READABLE = /\.(pdf|docx|xlsx|txt|md|markdown|rst|json|jsonl|ndjson|yaml|yml|toml|csv|tsv|log|py|js|mjs|cjs|jsx|ts|tsx|go|rs|java|kt|rb|php|c|h|cc|cpp|hpp|cs|swift|m|mm|sh|bash|zsh|fish|sql|html|htm|css|scss|sass|less|vue|svelte|xml|ini|cfg|conf|env|properties|gradle|lock|mod|sum|proto|graphql|gql)$/i;
+const IMAGE = /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i;
+const uploads = {items: [], nextId: 1, running: false};
+
+function readableName(name) {
+  if (!name.includes(".")) return true;   // README, Makefile, LICENSE
+  return READABLE.test(name);
+}
+function uploadPaths() {
+  return uploads.items.filter(item => item.status === "done" && item.readable).map(item => item.path);
+}
+// The paths ride in the composer instead of being sent behind the user's back:
+// they can edit or drop the sentence before pressing send. The prefix is tracked
+// so removing a file rewrites the line instead of appending a second one.
+function applyUploadPrompt() {
+  const input = $("input");
+  const paths = uploadPaths();
+  const previous = state.promptPrefix;
+  if (previous && input.value.startsWith(previous)) input.value = input.value.slice(previous.length);
+  state.promptPrefix = paths.length ? `请阅读 ${paths.join("、")}` : "";
+  if (state.promptPrefix) {
+    const rest = input.value.replace(/^[：:]\s*/, "");
+    input.value = rest ? `${state.promptPrefix}：${rest}` : `${state.promptPrefix}：`;
+  }
+  // A run in flight owns the status line; the queue does not talk over it.
+  if (!state.busy) {
+    $("status").textContent = paths.length ? `已上传 ${paths.length} 个文件` : "就绪";
+  }
+}
+function uploadItemView(item) {
+  const row = textNode("div", "", "upload-row");
+  const thumb = textNode("div", "", "upload-thumb");
+  if (item.preview) {
+    const image = document.createElement("img");
+    image.src = item.preview; image.alt = "";
+    thumb.append(image);
+  } else {
+    thumb.textContent = (item.name.split(".").pop() || "file").slice(0, 4);
+  }
+  const facts = textNode("div", "", "upload-facts");
+  facts.append(textNode("div", item.name, "upload-name"));
+  const meta = textNode("div", "", "upload-meta");
+  const labels = {queued: "等待上传", uploading: `上传中 ${Math.round(item.progress * 100)}%`,
+    done: `已上传 ${formatSize(item.size)}`, failed: item.error || "上传失败"};
+  meta.textContent = labels[item.status];
+  meta.classList.toggle("failed", item.status === "failed");
+  facts.append(meta);
+  if (item.status === "uploading") {
+    // A <progress> element, not a styled div: the page is served under
+    // `style-src 'self'`, and a value is markup rather than an inline style.
+    const bar = document.createElement("progress");
+    bar.className = "upload-bar";
+    bar.max = 1; bar.value = item.progress;
+    facts.append(bar);
+  }
+  if (item.note) facts.append(textNode("div", item.note, "upload-meta"));
+  row.append(thumb, facts);
+  if (item.status === "failed" && item.retryable) {
+    const retry = textNode("button", "↻", "upload-retry");
+    retry.type = "button"; retry.title = "重试上传"; retry.setAttribute("aria-label", `重试上传 ${item.name}`);
+    retry.addEventListener("click", () => { item.status = "queued"; item.progress = 0; item.error = ""; renderUploads(); runUploads(); });
+    row.append(retry);
+  }
+  const remove = textNode("button", "×", "upload-remove");
+  remove.type = "button"; remove.title = "移除"; remove.setAttribute("aria-label", `移除 ${item.name}`);
+  remove.addEventListener("click", () => {
+    if (item.request) { try { item.request.abort(); } catch { /* already finished */ } }
+    uploads.items = uploads.items.filter(other => other !== item);
+    renderUploads(); applyUploadPrompt();
   });
-  const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(value.error || `上传失败 (${response.status})`);
-  return value;
+  row.append(remove);
+  return row;
+}
+function renderUploads() {
+  $("uploads").replaceChildren(...uploads.items.map(uploadItemView));
+}
+function uploadOne(item) {
+  return new Promise(resolve => {
+    const request = new XMLHttpRequest();
+    item.request = request;
+    item.status = "uploading"; item.progress = 0;
+    // Painted before the first byte: the row says "上传中" the moment it is
+    // queued, not when the first progress event arrives.
+    renderUploads();
+    request.open("POST", withWorkspace(`/api/uploads?name=${encodeURIComponent(item.name)}`));
+    request.setRequestHeader("Content-Type", item.file.type || "application/octet-stream");
+    request.upload.addEventListener("progress", event => {
+      if (!event.lengthComputable) return;
+      item.progress = event.total ? event.loaded / event.total : 0;
+      renderUploads();
+    });
+    request.addEventListener("load", () => {
+      let value = {};
+      try { value = JSON.parse(request.responseText || "{}"); } catch { value = {}; }
+      if (request.status >= 200 && request.status < 300) {
+        item.status = "done"; item.path = value.path; item.progress = 1; item.error = "";
+      } else {
+        item.status = "failed"; item.retryable = request.status !== 413;
+        item.error = request.status === 413
+          ? "文件超过服务端上限，未上传"
+          : value.error || `上传失败 (${request.status})`;
+      }
+      resolve();
+    });
+    request.addEventListener("error", () => {
+      item.status = "failed"; item.retryable = true; item.error = "网络中断，未上传成功"; resolve();
+    });
+    request.addEventListener("abort", () => { item.status = "failed"; item.error = "已取消"; resolve(); });
+    request.send(item.file);
+  });
+}
+async function runUploads() {
+  if (uploads.running) return;
+  uploads.running = true;
+  try {
+    while (true) {
+      const next = uploads.items.find(item => item.status === "queued");
+      if (!next) break;
+      await uploadOne(next);
+      renderUploads();
+      applyUploadPrompt();
+    }
+  } finally { uploads.running = false; }
+}
+function enqueueFiles(files) {
+  const list = Array.from(files || []);
+  if (!list.length) return;
+  // An archived session refuses new runs, so a queue there would only produce a
+  // prompt that cannot be sent.
+  if (state.readonly) { showError(new Error("该会话已归档，恢复后才能上传")); return; }
+  clearError();
+  for (const file of list) {
+    const item = {id: uploads.nextId++, file, name: file.name || "upload", size: file.size,
+      status: "queued", progress: 0, error: "", path: null, retryable: false,
+      readable: readableName(file.name || ""), request: null, note: "", preview: null};
+    if (file.size > MAX_UPLOAD_BYTES) {
+      item.status = "failed";
+      item.error = `超过 20 MiB 上限（${formatSize(file.size)}），未上传`;
+    } else if (IMAGE.test(file.name || "")) {
+      // Stored so the workspace has it, but read_file has no OCR: say so here
+      // rather than letting the model promise a description it cannot make.
+      item.note = "图片：当前工具读不了图片正文";
+      previewFile(file, data => { item.preview = data; renderUploads(); });
+    } else if (!item.readable) {
+      item.status = "failed";
+      item.error = "不支持这种文件类型（PDF / Word / Excel / 文本）";
+    }
+    uploads.items.push(item);
+  }
+  renderUploads();
+  runUploads();
+}
+// A data: URL, not a blob: one — `img-src 'self' data:` is what the page allows.
+function previewFile(file, apply) {
+  const reader = new FileReader();
+  reader.addEventListener("load", () => { if (typeof reader.result === "string") apply(reader.result); });
+  reader.addEventListener("error", () => { /* no thumbnail; the name still shows */ });
+  reader.readAsDataURL(file);
 }
 
 $("attach").addEventListener("click", () => $("file-input").click());
-$("file-input").addEventListener("change", async event => {
-  const file = event.target.files && event.target.files[0];
+$("file-input").addEventListener("change", event => {
+  const files = Array.from(event.target.files || []);
   event.target.value = "";
-  if (!file) return;
-  clearError();
-  $("status").textContent = `正在上传 ${file.name}…`;
-  try {
-    const saved = await uploadFile(file);
-    const input = $("input");
-    const ask = `请阅读 ${saved.path}`;
-    const rest = input.value.trim();
-    input.value = rest ? `${ask}：${rest}` : `${ask}：`;
-    input.focus();
-    $("status").textContent = `已上传 ${saved.name}（${formatSize(saved.size)}）`;
-  } catch (error) {
-    showError(error);
-    $("status").textContent = "就绪";
-  }
+  if (files.length) enqueueFiles(files);
+});
+$("input").addEventListener("paste", event => {
+  const files = Array.from((event.clipboardData && event.clipboardData.files) || []);
+  if (!files.length) return;
+  // A pasted screenshot is a file, not text: it goes to the queue instead of
+  // becoming a base64 blob in the message body.
+  event.preventDefault();
+  enqueueFiles(files);
+});
+const chat = document.querySelector(".chat");
+let dragDepth = 0;
+const draggingFiles = event => Array.from((event.dataTransfer && event.dataTransfer.types) || []).includes("Files");
+chat.addEventListener("dragenter", event => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault(); dragDepth += 1; chat.classList.add("drop-target");
+});
+chat.addEventListener("dragover", event => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+});
+chat.addEventListener("dragleave", () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) chat.classList.remove("drop-target");
+});
+chat.addEventListener("drop", event => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0; chat.classList.remove("drop-target");
+  enqueueFiles(event.dataTransfer ? event.dataTransfer.files : null);
+});
+// One listener for every code block the renderer produces: the markup is a
+// string, so per-node handlers would be re-attached on each repaint.
+document.addEventListener("click", event => {
+  const button = event.target.closest("[data-copy-code]");
+  if (!button) return;
+  const block = button.closest(".code-block");
+  const code = block && block.querySelector("pre code");
+  if (code) copyText(code.textContent, button);
 });
 $("new-session").addEventListener("click", async () => {
   try {
@@ -569,7 +1026,9 @@ $("older").addEventListener("click", async () => {
     const page = await api(`/api/sessions/${id}/messages?before=${before}`);
     if (version !== state.version) return;
     const fragment = document.createDocumentFragment();
-    for (const item of page.items) displayMessage(item.message, fragment);
+    const nodes = [];
+    for (const item of page.items) nodes.push(displayMessage(item.message, fragment, item));
+    attachSources(nodes);
     $("messages").prepend(fragment); state.before = page.next_before; $("older").hidden = !state.before;
   } catch (error) { showError(error); }
   finally { $("older").disabled = false; }
@@ -820,6 +1279,9 @@ async function switchWorkspace(path) {
   state.session = null; localStorage.removeItem("chagent.session");
   showArchived(false); state.query = ""; $("session-search").value = "";
   resetStream(); state.loading = false; state.readonly = false; setBusy(false);
+  // An upload belongs to the workspace it landed in; carrying the queue across
+  // would offer paths that the new workspace cannot see.
+  uploads.items = []; state.promptPrefix = ""; $("input").value = ""; renderUploads();
   $("messages").replaceChildren(); $("empty").hidden = false; $("session-title").textContent = "聊天";
   $("usage-pill").hidden = true;
   await listSessions();

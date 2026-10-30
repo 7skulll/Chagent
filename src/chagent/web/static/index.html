@@ -15,6 +15,7 @@
     html,body{overflow-x:clip}
     :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   </style>
+  <script src="/static/markdown.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -66,6 +67,7 @@
       <button id="older" class="load-more in-chat" hidden>加载更早的消息</button>
       <div id="messages"></div>
       <div id="live" aria-live="polite"></div>
+      <button id="jump-latest" class="jump-latest" hidden>回到最新 ↓</button>
       <div id="empty">
         <svg class="empty-mark" viewBox="0 0 96 96" aria-hidden="true" focusable="false">
           <path d="M48 10c7 0 12.4 3.4 15.2 8.6C69 15.4 76 16.6 80.6 21.2c4.6 4.6 5.8 11.6 2.6 17.4C88.6 41.4 92 46.8 92 53.8c0 7-3.4 12.4-8.8 15.2 3.2 5.8 2 12.8-2.6 17.4-4.6 4.6-11.6 5.8-17.4 2.6C60.4 94.4 55 92 48 92s-12.4-2.4-15.2-3c-5.8 3.2-12.8 2-17.4-2.6-4.6-4.6-5.8-11.6-2.6-17.4C7.4 66.2 4 60.8 4 53.8c0-7 3.4-12.4 8.8-15.2-3.2-5.8-2-12.8 2.6-17.4C20 16.6 27 15.4 32.8 18.6 35.6 13.4 41 10 48 10Z" transform="translate(0 -3) scale(.96)" fill="currentColor"/>
@@ -82,12 +84,13 @@
 
     <footer class="dock">
       <div class="status-line"><span id="status" role="status">就绪</span><button id="stop" class="stop-btn" hidden>■ 停止生成</button></div>
+      <div id="uploads" class="uploads" aria-live="polite"></div>
       <form id="composer" class="composer">
         <label for="input" class="sr-only">输入消息</label>
         <textarea id="input" rows="2" placeholder="随心输入" maxlength="16000"></textarea>
         <div class="composer-bottom">
           <button type="button" class="round-btn" id="attach" title="上传文档（PDF / Word / Excel / 文本）"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5.5v13M5.5 12h13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
-          <input type="file" id="file-input" hidden>
+          <input type="file" id="file-input" multiple hidden>
           <button type="button" class="round-btn" id="open-memory" title="长期记忆"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.2 13.4c1.3-1.3 2-2.9 1.6-4.5-.5-2-2.6-3-4.4-2.2-1.8.8-2.5 3-1.7 4.9.9 2.1 3 3.5 4.5 1.8ZM12 12c2 3.6 6.5 3.6 8.4.4 1.6-2.7.3-6.3-2.7-7.2-2.6-.8-5.2.7-5.7 3.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 18.5c3.8 1.6 8.2 1.6 12 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
           <button type="button" class="round-btn tool-chip" id="open-config" title="运行时配置"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 4.2v2.3M12 17.5v2.3M4.2 12h2.3M17.5 12h2.3M6.5 6.5l1.6 1.6M15.9 15.9l1.6 1.6M17.5 6.5l-1.6 1.6M8.1 15.9l-1.6 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
           <span class="toolbar-spacer"></span>

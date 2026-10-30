@@ -175,8 +175,11 @@ class ConversationRepository:
         if not 1 <= limit <= 200 or (before is not None and before < 1):
             raise ValueError("Invalid message page bounds")
         await self.get_session(session_id)
-        query = "SELECT id, sequence, payload, run_id FROM messages WHERE session_id = %s"
+        query = ("SELECT id, sequence, payload, run_id, superseded_by FROM messages "
+                 "WHERE session_id = %s")
         params: tuple = (session_id,)
+        # Retired records stay in the transcript view on purpose: the point of
+        # keeping them is being able to unfold the answer that was replaced.
         if before is not None:
             query += " AND sequence < %s"
             params += (before,)
@@ -184,9 +187,27 @@ class ConversationRepository:
         async with self.database.connection() as connection:
             cursor = await connection.execute(query, (*params, limit + 1))
             rows = await cursor.fetchall()
-        items = [StoredMessage(row["id"], row["sequence"], message_from_dict(row["payload"]), row["run_id"])
+        items = [StoredMessage(row["id"], row["sequence"], message_from_dict(row["payload"]), row["run_id"],
+                              row["superseded_by"])
                  for row in reversed(rows[:limit])]
         return MessagePage(items, items[0].sequence if len(rows) > limit else None)
+
+    async def message_record(self, session_id: UUID, message_id: UUID) -> StoredMessage | None:
+        """One message of this session, or ``None`` when it is not there.
+
+        The caller needs the sequence to retire a suffix, so this is a single
+        row read rather than a page scan.
+        """
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT id, sequence, payload, run_id, superseded_by FROM messages "
+                "WHERE session_id = %s AND id = %s", (session_id, message_id),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return StoredMessage(row["id"], row["sequence"], message_from_dict(row["payload"]), row["run_id"],
+                             row["superseded_by"])
 
     async def task_state(self, session_id: UUID) -> TaskState:
         async with self.database.connection() as connection:
@@ -209,6 +230,39 @@ class ConversationRepository:
             return [{"model_call_id": str(row["id"]), "run_id": str(row["run_id"]),
                      "iteration": row["iteration"], "snapshot": row["context_snapshot"]}
                     for row in await cursor.fetchall()]
+
+    async def run_memory_references(self, session_id: UUID) -> list[dict]:
+        """Which memories each run of one session was given, with their text.
+
+        Read from the first model call of each run: its context snapshot is the
+        record of what the model actually saw. The transcript does not carry
+        this, because memory is deliberately not a message.
+        """
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT DISTINCT ON (m.run_id) m.run_id, "
+                "  m.context_snapshot->'memory_references' AS refs FROM model_calls m "
+                "JOIN runs r ON r.id = m.run_id WHERE r.session_id = %s "
+                "ORDER BY m.run_id, m.created_at, m.id", (session_id,),
+            )
+            rows = await cursor.fetchall()
+            wanted: dict[UUID, list[UUID]] = {}
+            for row in rows:
+                identities = [UUID(str(item["id"])) for item in (row["refs"] or [])
+                              if isinstance(item, dict) and item.get("id")]
+                if identities:
+                    wanted[row["run_id"]] = identities
+            if not wanted:
+                return []
+            cursor = await connection.execute(
+                "SELECT id, key, scope, revision, content, pinned, origin FROM memories "
+                "WHERE id = ANY(%s)", ([item for group in wanted.values() for item in group],),
+            )
+            memories = {row["id"]: {**row, "id": str(row["id"])} for row in await cursor.fetchall()}
+        # Snapshot order is recall order, which is relevance; keep it.
+        return [{"run_id": run_id,
+                 "memories": [memories[identity] for identity in identities if identity in memories]}
+                for run_id, identities in wanted.items()]
 
     async def update_task_state(self, session_id: UUID, state: TaskState, expected_revision: int) -> TaskState:
         payload = asdict(state)
@@ -255,17 +309,21 @@ class ConversationRepository:
                    "(jsonb_set(m.payload, '{content}', jsonb_path_query_array(m.payload, '$.content[*] ? (@.type == \"image\")')) - 'details') "
                    "ELSE m.payload END" if project_artifacts else "m.payload")
         query = (
-            "SELECT m.id, m.sequence, " + payload + " AS payload, m.run_id FROM messages m "
+            "SELECT m.id, m.sequence, " + payload + " AS payload, m.run_id, m.superseded_by FROM messages m "
             "LEFT JOIN runs r ON r.id = m.run_id WHERE m.session_id = %s "
         )
         params: tuple = (session_id,)
         if current_run is not None:
-            query += "AND (m.run_id IS NULL OR r.status = 'completed' OR r.id = %s) "
+            # A replay is a linear story: a record replaced by a later run is
+            # not part of it, even though the row is still readable above.
+            query += ("AND m.superseded_by IS NULL "
+                      "AND (m.run_id IS NULL OR r.status = 'completed' OR r.id = %s) ")
             params = (session_id, current_run)
         query += "ORDER BY m.sequence"
         async with self.database.connection() as connection:
             cursor = await connection.execute(query, params)
-            return [StoredMessage(row["id"], row["sequence"], message_from_dict(row["payload"]), row["run_id"])
+            return [StoredMessage(row["id"], row["sequence"], message_from_dict(row["payload"]), row["run_id"],
+                                  row["superseded_by"])
                     for row in await cursor.fetchall()]
 
 
@@ -458,7 +516,18 @@ class RunRepository:
         except Exception:
             stream.discard()
 
-    async def begin(self, session_id: UUID, message: UserMessage) -> UUID:
+    async def begin(self, session_id: UUID, message: UserMessage | None, *,
+                    supersede_from: int | None = None) -> UUID:
+        """Open a run and, in the same transaction, retire what it replaces.
+
+        ``message`` is ``None`` for a regeneration: the question is already in
+        the transcript, so writing a second user row would duplicate it.
+        ``supersede_from`` is the sequence of the first record this run replaces;
+        everything from there on stops being replayed, which is what makes the
+        old answer folded rather than deleted.
+        """
+        if message is None and supersede_from is None:
+            raise ValueError("A run needs either a new message or a superseded record")
         run_id, owner = uuid4(), uuid4()
         try:
             async with self.database.transaction() as connection:
@@ -475,10 +544,22 @@ class RunRepository:
                     "VALUES (%s, %s, 'running', now(), %s, clock_timestamp() + interval '30 seconds')",
                     (run_id, session_id, owner),
                 )
-                await self._message(connection, session_id, run_id, message)
+                if supersede_from is not None:
+                    # Before the new message is inserted: the replacement must
+                    # not retire itself.
+                    await connection.execute(
+                        "UPDATE messages SET superseded_by = %s "
+                        "WHERE session_id = %s AND sequence >= %s AND superseded_by IS NULL",
+                        (run_id, session_id, supersede_from),
+                    )
+                if message is not None:
+                    await self._message(connection, session_id, run_id, message)
                 # This transaction created the run row, so it already holds the
                 # lock the event insert needs.
-                await self._event(connection, run_id, "run_started", {"session_id": str(session_id)}, locked=True)
+                payload: JsonObject = {"session_id": str(session_id)}
+                if supersede_from is not None:
+                    payload["supersede_from"] = supersede_from
+                await self._event(connection, run_id, "run_started", payload, locked=True)
                 await connection.execute("UPDATE sessions SET updated_at = now() WHERE id = %s", (session_id,))
         except errors.UniqueViolation as error:
             if error.diag.constraint_name == "runs_one_active_per_session_idx":

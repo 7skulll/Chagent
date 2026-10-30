@@ -43,6 +43,9 @@ class StoredMessage:
     sequence: int
     message: Message
     run_id: UUID | None = None
+    #: The run that replaced this record. Non-null means it stays in the
+    #: transcript for reading but is no longer replayed into the model.
+    superseded_by: UUID | None = None
 
 
 @dataclass(slots=True)

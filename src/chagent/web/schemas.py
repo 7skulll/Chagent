@@ -59,18 +59,32 @@ class SessionEdit(InputModel):
 
 
 class RunCreate(InputModel):
-    text: Annotated[StrictStr, Field(min_length=1, max_length=16000)]
+    """One way of asking for a run: a new message, an edit, or a regeneration.
+
+    ``text`` is optional only because a regeneration has nothing new to say. The
+    two replacement fields name a message that already exists in the session;
+    the server retires everything from there on and re-asks from that point.
+    """
+
+    text: Annotated[StrictStr, Field(max_length=16000)] | None = None
     #: Accepted only to be refused when it disagrees with the session: a run
     #: inherits the mode, and switching it mid-conversation would make the tool
     #: declarations in the prompt differ from the face that executes.
     mode: Literal["work", "code"] | None = None
+    #: Regenerate the answer to the turn that produced this assistant message.
+    regenerate_from: UUID | None = None
+    #: Replace this user message with ``text`` and run from there.
+    edit_message_id: UUID | None = None
 
-    @field_validator("text")
-    @classmethod
-    def nonblank(cls, value):
-        if not value.strip():
+    @model_validator(mode="after")
+    def one_request(self):
+        if self.regenerate_from is not None and self.edit_message_id is not None:
+            raise ValueError("Regenerate and edit are different requests; send one")
+        if self.regenerate_from is None and not (self.text or "").strip():
             raise ValueError("Message must not be empty")
-        return value
+        if self.edit_message_id is not None and not (self.text or "").strip():
+            raise ValueError("An edited message must not be empty")
+        return self
 
 
 class MemoryCreate(InputModel):
@@ -284,6 +298,34 @@ class RunAccepted(BaseModel):
     session_id: UUID
 
 
+class MemorySourceView(BaseModel):
+    """One memory row a run was given, as the transcript shows it under 依据."""
+
+    id: str
+    key: str
+    scope: Literal["user", "workspace"]
+    revision: int
+    content: str
+    pinned: bool
+    origin: str
+
+
+class RunMemorySources(BaseModel):
+    run_id: UUID
+    memories: list[MemorySourceView]
+
+
+class SessionSources(BaseModel):
+    """What each run of a session cited outside its own text.
+
+    Web and document sources live in the tool results, which the history view
+    already carries; only memory is not a message, so the transcript loads this
+    once per session and stamps each answer with its own 依据.
+    """
+
+    runs: list[RunMemorySources]
+
+
 class Cancellation(BaseModel):
     accepted: bool
     status: str | None = None
@@ -293,6 +335,9 @@ class StoredMessageView(BaseModel):
     id: UUID
     sequence: int
     run_id: UUID | None
+    #: Non-null means a later run replaced this record; the transcript keeps it
+    #: for reading, the model no longer replays it.
+    superseded_by: UUID | None = None
     message: dict[str, Any]
 
 
