@@ -3,50 +3,60 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Chagent 是一个在本机运行、可检查上下文与长期记忆的对话式编码助手。">
   <title>Chagent · 本地对话</title>
   <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* Hallmark · checked: 2026-10-30 · genre: app screen · scope: app · v2.0.0 */
+    /* Critical rules: the page still focuses and never scrolls sideways when
+       the sheet above fails to load.
+       waive 26b: :active / :disabled and the other control states are declared
+       in style.css; this block is critical-path fallback only. */
+    html,body{overflow-x:clip}
+    :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  </style>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <!-- 最左图标栏 -->
-  <nav class="rail" aria-label="主导航">
-    <button class="rail-icon active" title="工作区" aria-label="工作区" id="open-context">
-      <svg viewBox="0 0 24 24"><circle cx="7" cy="6.5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="6.5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 20v-1.5A4.5 4.5 0 0 1 7.5 14h0m13 6v-1.5A4.5 4.5 0 0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M9.5 20v-1a2.5 2.5 0 0 1 5 0v1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-    </button>
-    <div class="rail-avatar" title="本地用户">GU</div>
-  </nav>
-
-  <!-- 会话侧栏 -->
+  <!-- 会话侧栏：唯一的一级导航。图标栏在 Z1 删到只剩一个工作区按钮（侧栏底部已有
+       同名控件），剩下的 60px 只是死掉的壳；头像则是一个不存在的用户。两者都已移除。 -->
   <aside class="sidebar">
     <div class="sidebar-head">
       <div class="brand"><strong>Chagent</strong></div>
     </div>
 
+    <label for="session-search" class="sr-only">搜索会话</label>
+    <input id="session-search" class="session-search" type="search" placeholder="搜索会话标题" maxlength="200" autocomplete="off">
+
     <button id="new-session" class="new-chat" title="开始一段新对话">
-      <svg viewBox="0 0 24 24"><path d="m4.5 16.4 10-10a2.1 2.1 0 0 1 3 3l-10 10-4 1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 16.4 10-10a2.1 2.1 0 0 1 3 3l-10 10-4 1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
       新聊天
     </button>
 
-    <div class="section-label">最近</div>
+    <div class="section-label" id="sessions-label">最近</div>
     <nav id="sessions" aria-label="会话列表"></nav>
     <button id="more-sessions" class="load-more" hidden>加载更多会话</button>
     <div class="sidebar-foot">
       <button id="workspace-button" class="workspace" title="切换工作区">
-        <svg viewBox="0 0 24 24"><path d="M3.5 7A2.5 2.5 0 0 1 6 4.5h3.2c.7 0 1.4.3 1.9.8l1.2 1.2H18A2.5 2.5 0 0 1 20.5 9v8A2.5 2.5 0 0 1 18 19.5H6A2.5 2.5 0 0 1 3.5 17Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span id="workspace"></span>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 7A2.5 2.5 0 0 1 6 4.5h3.2c.7 0 1.4.3 1.9.8l1.2 1.2H18A2.5 2.5 0 0 1 20.5 9v8A2.5 2.5 0 0 1 18 19.5H6A2.5 2.5 0 0 1 3.5 17Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        <span class="workspace-label"><span id="workspace-parent"></span><span id="workspace"></span></span>
       </button>
+      <button id="archived-toggle" class="archived-toggle" aria-pressed="false">已归档 <span id="archived-count">0</span></button>
     </div>
   </aside>
+
+  <div id="scrim" class="scrim" aria-hidden="true"></div>
 
   <!-- 中间聊天区 -->
   <main class="chat">
     <header class="tabbar">
       <div class="tabbar-left">
-        <button class="ghost-icon" id="toggle-sidebar" title="折叠/展开侧栏" aria-label="折叠或展开侧栏"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 4.5v15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+        <button class="ghost-icon" id="toggle-sidebar" title="折叠/展开侧栏" aria-label="折叠或展开侧栏"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 4.5v15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
       </div>
       <div class="tabbar-title" id="session-title">聊天</div>
       <div class="tabbar-right">
-        <button class="ghost-icon" id="toggle-tools" title="折叠/展开工具面板" aria-label="折叠或展开工具面板"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M14.5 4.5v15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+        <button class="usage-pill" id="usage-pill" title="本会话 token 用量" hidden>用量</button>
+        <button class="ghost-icon" id="toggle-tools" title="折叠/展开工具面板" aria-label="折叠或展开工具面板"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M14.5 4.5v15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
       </div>
     </header>
 
@@ -57,38 +67,36 @@
       <div id="messages"></div>
       <div id="live" aria-live="polite"></div>
       <div id="empty">
-        <svg class="empty-logo" viewBox="0 0 96 96" aria-hidden="true">
-          <path d="M48 10c7 0 12.4 3.4 15.2 8.6C69 15.4 76 16.6 80.6 21.2c4.6 4.6 5.8 11.6 2.6 17.4C88.6 41.4 92 46.8 92 53.8c0 7-3.4 12.4-8.8 15.2 3.2 5.8 2 12.8-2.6 17.4-4.6 4.6-11.6 5.8-17.4 2.6C60.4 94.4 55 92 48 92s-12.4-2.4-15.2-3c-5.8 3.2-12.8 2-17.4-2.6-4.6-4.6-5.8-11.6-2.6-17.4C7.4 66.2 4 60.8 4 53.8c0-7 3.4-12.4 8.8-15.2-3.2-5.8-2-12.8 2.6-17.4C20 16.6 27 15.4 32.8 18.6 35.6 13.4 41 10 48 10Z" transform="translate(0 -3) scale(.96)" fill="#c9c9ce"/>
-          <circle cx="38" cy="48" r="4.4" fill="#fff"/><circle cx="58" cy="48" r="4.4" fill="#fff"/>
-          <path d="M40 60c2.6 2.4 5.4 3.4 8 3.4s5.4-1 8-3.4" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>
+        <svg class="empty-mark" viewBox="0 0 96 96" aria-hidden="true" focusable="false">
+          <path d="M48 10c7 0 12.4 3.4 15.2 8.6C69 15.4 76 16.6 80.6 21.2c4.6 4.6 5.8 11.6 2.6 17.4C88.6 41.4 92 46.8 92 53.8c0 7-3.4 12.4-8.8 15.2 3.2 5.8 2 12.8-2.6 17.4-4.6 4.6-11.6 5.8-17.4 2.6C60.4 94.4 55 92 48 92s-12.4-2.4-15.2-3c-5.8 3.2-12.8 2-17.4-2.6-4.6-4.6-5.8-11.6-2.6-17.4C7.4 66.2 4 60.8 4 53.8c0-7 3.4-12.4 8.8-15.2-3.2-5.8-2-12.8 2.6-17.4C20 16.6 27 15.4 32.8 18.6 35.6 13.4 41 10 48 10Z" transform="translate(0 -3) scale(.96)" fill="currentColor"/>
+          <circle class="eye" cx="38" cy="48" r="4.4"/><circle class="eye" cx="58" cy="48" r="4.4"/>
+          <path class="mouth" d="M40 60c2.6 2.4 5.4 3.4 8 3.4s5.4-1 8-3.4" fill="none" stroke-width="3.4" stroke-linecap="round"/>
         </svg>
-        <h2>你想让我们在 <span class="dotted">Chagent</span> 中构建<br>什么？</h2>
+        <div class="empty-intro">
+          <h2>你想在 Chagent 中构建什么？</h2>
+          <p>工具只作用于当前工作区，每次调用都记录在这个会话里。</p>
+        </div>
+        <div class="starters" id="starters" aria-label="起手式"></div>
       </div>
     </section>
 
     <footer class="dock">
       <div class="status-line"><span id="status" role="status">就绪</span><button id="stop" class="stop-btn" hidden>■ 停止生成</button></div>
       <form id="composer" class="composer">
-        <div class="composer-toolbar">
-          <span class="toolbar-spacer"></span>
-          <button type="button" class="tool-chip" id="open-config" title="运行时配置">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 4.2v2.3M12 17.5v2.3M4.2 12h2.3M17.5 12h2.3M6.5 6.5l1.6 1.6M15.9 15.9l1.6 1.6M17.5 6.5l-1.6 1.6M8.1 15.9l-1.6 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          </button>
-        </div>
         <label for="input" class="sr-only">输入消息</label>
         <textarea id="input" rows="2" placeholder="随心输入" maxlength="16000"></textarea>
         <div class="composer-bottom">
-          <button type="button" class="round-btn" id="attach" title="上传文档（PDF / Word / Excel / 文本）"><svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+          <button type="button" class="round-btn" id="attach" title="上传文档（PDF / Word / Excel / 文本）"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5.5v13M5.5 12h13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           <input type="file" id="file-input" hidden>
-          <button type="button" class="round-btn" id="open-memory" title="长期记忆"><svg viewBox="0 0 24 24"><path d="M8.2 13.4c1.3-1.3 2-2.9 1.6-4.5-.5-2-2.6-3-4.4-2.2-1.8.8-2.5 3-1.7 4.9.9 2.1 3 3.5 4.5 1.8ZM12 12c2 3.6 6.5 3.6 8.4.4 1.6-2.7.3-6.3-2.7-7.2-2.6-.8-5.2.7-5.7 3.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 18.5c3.8 1.6 8.2 1.6 12 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+          <button type="button" class="round-btn" id="open-memory" title="长期记忆"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.2 13.4c1.3-1.3 2-2.9 1.6-4.5-.5-2-2.6-3-4.4-2.2-1.8.8-2.5 3-1.7 4.9.9 2.1 3 3.5 4.5 1.8ZM12 12c2 3.6 6.5 3.6 8.4.4 1.6-2.7.3-6.3-2.7-7.2-2.6-.8-5.2.7-5.7 3.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 18.5c3.8 1.6 8.2 1.6 12 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+          <button type="button" class="round-btn tool-chip" id="open-config" title="运行时配置"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 4.2v2.3M12 17.5v2.3M4.2 12h2.3M17.5 12h2.3M6.5 6.5l1.6 1.6M15.9 15.9l1.6 1.6M17.5 6.5l-1.6 1.6M8.1 15.9l-1.6 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
           <span class="toolbar-spacer"></span>
           <span id="model" class="model-pill" title="当前模型"></span>
           <button id="send" type="submit" class="send-btn" title="发送" aria-label="发送">
-            <svg viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
       </form>
-      <div class="dock-hint">本地工作区 · 工具操作会记录在会话中</div>
     </footer>
   </main>
 
@@ -133,6 +141,15 @@
     <div class="memory-heading"><div><h2 id="config-heading">运行时配置</h2><p>来自环境变量与启动参数，网页内只读。</p></div><button id="close-config" class="quiet" aria-label="关闭配置">关闭 ×</button></div>
     <div id="config-notice" role="status"></div>
     <dl id="config-list"></dl>
+    <h3 class="dialog-section">本机用量（近 7 天）</h3>
+    <div id="config-usage"></div>
+  </dialog>
+
+  <dialog id="usage-dialog" aria-labelledby="usage-heading">
+    <div class="memory-heading"><div><h2 id="usage-heading">本会话 token 用量</h2><p>供应商回报的计数，按运行汇总；不含金额。</p></div><button id="close-usage" class="quiet" aria-label="关闭用量">关闭 ×</button></div>
+    <div id="usage-notice" role="status"></div>
+    <div id="usage-summary"></div>
+    <div id="usage-table"></div>
   </dialog>
 </body>
 </html>

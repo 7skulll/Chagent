@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import httpx
 from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
+from psycopg.types.json import Jsonb
 import uvicorn
 
 from chagent.bootstrap import create_demo_runner
@@ -245,7 +246,15 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
                     if line.startswith("id: "):
                         cursor = int(line[4:])
                     if line.startswith("data: ") and json.loads(line[6:]).get("type") == "text_delta":
+                        self.assertTrue(self.runtime.has_viewer(UUID(run_id)))
                         break
+            # Closing the stream must remove the audience used by Z4 approvals;
+            # the server notices on its next disconnect check, not synchronously
+            # with the client's context manager exiting.
+            async with asyncio.timeout(3):
+                while self.runtime.has_viewer(UUID(run_id)):
+                    await asyncio.sleep(.01)
+            self.assertFalse(self.runtime.has_viewer(UUID(run_id)))
             self.assertEqual((await self.runner.runs.get(UUID(run_id)))["status"], "running")
             conflict = await client.post(f"/api/sessions/{identity}/runs", json={"text": "重复"})
             self.assertEqual(conflict.status_code, 409)
@@ -413,6 +422,175 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         listed = (await self.client.get("/api/workspaces")).json()["items"]
         self.assertIn(str(target), [row["path"] for row in listed])
         self.assertGreaterEqual(next(row["sessions"] for row in listed if row["path"] == str(target)), 1)
+
+    async def test_session_rename_archive_and_restore_round_trip(self):
+        identity = await self.create_session("原标题")
+        renamed = await self.client.patch(f"/api/sessions/{identity}", json={"title": "  新标题  "})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["title"], "新标题")
+        listing = (await self.client.get("/api/sessions")).json()
+        self.assertEqual(listing["items"][0]["title"], "新标题")
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).json()["title"], "新标题")
+
+        # An empty title means "no title", not "keep the old one".
+        cleared = await self.client.patch(f"/api/sessions/{identity}", json={"title": ""})
+        self.assertEqual(cleared.json()["title"], "")
+
+        archived = await self.client.patch(f"/api/sessions/{identity}", json={"archived": True})
+        self.assertEqual(archived.status_code, 200, archived.text)
+        self.assertIsNotNone(archived.json()["archived_at"])
+        self.assertEqual((await self.client.get("/api/sessions")).json()["items"], [])
+        only = (await self.client.get("/api/sessions?archived=only")).json()
+        self.assertEqual([item["id"] for item in only["items"]], [identity])
+        both = (await self.client.get("/api/sessions?archived=include")).json()
+        self.assertEqual([item["id"] for item in both["items"]], [identity])
+        # The archived page keeps its own count out of the way.
+        self.assertIsNone(only["archived_count"])
+        self.assertEqual(both["archived_count"], 1)
+
+        restored = await self.client.patch(f"/api/sessions/{identity}", json={"archived": False})
+        self.assertIsNone(restored.json()["archived_at"])
+        self.assertEqual([item["id"] for item in (await self.client.get("/api/sessions")).json()["items"]], [identity])
+
+    async def test_archived_session_is_readable_but_refuses_new_runs(self):
+        identity = await self.create_session("归档后只读")
+        response = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "先跑一次"})
+        await self.wait_run(response.json()["run_id"])
+        await self.client.patch(f"/api/sessions/{identity}", json={"archived": True})
+
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}/messages")).status_code, 200)
+        refused = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "还能跑吗"})
+        self.assertEqual(refused.status_code, 409, refused.text)
+        runs = await self.runner.runs.active(roots=[str(self.workspace)])
+        self.assertEqual(runs, [])
+        detail = (await self.client.get(f"/api/sessions/{identity}")).json()
+        self.assertIsNotNone(detail["archived_at"])
+
+    async def test_session_search_matches_titles_only(self):
+        first = await self.create_session("项目 Alpha 计划")
+        second = await self.create_session("无关会话")
+        response = await self.client.post(f"/api/sessions/{second}/runs", json={"text": "Alpha 出现在正文里"})
+        await self.wait_run(response.json()["run_id"])
+
+        found = (await self.client.get("/api/sessions", params={"q": "alpha"})).json()
+        self.assertEqual([item["id"] for item in found["items"]], [first])
+        # A wildcard typed by the user is a character, not a request for everything.
+        self.assertEqual((await self.client.get("/api/sessions", params={"q": "%"})).json()["items"], [])
+        self.assertEqual(isinstance(found["archived_count"], int), True)
+
+    async def test_a_search_that_matches_everything_still_paginates(self):
+        identities = [await self.create_session(f"批量会话 {index}") for index in range(3)]
+        page = (await self.client.get("/api/sessions", params={"q": "批量会话", "limit": 2})).json()
+        self.assertEqual(len(page["items"]), 2)
+        rest = (await self.client.get("/api/sessions",
+                                      params={"q": "批量会话", "limit": 2, "before": page["next_cursor"]})).json()
+        self.assertEqual([item["id"] for item in rest["items"]], [identities[0]])
+
+    async def test_session_edit_validation(self):
+        identity = await self.create_session()
+        endpoint = f"/api/sessions/{identity}"
+        for body in ({}, {"title": None}, {"archived": None}, {"title": "x" * 201},
+                     {"title": "ok", "unknown": 1}, {"archived": "true"}):
+            with self.subTest(body=body):
+                self.assertEqual((await self.client.patch(endpoint, json=body)).status_code, 400)
+        self.assertEqual((await self.client.patch(f"/api/sessions/{uuid4()}", json={"title": "x"})).status_code, 404)
+        # The same 200-character ceiling the command line enforces.
+        self.assertEqual((await self.client.patch(endpoint, json={"title": "x" * 200})).status_code, 200)
+
+    async def test_session_usage_sums_what_the_provider_reported(self):
+        identity = await self.create_session("用量")
+        run_id = await self.runner.runs.begin(UUID(identity), UserMessage("统计", 0))
+        await self.write_model_calls(run_id, [
+            {"input": 1000, "output": 200, "cache_read": 3000, "cache_write": 400, "total_tokens": 4600},
+            {"input": 500, "output": 100, "cache_read": 1500, "cache_write": 0, "total_tokens": 3600},
+        ])
+        await self.runner.runs.finish(run_id, "completed")
+        usage = (await self.client.get(f"/api/sessions/{identity}/usage")).json()
+        self.assertEqual(usage["totals"]["input"], 1500)
+        self.assertEqual(usage["totals"]["output"], 300)
+        self.assertEqual(usage["totals"]["cache_read"], 4500)
+        self.assertEqual(usage["totals"]["cache_write"], 400)
+        self.assertEqual(usage["totals"]["total_tokens"], 8200)
+        self.assertEqual(usage["totals"]["model_calls"], 2)
+        self.assertEqual(usage["totals"]["runs"], 1)
+        self.assertAlmostEqual(usage["totals"]["cache_hit_rate"], 4500 / 6000)
+        self.assertEqual(usage["items"][0]["run_id"], str(run_id))
+
+    async def test_a_call_without_usage_counts_but_contributes_no_tokens(self):
+        identity = await self.create_session("缺用量")
+        run_id = await self.runner.runs.begin(UUID(identity), UserMessage("统计", 0))
+        await self.write_model_calls(run_id, [
+            {"input": 100, "output": 20, "cache_read": 0, "cache_write": 0, "total_tokens": 120},
+            None,
+        ])
+        await self.runner.runs.finish(run_id, "completed")
+        usage = (await self.client.get(f"/api/sessions/{identity}/usage")).json()
+        self.assertEqual(usage["totals"]["model_calls"], 2)
+        self.assertEqual(usage["totals"]["total_tokens"], 120)
+        # There were uncached input tokens, so a zero hit rate is a measurement.
+        self.assertEqual(usage["totals"]["cache_hit_rate"], 0.0)
+
+    async def test_daily_usage_covers_the_opened_workspace_only(self):
+        identity = await self.create_session("今日用量")
+        run_id = await self.runner.runs.begin(UUID(identity), UserMessage("统计", 0))
+        await self.write_model_calls(run_id, [
+            {"input": 10, "output": 5, "cache_read": 0, "cache_write": 0, "total_tokens": 15}])
+        await self.runner.runs.finish(run_id, "completed")
+        daily = (await self.client.get("/api/usage?days=7")).json()
+        self.assertEqual(daily["days"], 7)
+        self.assertEqual(daily["totals"]["total_tokens"], 15)
+        self.assertEqual(daily["totals"]["runs"], 1)
+        self.assertEqual(len(daily["items"]), 1)
+        self.assertEqual(daily["items"][0]["model_calls"], 1)
+        empty = (await self.client.get("/api/usage?days=0")).status_code
+        self.assertEqual(empty, 400)
+
+    async def test_active_runs_report_the_tool_each_one_is_running(self):
+        identity = await self.create_session("后台运行")
+        run_id = await self.runner.runs.begin(UUID(identity), UserMessage("长命令", 0))
+        model_call = uuid4()
+        async with self.database.transaction() as connection:
+            await connection.execute(
+                "INSERT INTO model_calls (id, run_id, iteration, request, context_snapshot) VALUES (%s, %s, 0, %s, %s)",
+                (model_call, run_id, Jsonb({}), Jsonb({})))
+        from chagent.domain.messages import ToolCall
+        record = (await self.runner.runs.queue_tool_calls(
+            run_id, model_call, [ToolCall("c1", "exec_command", {"cmd": "sleep 45"})]))[0]
+        async with self.database.transaction() as connection:
+            await connection.execute(
+                "UPDATE tool_calls SET status = 'running', created_at = now() WHERE id = %s", (record,))
+
+        page = (await self.client.get("/api/runs?active=true")).json()
+        self.assertEqual([item["run_id"] for item in page["items"]], [str(run_id)])
+        self.assertEqual(page["items"][0]["session_id"], identity)
+        self.assertEqual(page["items"][0]["current_tool"], "exec_command")
+        self.assertEqual((await self.client.get("/api/runs?active=false")).status_code, 400)
+
+        await self.runner.runs.finish(run_id, "cancelled")
+        self.assertEqual((await self.client.get("/api/runs?active=true")).json()["items"], [])
+
+    async def test_active_runs_stay_inside_the_opened_workspace(self):
+        other = await self.runner.conversations.create_session(self.workspace.parent)
+        run_id = await self.runner.runs.begin(other, UserMessage("别处的运行", 0))
+        mine = await self.create_session("这里的运行")
+        my_run = await self.runner.runs.begin(UUID(mine), UserMessage("这里的运行", 0))
+        page = (await self.client.get("/api/runs?active=true")).json()
+        self.assertEqual([item["run_id"] for item in page["items"]], [str(my_run)])
+        # A row inserted directly has no in-process owner. Cancellation refuses
+        # it honestly instead of pretending, and never touches the other run.
+        cancelled = await self.client.post(f"/api/runs/{my_run}/cancel")
+        self.assertEqual(cancelled.status_code, 409, cancelled.text)
+        self.assertEqual((await self.runner.runs.get(run_id))["status"], "running")
+        await self.runner.runs.finish(run_id, "cancelled")
+
+    async def write_model_calls(self, run_id, usages):
+        async with self.database.transaction() as connection:
+            for index, usage in enumerate(usages):
+                response = {"usage": usage} if usage is not None else {"content": []}
+                await connection.execute(
+                    "INSERT INTO model_calls (id, run_id, iteration, request, context_snapshot, response, status) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, 'completed')",
+                    (uuid4(), run_id, index, Jsonb({}), Jsonb({}), Jsonb(response)))
 
     async def test_config_reports_the_resolved_switches(self):
         value = (await self.client.get("/api/config")).json()

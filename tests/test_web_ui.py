@@ -31,8 +31,11 @@ RUNTIME_IDS = {"approval"}
 REMOVED_TOKENS = (
     "rail-top", "rail-bottom", "head-actions", "side-row", "fake-tab", "tab-x",
     "browser-bar", "url-pill", "tool-card", "tool-ico", "tool-extra",
+    # Z6: the rail itself. One workspace button is not a navigation column, and
+    # #workspace-button in the sidebar foot already does the same job.
+    "rail", "rail-icon", "rail-avatar",
 )
-REMOVED_IDS = ("brand",)
+REMOVED_IDS = ("brand", "open-context")
 
 
 class _Markup(HTMLParser):
@@ -81,9 +84,10 @@ class WebSurfaceTests(unittest.TestCase):
         self.assertEqual(orphans, [], f"这些按钮没有任何行为：{orphans}")
 
     def test_button_surface_is_pinned(self):
-        # 44 buttons minus the 24 Z1 deleted. Raising this number means adding a
-        # control; it must come with a handler or the test above fails.
-        self.assertEqual(len(self.page.buttons), 20)
+        # 44 buttons minus the 24 Z1 deleted, plus Z2/Z3's session search toggle
+        # and usage pill, and the usage dialog's close button; Z6 removed the
+        # rail's workspace button.
+        self.assertEqual(len(self.page.buttons), 22)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)
@@ -102,10 +106,19 @@ class WebSurfaceTests(unittest.TestCase):
         chips = [attrs for attrs, _ in self.page.buttons if "tool-chip" in attrs.get("class", "").split()]
         self.assertEqual([attrs.get("id") for attrs in chips], ["open-config"])
 
-    def test_rail_keeps_only_the_workspace_button(self):
-        rail = MARKUP.split('<nav class="rail"', 1)[1].split("</nav>", 1)[0]
-        self.assertEqual(rail.count("<button"), 1)
-        self.assertIn('id="open-context"', rail)
+    def test_the_shell_is_one_column(self):
+        # A single 60px icon strip with one button duplicated a control that is
+        # already labelled in the sidebar foot; it also carried an avatar for a
+        # user this single-user app does not have.
+        self.assertNotIn('class="rail"', MARKUP)
+        self.assertNotIn(".rail", STYLES)
+
+    def test_empty_state_offers_only_real_openers(self):
+        # Starters are built in app.js, so the markup holds the container only:
+        # every opener must stay a task the base tool surface can finish.
+        starters = re.search(r"const STARTERS = \[(.*?)\];", SCRIPT, re.S)
+        self.assertIsNotNone(starters)
+        self.assertNotRegex(starters.group(1), r"测试|命令|联网|搜索网页")
 
     def test_no_placeholder_controls_are_left(self):
         self.assertNotIn("未开放", MARKUP)

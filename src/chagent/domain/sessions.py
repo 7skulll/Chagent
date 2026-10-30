@@ -23,6 +23,10 @@ class Session:
 class SessionPage:
     items: list[Session]
     next_cursor: UUID | None = None
+    #: How many sessions of this workspace are archived, so the sidebar can
+    #: label its toggle. ``None`` means the question did not apply (the page
+    #: already shows only archived sessions).
+    archived_count: int | None = None
 
 
 @dataclass(slots=True)

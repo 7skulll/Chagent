@@ -73,31 +73,63 @@ class ConversationRepository:
 
     async def list_sessions(
         self, *, workspace: Path | None = None, include_archived: bool = False,
+        archived: str | None = None, query: str | None = None,
         limit: int = 50, before: UUID | None = None,
     ) -> SessionPage:
+        """One page of sessions, optionally searching titles.
+
+        ``archived`` is the browser's three-way switch; ``include_archived``
+        remains the older two-way switch the command line uses. The archived
+        count is returned alongside so the sidebar can label its own toggle
+        without a second request.
+        """
         if not 1 <= limit <= 100:
             raise ValueError("Session page limit must be between 1 and 100")
+        mode = archived or ("include" if include_archived else "hide")
+        if mode not in {"hide", "include", "only"}:
+            raise ValueError("archived must be hide, include or only")
         clauses = []
         params = []
+        count_where = ["s.archived_at IS NOT NULL"]
+        count_params = []
         if workspace is not None:
             clauses.append("w.root_path = %s")
             params.append(str(workspace.expanduser().resolve()))
-        if not include_archived:
+            count_where.append("w.root_path = %s")
+            count_params.append(str(workspace.expanduser().resolve()))
+        if mode == "hide":
             clauses.append("s.archived_at IS NULL")
+        elif mode == "only":
+            clauses.append("s.archived_at IS NOT NULL")
+        text = (query or "").strip()
+        if text:
+            # ILIKE is case-insensitive; the escapes keep a typed % or _ literal
+            # instead of letting it widen the match.
+            pattern = "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            clauses.append("s.title ILIKE %s")
+            params.append(pattern)
+            count_where.append("s.title ILIKE %s")
+            count_params.append(pattern)
         if before is not None:
             anchor = await self.get_session(before)
             clauses.append("(s.created_at, s.id) < (%s, %s)")
             params.extend((anchor.created_at, anchor.id))
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        query = (
+        query_text = (
             "SELECT s.*, w.root_path FROM sessions s JOIN workspaces w ON w.id = s.workspace_id"
             + where + " ORDER BY s.created_at DESC, s.id DESC LIMIT %s"
         )
         async with self.database.connection() as connection:
-            cursor = await connection.execute(query, (*params, limit + 1))
+            cursor = await connection.execute(query_text, (*params, limit + 1))
             rows = await cursor.fetchall()
+            archived_count = None
+            if mode != "only":
+                cursor = await connection.execute(
+                    "SELECT count(*) AS n FROM sessions s JOIN workspaces w ON w.id = s.workspace_id "
+                    "WHERE " + " AND ".join(count_where), tuple(count_params))
+                archived_count = (await cursor.fetchone())["n"]
         items = [self._session(row) for row in rows[:limit]]
-        return SessionPage(items, items[-1].id if len(rows) > limit else None)
+        return SessionPage(items, items[-1].id if len(rows) > limit else None, archived_count)
 
     async def workspaces(self) -> list[dict]:
         """Known workspaces with their live session counts, newest activity first.
@@ -665,6 +697,30 @@ class RunRepository:
                 (session_id,),
             )
             return await cursor.fetchone()
+
+    async def active(self, *, roots: list[str] | None = None) -> list[DictRow]:
+        """Runs that have not converged yet, with the tool each is running.
+
+        ``roots`` limits the answer to workspaces this process has opened, the
+        same boundary every other endpoint applies; ``None`` means no boundary
+        and exists only for maintenance callers.
+        """
+        sql = (
+            "SELECT r.id, r.session_id, r.status, r.started_at, "
+            "  (SELECT t.name FROM tool_calls t WHERE t.run_id = r.id AND t.status = 'running' "
+            "   ORDER BY t.created_at DESC, t.id LIMIT 1) AS current_tool "
+            "FROM runs r JOIN sessions s ON s.id = r.session_id "
+            "JOIN workspaces w ON w.id = s.workspace_id "
+            "WHERE r.status IN ('queued', 'running')"
+        )
+        params: tuple = ()
+        if roots is not None:
+            sql += " AND w.root_path = ANY(%s)"
+            params = (roots,)
+        sql += " ORDER BY r.started_at, r.id"
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(sql, params)
+            return await cursor.fetchall()
 
     async def recovery_facts(self, session_id: UUID, *, current_run: UUID,
                              limit: int = 64) -> list[RecoveryFact]:

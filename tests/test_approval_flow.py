@@ -182,6 +182,96 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("approval_requested", kinds)
         self.assertEqual(await self.approvals(runner).pending(result.run_id), [])
 
+    async def test_a_question_with_no_page_waiting_is_denied_quickly(self):
+        """Nobody is looking: the command must not wait out the full TTL."""
+        marker = self.workspace / "unwatched.txt"
+        runner = self.runner(arguments={"cmd": f"printf x > {marker.name}"})
+        broker = runner.scheduler.approvals
+        broker.audience = lambda run_id: False
+        broker.grace = 0.3
+        session = await runner.conversations.create_session(self.workspace)
+        started = asyncio.get_running_loop().time()
+        result = await asyncio.wait_for(runner.run(session, "没人看着"), timeout=15)
+        self.assertLess(asyncio.get_running_loop().time() - started, 12)
+        self.assertEqual(result.end_reason, "model_stop")
+        answer = result.message.content[0].text
+        self.assertIn("No browser page was waiting", answer)
+        self.assertIn("Do not retry", answer)
+        self.assertFalse(marker.exists())
+        row = await self.tool_row(result.run_id)
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["result"]["details"]["approval"], "unwatched")
+        self.assertFalse(row["result"]["details"]["execution_started"])
+        self.assertEqual(await self.approvals(runner).pending(result.run_id), [])
+
+    async def test_a_watching_page_keeps_the_absolute_deadline(self):
+        """Someone is looking, so the question waits for them, not for a timer."""
+        runner = self.runner(arguments={"cmd": "printf watched"})
+        broker = runner.scheduler.approvals
+        broker.audience = lambda run_id: True
+        broker.grace = 0.3
+        broker.timeout = 1.0
+        session = await runner.conversations.create_session(self.workspace)
+        result = await asyncio.wait_for(runner.run(session, "有人看着"), timeout=15)
+        row = await self.tool_row(result.run_id)
+        # Expired by its own deadline, not denied for lack of an audience.
+        self.assertEqual(row["result"]["details"]["approval"], "expired")
+
+    async def test_zero_grace_restores_the_absolute_deadline(self):
+        """The rollback switch ignores audience loss and waits for the TTL."""
+        runner = self.runner(arguments={"cmd": "printf disabled"})
+        broker = runner.scheduler.approvals
+        broker.audience = lambda run_id: False
+        broker.grace = 0
+        broker.timeout = 0.5
+        session = await runner.conversations.create_session(self.workspace)
+        result = await asyncio.wait_for(runner.run(session, "关闭在场宽限"), timeout=15)
+        row = await self.tool_row(result.run_id)
+        self.assertEqual(row["result"]["details"]["approval"], "expired")
+
+    async def test_a_reconnecting_page_clears_the_unwatched_clock(self):
+        """A refresh drops the stream for a moment; that must not kill the run."""
+        marker = self.workspace / "reconnected.txt"
+        runner = self.runner(arguments={"cmd": f"printf y > {marker.name}"})
+        broker = runner.scheduler.approvals
+        calls = {"n": 0}
+
+        def audience(run_id):
+            calls["n"] += 1
+            # Two absent polls, two present polls, then absent again. Each
+            # absence is shorter than the grace; only a reset on reconnect lets
+            # the second one survive too.
+            return ((calls["n"] - 1) // 2) % 2 == 1
+
+        broker.audience = audience
+        broker.grace = 0.4
+        session = await runner.conversations.create_session(self.workspace)
+        identities = []
+        task = asyncio.create_task(runner.run(session, "刷新一下", on_started=identities.append))
+        request = await self.wait_pending(runner, await self.wait_run_id(identities))
+        await asyncio.sleep(1.2)          # three grace windows after the reconnect
+        self.assertFalse(task.done())
+        self.assertEqual([item.id for item in await self.approvals(runner).pending(request.run_id)],
+                         [request.id])
+        await self.approvals(runner).decide(request.id, approve=True)
+        result = await asyncio.wait_for(task, timeout=20)
+        self.assertTrue(marker.exists())
+        self.assertEqual(result.end_reason, "model_stop")
+
+    async def test_cli_questions_ignore_the_audience(self):
+        """``remote=False`` has no page to lose, so the grace never applies."""
+        marker = self.workspace / "cli.txt"
+        runner = self.runner(arguments={"cmd": f"printf z > {marker.name}"}, remote=False,
+                             decider=no_approver)
+        broker = runner.scheduler.approvals
+        broker.audience = lambda run_id: False
+        broker.grace = 0.1
+        session = await runner.conversations.create_session(self.workspace)
+        result = await runner.run(session, "命令行")
+        row = await self.tool_row(result.run_id)
+        # Denied because the terminal cannot answer, not because nobody watched.
+        self.assertEqual(row["result"]["details"]["approval"], "denied")
+
     async def test_stale_grant_is_not_executed(self):
         """An approval is bound to the arguments it was issued for."""
         marker = self.workspace / "stale.txt"

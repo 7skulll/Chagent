@@ -1,6 +1,6 @@
 """HTTP contracts; domain/storage classes remain independent of FastAPI."""
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -29,6 +29,30 @@ class SessionCreate(InputModel):
     title: Annotated[StrictStr, Field(max_length=200)] = "新会话"
     # Absent means the workspace the server was started in.
     workspace: Annotated[StrictStr, Field(min_length=1, max_length=4096)] | None = None
+
+
+class SessionEdit(InputModel):
+    """Session metadata; both fields are optional but at least one is required.
+
+    ``title`` empty means "no title", not "leave it alone": an explicit null is
+    rejected so a missing field and a cleared one stay different requests.
+    """
+
+    title: Annotated[StrictStr, Field(max_length=200)] | None = None
+    archived: StrictBool | None = None
+
+    @field_validator("title", "archived", mode="before")
+    @classmethod
+    def not_null(cls, value):
+        if value is None:
+            raise ValueError("An explicit null value is not allowed")
+        return value
+
+    @model_validator(mode="after")
+    def nonempty(self):
+        if not self.model_fields_set.intersection({"title", "archived"}):
+            raise ValueError("Provide title or archived to edit")
+        return self
 
 
 class RunCreate(InputModel):
@@ -131,6 +155,7 @@ class ConfigView(BaseModel):
     sandbox_network: bool
     approval: str
     approval_timeout: float
+    approval_grace: float
     host_commands: bool
     web_access: str
     web_key: Literal["set", "missing"]
@@ -147,6 +172,65 @@ class ConfigView(BaseModel):
 class SessionPage(BaseModel):
     items: list[Session]
     next_cursor: UUID | None = None
+    #: Archived sessions of the same workspace, for the sidebar's toggle label.
+    archived_count: int | None = None
+
+
+class UsageTotals(BaseModel):
+    runs: int
+    model_calls: int
+    input: int
+    output: int
+    cache_read: int
+    cache_write: int
+    total_tokens: int
+    #: ``cache_read / (input + cache_read)``; null when the denominator is 0, so
+    #: the page can print "—" instead of a hollow 0%.
+    cache_hit_rate: float | None
+
+
+class UsageRow(BaseModel):
+    run_id: UUID
+    started_at: datetime | None
+    model_calls: int
+    input: int
+    output: int
+    cache_read: int
+    cache_write: int
+    total_tokens: int
+
+
+class UsageView(BaseModel):
+    items: list[UsageRow]
+    totals: UsageTotals
+
+
+class DailyUsageRow(BaseModel):
+    day: date
+    model_calls: int
+    input: int
+    output: int
+    cache_read: int
+    cache_write: int
+    total_tokens: int
+
+
+class DailyUsageView(BaseModel):
+    days: int
+    items: list[DailyUsageRow]
+    totals: UsageTotals
+
+
+class ActiveRunView(BaseModel):
+    run_id: UUID
+    session_id: UUID
+    started_at: datetime | None
+    #: The tool this run is executing right now, if any.
+    current_tool: str | None
+
+
+class ActiveRunPage(BaseModel):
+    items: list[ActiveRunView]
 
 
 class RunView(BaseModel):

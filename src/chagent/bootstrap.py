@@ -40,6 +40,7 @@ def create_demo_runner(
     sandbox: Sandbox | None = None,
     approval_policy: ApprovalPolicy | None = None,
     approval_timeout: float = 300.0,
+    approval_grace: float = 10.0,
     approval_decider=None,
     approval_remote: bool = True,
     process_wall_timeout: float = 600.0,
@@ -55,6 +56,7 @@ def create_demo_runner(
         memory_worker_concurrency=memory_worker_concurrency,
         sandbox=sandbox,
         approval_policy=approval_policy, approval_timeout=approval_timeout,
+        approval_grace=approval_grace,
         approval_decider=approval_decider, approval_remote=approval_remote,
         process_wall_timeout=process_wall_timeout, max_processes=max_processes,
         web=web,
@@ -76,6 +78,7 @@ def create_runner(
     sandbox: Sandbox | None = None,
     approval_policy: ApprovalPolicy | None = None,
     approval_timeout: float = 300.0,
+    approval_grace: float = 10.0,
     approval_decider=None,
     approval_remote: bool = True,
     process_wall_timeout: float = 600.0,
@@ -109,7 +112,7 @@ def create_runner(
     runner.scheduler.policy = approval_policy or ApprovalPolicy()
     runner.scheduler.approvals = ApprovalBroker(
         ApprovalRepository(database, runs), runs, timeout=approval_timeout,
-        decider=approval_decider, remote=approval_remote,
+        decider=approval_decider, remote=approval_remote, grace=approval_grace,
     )
     runner.scheduler.sandbox_mode = sandbox.settings.mode if sandbox is not None else "off"
     # One worker per runner: it reads model/client at call time, so a replaced

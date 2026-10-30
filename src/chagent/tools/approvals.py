@@ -15,6 +15,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from time import monotonic
 from uuid import UUID
 
 from chagent.storage.approvals import ApprovalRepository, ApprovalRequest
@@ -32,6 +33,12 @@ EXPIRED = ("No one approved this command before the deadline, so it was not exec
            "will ask again; do not silently change the command.")
 CANCELLED = "The run ended while this command was waiting for approval; it was not executed."
 UNAVAILABLE = "No approver is available for this command, so it was not executed."
+# Nobody is looking. This is deliberately not worded as a refusal of the
+# command: the command was never judged, so retrying it with new flags is the
+# wrong lesson. It is also not "expired", because the deadline did not pass.
+UNWATCHED = ("No browser page was waiting for this command, so it was not executed. This is not a "
+             "decision about the command itself: the user was not there to answer. Do not retry it "
+             "with different arguments; ask the user whether they still want it run.")
 STALE = ("The approval was no longer valid when the command was about to start (expired, already "
          "used, or the arguments changed); it was not executed.")
 
@@ -49,12 +56,18 @@ class ApprovalOutcome:
 class ApprovalBroker:
     def __init__(self, approvals: ApprovalRepository, runs: RunRepository, *, timeout: float,
                  decider: ApprovalDecider | None = None, remote: bool = True,
-                 poll: float = POLL_SECONDS):
+                 poll: float = POLL_SECONDS, grace: float = 10.0,
+                 audience: Callable[[UUID], bool] | None = None):
         if timeout <= 0:
             raise ValueError("Approval timeout must be positive")
+        if grace < 0:
+            raise ValueError("Unwatched grace must not be negative")
         self.approvals, self.runs = approvals, runs
-        self.timeout, self.poll = timeout, poll
+        self.timeout, self.poll, self.grace = timeout, poll, grace
         self.decider, self.remote = decider, remote
+        #: True when someone is attached to this run right now. Only consulted
+        #: for remote questions: a terminal prompt has no page to close.
+        self.audience = audience
 
     async def request(self, *, run_id: UUID, tool_record_id: UUID, tool_name: str,
                       arguments: dict, cwd: str,
@@ -63,6 +76,7 @@ class ApprovalBroker:
             run_id=run_id, tool_record_id=tool_record_id, fingerprint=fingerprint(tool_name, arguments, cwd),
             tool_name=tool_name, cwd=cwd, subject=subject_of(tool_name, arguments), ttl=self.timeout)
         asked = False
+        unwatched_since: float | None = None
         # A human deciding is not the run spending its execution budget.
         if budget is not None:
             budget.pause()
@@ -89,6 +103,20 @@ class ApprovalBroker:
                         # must become expired before anyone can still approve it.
                         await self.approvals.expire_due(run_id=run_id)
                         continue
+                    if self.remote and self.audience is not None and self.grace > 0:
+                        # A page that reloads reconnects in a second or two, so
+                        # "nobody is watching" has to persist before it counts.
+                        if self.audience(run_id):
+                            unwatched_since = None
+                        elif unwatched_since is None:
+                            unwatched_since = monotonic()
+                        elif monotonic() - unwatched_since >= self.grace:
+                            # The decision is a conditional update: if someone
+                            # answered in the same instant, theirs wins and the
+                            # loop returns that answer instead.
+                            if await self.approvals.decide(current.id, approve=False, note="no viewer") == "conflict":
+                                continue
+                            return ApprovalOutcome(False, current.id, UNWATCHED, "unwatched")
                     if self.decider is not None and not asked:
                         asked = True
                         answer = await self.decider(current)

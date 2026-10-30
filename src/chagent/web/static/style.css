@@ -1,199 +1,497 @@
-:root{
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Helvetica Neue",sans-serif;
-  color:#1d1d1f;background:#fff;font-size:14px;font-synthesis:none;
-  --line:#e6e6e9;--line-soft:#efeff1;--sub:#86868b;--faint:#aeaeb2;--panel:#f7f7f8;--hover:#f0f0f2;
-  --accent:#3478f6;
-}
-*{box-sizing:border-box}
-[hidden]{display:none!important}
-body{margin:0;display:flex;height:100dvh;overflow:hidden}
-button,textarea,kbd{font:inherit}
-button{cursor:pointer;border:0;background:transparent;color:inherit;border-radius:8px;padding:0;transition:background .12s}
-button:disabled{cursor:default;opacity:.4}
-button:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-svg{display:block}
+/* Hallmark · checked: 2026-10-30 · genre: app screen (local agent console)
+ * floor: 0 FAIL · fixed: 11 · structural: 3 printed (states, URL state, signature)
+ * continued 2026-10-30 (pass 2): the 60px rail is gone (one button that duplicated the
+ *   sidebar's workspace control, plus an avatar for a user this app does not have); the
+ *   empty state now carries three openers the base tools can finish; assistant and tool
+ *   rows lose their repeated name labels and boxes for one hairline each; context facts
+ *   are label/value pairs; every disclosure shares one chevron; meta strings lose their
+ *   middle dots (63); api-docs groups 26 rows by resource
+ * continued 2026-10-30: api-docs rows get method badges (middle-dot summary removed),
+ *   links gain :active, the empty state gains its dotted signature; field borders move to
+ *   --line-strong (3:1 edge, gate 40); the collapsed mobile drawer leaves the geometry
+ *   entirely (display none + allow-discrete, gate 34)
+ * built: the project · redesign: polish · v2.0.0 */
+/* Hallmark · dismissed 25 · the empty-state lede is one sentence of 26 characters, and the gate allows a caption from 28ch; the measure is the sentence's own length */
+/* Hallmark · waive 26b · inline blocks in index.html and api-docs.html · the eight control states and :disabled are declared in this shared sheet, and the inline blocks are critical-path fallback only */
 
-/* ---------- 最左图标栏 ---------- */
-.rail{width:56px;flex-shrink:0;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:14px 0 12px;border-right:1px solid var(--line-soft);background:#fff}
-.rail-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:10px;color:#6e6e73}
-.rail-icon svg{width:21px;height:21px}
-.rail-icon:hover{background:var(--hover)}
-.rail-icon.active{background:var(--panel);color:#1d1d1f}
-.rail-avatar{width:30px;height:30px;border-radius:50%;background:#e8734a;color:#fff;display:grid;place-items:center;font-size:12px;font-weight:500}
+/* Every colour and every face comes from here. Nothing past this block names one. */
+:root{
+  color-scheme: light;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Fixed steps at 1.125. No fluid heads, no display face on labels or data. */
+  --text-meta: 11px;
+  --text-label: 12.5px;
+  --text-body: 14px;
+  /* Reading size for message prose. A step above UI body: chat is read, chrome is scanned. */
+  --text-read: 15px;
+  --text-strong: 16px;
+  --text-title: 19px;
+  --text-display: 22px;
+  --leading-tight: 1.25;
+  --leading-ui: 1.55;
+  --leading-prose: 1.75;
+
+  --bg: oklch(0.995 0.002 255);
+  --surface: oklch(0.978 0.002 255);
+  --surface-2: oklch(0.955 0.003 255);
+  --surface-3: oklch(0.928 0.004 255);
+  --line: oklch(0.9 0.004 255);
+  --line-soft: oklch(0.936 0.003 255);
+  /* Field edges must read against the paper: 3:1 or better, never the hairline. */
+  --line-strong: oklch(0.6 0.008 255);
+  --ink: oklch(0.24 0.008 255);
+  --ink-2: oklch(0.4 0.008 255);
+  --ink-3: oklch(0.52 0.008 255);
+  --ink-4: oklch(0.64 0.006 255);
+  --accent: oklch(0.5 0.145 258);
+  --accent-hover: oklch(0.44 0.145 258);
+  --accent-soft: oklch(0.952 0.026 258);
+  --on-accent: oklch(0.995 0.002 255);
+  --danger: oklch(0.49 0.16 27);
+  --danger-soft: oklch(0.968 0.018 27);
+  --danger-line: oklch(0.885 0.04 27);
+  --warn: oklch(0.47 0.1 68);
+  --warn-soft: oklch(0.98 0.038 85);
+  --warn-line: oklch(0.855 0.075 80);
+  --ok: oklch(0.47 0.1 152);
+  --ok-soft: oklch(0.955 0.03 152);
+  --scrim: oklch(0.24 0.01 255 / 0.42);
+
+  --r-1: 6px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --r-4: 16px;
+  --r-full: 999px;
+
+  /* Two control sizes, 6px apart: 34 for tools, 40 for the one primary. */
+  --control: 34px;
+  --control-lg: 40px;
+  --sidebar-w: 260px;
+  --tools-w: 300px;
+  --tabbar-h: 48px;
+  --measure: 46rem;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  --shadow-1: 0 1px 2px oklch(0.24 0.01 255 / 0.06);
+  --shadow-2: 0 6px 20px oklch(0.24 0.01 255 / 0.08);
+  --shadow-3: 0 16px 48px oklch(0.24 0.01 255 / 0.16), 0 2px 8px oklch(0.24 0.01 255 / 0.06);
+
+  --dur-micro: 90ms;
+  --dur-short: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--leading-ui);
+  color: var(--ink);
+  background: var(--bg);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-size-adjust: 100%;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{height:100%;overflow-x:clip}
+body{margin:0;height:100dvh;display:flex;overflow:hidden;overflow-x:clip;background:var(--bg);color:var(--ink)}
+[hidden]{display:none!important}
+::selection{background:var(--accent-soft);color:var(--ink)}
+svg{display:block;flex-shrink:0}
+.scrim{display:none}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:transparent;border-radius:var(--r-2);padding:0;
+  transition:background var(--dur-micro) var(--ease), color var(--dur-micro) var(--ease),
+    border-color var(--dur-micro) var(--ease), opacity var(--dur-micro) var(--ease)}
+button:disabled{cursor:not-allowed;opacity:.55}
+:where(button,a,input,textarea,select,summary,[tabindex]):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input:focus-visible,textarea:focus-visible,select:focus-visible{outline-offset:-1px}
+
+/* ---------- 展开与收起 ---------- */
+/* One disclosure marker everywhere: a chevron that turns 90 degrees, not the OS
+   triangle, which sits at a different size in every browser. */
+summary{list-style:none;cursor:pointer}
+summary::-webkit-details-marker{display:none}
+.message summary::before,.api-row>summary::before,#context-panel>summary::before,
+.memory-card summary::before,#context-info summary::before{content:"›";flex:none;
+  margin-right:var(--sp-2);color:var(--ink-4);font-size:var(--text-strong);line-height:1;
+  transform:translateY(1px);transition:transform var(--dur-micro) var(--ease)}
+.message details[open]>summary::before,.api-row[open]>summary::before,
+#context-panel[open]>summary::before,.memory-card details[open]>summary::before,
+#context-info details[open]>summary::before{transform:translateY(1px) rotate(90deg)}
+/* The flex summaries already carry the gap, so their chevron does not add one. */
+.message summary::before,.api-row>summary::before,#context-panel>summary::before{margin-right:0}
 
 /* ---------- 会话侧栏 ---------- */
-.sidebar{width:268px;flex-shrink:0;display:flex;flex-direction:column;background:#fbfbfc;border-right:1px solid var(--line-soft);padding:12px 10px 10px}
+.sidebar{width:var(--sidebar-w);flex:0 0 var(--sidebar-w);display:flex;flex-direction:column;min-height:0;
+  padding:var(--sp-2);background:var(--surface);border-right:1px solid var(--line-soft)}
 body.sidebar-collapsed .sidebar{display:none}
-body.sidebar-collapsed #toggle-sidebar,body.tools-collapsed #toggle-tools{background:var(--panel)}
-.sidebar-head{display:flex;align-items:center;justify-content:space-between;padding:2px 6px 10px}
-.brand{display:flex;align-items:center;gap:5px;font-size:19px;font-weight:500;letter-spacing:-.2px;padding:6px 8px}
-.ghost-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:#7c7c81;flex-shrink:0}
-.ghost-icon svg{width:17px;height:17px}
-.ghost-icon:hover{background:var(--hover)}
-.new-chat{display:flex;align-items:center;gap:10px;width:100%;padding:10px 10px;border-radius:9px;font-size:15px;font-weight:500;color:#3c3c40;text-align:left}
-.new-chat svg{width:18px;height:18px;color:var(--sub)}
-.new-chat:hover{background:var(--hover)}
-.section-label{font-size:12px;color:var(--faint);padding:16px 10px 7px}
-#sessions{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:1px;scrollbar-width:thin}
-#sessions button{display:block;width:100%;padding:9px 11px;text-align:left;font-size:14.5px;color:#48484d;border-radius:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#sessions button:hover{background:var(--hover)}
-#sessions button.active{background:#e9e9ec;color:#1d1d1f;font-weight:500}
-.load-more{font-size:12.5px;color:var(--sub);padding:8px 10px;text-align:left}
-.load-more:hover{color:#1d1d1f}
-.load-more.in-chat{margin:0 auto;display:block}
-.sidebar-foot{padding:10px 6px 2px;border-top:1px solid var(--line-soft)}
-.workspace{display:flex;align-items:center;gap:6px;width:100%;font-size:12px;color:var(--sub);padding:6px;overflow:hidden;text-align:left}
-.workspace svg{width:15px;height:15px;flex-shrink:0;color:var(--faint)}
-.workspace span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
-.workspace:hover{background:var(--hover);color:#3c3c40}
+.sidebar-head{padding:0 var(--sp-1) var(--sp-2)}
+.brand{display:flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);
+  font-size:var(--text-strong);font-weight:650;letter-spacing:-.01em}
+.session-search{width:100%;height:var(--control);margin:0 0 var(--sp-2);padding:0 var(--sp-3);
+  border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--bg);font-size:var(--text-label);color:var(--ink)}
+.session-search::placeholder{color:var(--ink-4)}
+.new-chat{display:flex;align-items:center;gap:var(--sp-2);width:100%;height:var(--control);
+  padding:0 var(--sp-2);border-radius:var(--r-2);font-size:var(--text-body);font-weight:550;text-align:left;color:var(--ink)}
+.new-chat svg{width:16px;height:16px;color:var(--ink-3)}
+.new-chat:hover{background:var(--surface-2)}
+.new-chat:active{background:var(--surface-3)}
+.section-label{padding:var(--sp-4) var(--sp-2) var(--sp-1);font-size:var(--text-meta);font-weight:600;color:var(--ink-3)}
+#sessions{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:1px;padding-bottom:var(--sp-2);scrollbar-width:thin}
+.session-row{position:relative;display:flex;align-items:center;border-radius:var(--r-2)}
+.session-row:hover{background:var(--surface-2)}
+.session-row.active{background:var(--surface-3)}
+.session-open{flex:1;min-width:0;min-height:var(--control);display:flex;align-items:center;gap:var(--sp-2);
+  padding:0 2px 0 var(--sp-2);border-radius:var(--r-2) 0 0 var(--r-2);font-size:var(--text-body);
+  color:var(--ink-2);text-align:left}
+.session-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-row.active .session-open{color:var(--ink);font-weight:600}
+.session-menu{width:28px;height:28px;margin-right:2px;display:grid;place-items:center;border-radius:var(--r-1);
+  color:var(--ink-3);opacity:0;font-size:var(--text-strong);line-height:1}
+.session-row:hover .session-menu,.session-row.menu-open .session-menu,.session-menu:focus-visible{opacity:1}
+.session-menu:hover{background:var(--surface-3);color:var(--ink)}
+.session-menu-pop{position:absolute;right:var(--sp-1);top:calc(100% - 2px);z-index:20;min-width:132px;
+  display:flex;flex-direction:column;padding:var(--sp-1);background:var(--bg);border:1px solid var(--line);
+  border-radius:var(--r-3);box-shadow:var(--shadow-2)}
+.session-menu-pop button{padding:var(--sp-2) var(--sp-2);border-radius:var(--r-1);font-size:var(--text-label);text-align:left}
+.session-menu-pop button:hover{background:var(--surface-2)}
+.session-rename{flex:1;min-width:0;height:28px;margin:var(--sp-1);padding:0 var(--sp-2);border:1px solid var(--accent);
+  border-radius:var(--r-1);background:var(--bg);font-size:var(--text-label)}
+.session-row .dot{width:6px;height:6px;flex:none;border-radius:var(--r-full);background:var(--ok)}
+.archived-toggle{display:flex;align-items:center;gap:var(--sp-1);width:100%;min-height:30px;padding:0 var(--sp-2);
+  border-radius:var(--r-1);font-size:var(--text-meta);color:var(--ink-3);text-align:left}
+.archived-toggle:hover{background:var(--surface-2);color:var(--ink-2)}
+.archived-toggle[aria-pressed="true"]{background:var(--surface-3);color:var(--ink);font-weight:600}
+#archived-count{color:var(--ink-4)}
+.load-more{padding:var(--sp-2);border-radius:var(--r-1);font-size:var(--text-label);color:var(--ink-3);text-align:left}
+.load-more:hover{background:var(--surface-2);color:var(--ink)}
+.load-more.in-chat{margin:0 auto;padding:var(--sp-2) var(--sp-3)}
+.sidebar-foot{display:flex;flex-direction:column;gap:2px;margin-top:var(--sp-2);padding-top:var(--sp-2);border-top:1px solid var(--line-soft)}
+.workspace{display:flex;align-items:center;gap:var(--sp-2);width:100%;min-height:30px;padding:0 var(--sp-2);
+  border-radius:var(--r-1);font-size:var(--text-meta);color:var(--ink-3);text-align:left;overflow:hidden}
+.workspace svg{width:14px;height:14px;color:var(--ink-4)}
+/* Parent dimmed, folder name in ink: a path truncated at the left hides the one
+   segment that identifies the workspace, so the tail is what survives. */
+.workspace-label{display:flex;min-width:0;overflow:hidden;white-space:nowrap}
+#workspace-parent{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-4)}
+.workspace-label #workspace{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-2)}
+.workspace:hover{background:var(--surface-2);color:var(--ink)}
 
 /* ---------- 中间聊天区 ---------- */
-.chat{display:flex;flex-direction:column;flex:1;min-width:0;background:#fff}
-.tabbar{height:46px;flex-shrink:0;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line-soft)}
-.tabbar-left{display:flex;gap:2px}
-.tabbar-title{flex:1;text-align:center;font-size:13.5px;font-weight:500;color:#3c3c40;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tabbar-right{display:flex;align-items:center;gap:4px}
-#error{margin:10px 24px 0;background:#fdf0ee;color:#b3452e;border:1px solid #f2d8d2;padding:10px 16px;border-radius:10px;font-size:12.5px}
+.chat{display:flex;flex-direction:column;flex:1;min-width:0;background:var(--bg)}
+.tabbar{height:var(--tabbar-h);flex:none;display:flex;align-items:center;gap:var(--sp-2);
+  padding:0 var(--sp-3);border-bottom:1px solid var(--line-soft)}
+.tabbar-left,.tabbar-right{display:flex;align-items:center;gap:var(--sp-1);flex:none}
+.tabbar-title{flex:1;min-width:0;font-size:var(--text-label);font-weight:600;color:var(--ink);text-align:center;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ghost-icon{width:var(--control);height:var(--control);display:grid;place-items:center;border-radius:var(--r-2);color:var(--ink-3)}
+.ghost-icon svg{width:17px;height:17px}
+.ghost-icon:hover{background:var(--surface-2);color:var(--ink)}
+.ghost-icon:active{background:var(--surface-3)}
+.usage-pill{height:28px;padding:0 var(--sp-3);border:1px solid var(--line-soft);border-radius:var(--r-full);
+  background:var(--surface);font-size:var(--text-meta);font-weight:550;color:var(--ink-2);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.usage-pill:hover{background:var(--surface-2);color:var(--ink)}
+#error{margin:var(--sp-3) var(--sp-4) 0;padding:var(--sp-2) var(--sp-3);border:1px solid var(--danger-line);
+  border-radius:var(--r-2);background:var(--danger-soft);color:var(--danger);font-size:var(--text-label)}
 
-#conversation{overflow-y:auto;flex:1;position:relative;padding:24px max(28px,calc((100% - 780px)/2));scrollbar-width:thin}
+#conversation{flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;
+  padding:var(--sp-5) max(var(--sp-5), calc((100% - var(--measure)) / 2));scrollbar-width:thin;
+  scrollbar-color:var(--line) transparent}
 #messages:empty{display:none}
 #live:empty{display:none}
 
-/* 空状态 */
-#empty{display:flex;flex-direction:column;justify-content:center;align-items:center;height:82%;text-align:center;color:#86868b}
-#empty[hidden]{display:none}
-.empty-logo{width:86px;height:86px;margin-bottom:26px;opacity:.92}
-#empty h2{font-size:27px;line-height:1.45;color:#2b2b2e;font-weight:500;margin:0;letter-spacing:-.3px}
-.dotted{text-decoration:underline dotted #b9b9be;text-underline-offset:6px}
+/* 空状态：标记、一句边界说明、三个起手式。空会话是这个工具的第一屏，
+   所以它要能直接开工，而不是一块灰色像章加一句话。 */
+#empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-5);
+  padding:var(--sp-6) var(--sp-4);text-align:center}
+.empty-mark{width:52px;height:52px;color:var(--ink-4)}
+.empty-mark .eye{fill:var(--bg)}
+.empty-mark .mouth{stroke:var(--bg)}
+.empty-intro{display:flex;flex-direction:column;align-items:center;gap:var(--sp-2)}
+#empty h2{margin:0;max-width:22ch;font-size:var(--text-display);line-height:var(--leading-tight);
+  letter-spacing:-.02em;font-weight:650;color:var(--ink);text-wrap:balance;overflow-wrap:break-word;min-width:0}
+.empty-intro p{margin:0;max-width:44ch;font-size:var(--text-label);line-height:var(--leading-ui);color:var(--ink-3);
+  text-wrap:pretty}
+.starters{width:min(36rem, 100%);display:flex;flex-direction:column;text-align:left;
+  border-top:1px solid var(--line-soft)}
+.starters-label{margin:0;padding:var(--sp-3) var(--sp-2) var(--sp-1);font-size:var(--text-meta);color:var(--ink-3)}
+.starter{display:block;width:100%;min-height:var(--control);padding:var(--sp-2) var(--sp-2);
+  border-bottom:1px solid var(--line-soft);font-size:var(--text-body);line-height:var(--leading-ui);
+  color:var(--ink-2);text-align:left}
+.starter:last-child{border-bottom:0}
+.starter:hover{background:var(--surface-2);color:var(--ink)}
+.starter:active{background:var(--surface-2)}
 
 /* 消息 */
-.message{margin:6px 0 26px;line-height:1.8;font-size:14px}
-.message .role{font-size:11px;font-weight:500;color:var(--faint);margin-bottom:6px}
-.message .content{white-space:pre-wrap;overflow-wrap:anywhere}
-.message.user{margin-left:64px}
-.message.user .content{background:var(--panel);border:1px solid var(--line-soft);border-radius:14px;padding:12px 16px}
-.message.user .role{text-align:right}
-.message details{font-size:12px;background:var(--panel);border:1px solid var(--line-soft);border-radius:10px;padding:10px 13px;margin:9px 0;overflow-wrap:anywhere}
-.message summary{cursor:pointer;color:#6e6e73}
-.message pre{white-space:pre-wrap;line-height:1.6;max-height:300px;overflow:auto;margin:6px 0 0}
-.tool-status{font-size:12px;color:#6e6e73;border-left:2px solid #d8d8dc;padding:4px 12px;margin:10px 0}
-.tool-status.failed{color:#b3452e;border-color:#e8bfb5}
+.message{margin:0 0 var(--sp-5);font-size:var(--text-read);line-height:var(--leading-prose)}
+/* Authorship is carried by alignment and the bubble, not a repeated name above
+   every message; the name stays in the DOM for screen readers. */
+.message .content{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
+.message.user{display:flex;flex-direction:column;align-items:flex-end}
+.message.user .content{max-width:min(78%, 34rem);padding:var(--sp-2) var(--sp-3);border:1px solid var(--line-soft);
+  border-radius:var(--r-3) var(--r-3) var(--r-1) var(--r-3);background:var(--surface)}
+/* Tool calls read as one hairline row each, not a box inside a box. */
+.message details{margin:var(--sp-2) 0;padding:var(--sp-1) var(--sp-3);border-left:2px solid var(--line);
+  font-size:var(--text-label);overflow-wrap:anywhere}
+.message summary{display:flex;align-items:baseline;gap:var(--sp-2);font-weight:500;color:var(--ink-2)}
+.message summary:hover{color:var(--ink)}
+.tool-name{font-family:var(--font-mono);font-size:var(--text-meta);color:var(--ink)}
+.tool-state{color:var(--ink-3)}
+.tool-state.failed{color:var(--danger)}
+.tool-note{margin-left:auto;flex:none;color:var(--ink-4);font-variant-numeric:tabular-nums}
+.message pre{max-height:300px;overflow:auto;margin:var(--sp-1) 0 0;font-family:var(--font-mono);
+  font-size:var(--text-label);line-height:1.6;white-space:pre-wrap}
+.tool-status{margin:var(--sp-2) 0;padding:2px var(--sp-3);border-left:2px solid var(--line);
+  font-size:var(--text-label);color:var(--ink-2)}
+.tool-status.failed{border-left-color:var(--danger-line);color:var(--danger)}
+
+/* 审批 */
+.approval{display:flex;flex-direction:column;gap:var(--sp-1);margin:var(--sp-3) 0;padding:var(--sp-3);
+  border:1px solid var(--warn-line);border-radius:var(--r-2);background:var(--warn-soft)}
+.approval-title{font-size:var(--text-body);font-weight:600;color:var(--ink)}
+.approval-command{font-family:var(--font-mono);font-size:var(--text-label);color:var(--ink-2);
+  white-space:pre-wrap;word-break:break-all}
+.approval-note{font-size:var(--text-meta);color:var(--ink-2)}
+.approval-actions{display:flex;gap:var(--sp-2);margin-top:var(--sp-1)}
+.approval-actions button{min-height:var(--control);padding:0 var(--sp-3);border:1px solid var(--line);
+  border-radius:var(--r-2);background:var(--bg);font-size:var(--text-label);font-weight:600;color:var(--ink)}
+.approval-actions button:hover{background:var(--surface-2)}
+.primary,.approval-actions .primary{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}
+.primary:hover,.approval-actions .primary:hover{background:var(--accent-hover)}
 
 /* ---------- 底部输入坞 ---------- */
-.dock{padding:6px max(28px,calc((100% - 720px)/2)) 14px;flex-shrink:0}
-.status-line{display:flex;align-items:center;justify-content:center;gap:12px;height:26px;font-size:11.5px;color:var(--faint)}
-.stop-btn{font-size:11.5px;color:#b3452e;padding:3px 10px;border-radius:7px}
-.stop-btn:hover{background:#fdf0ee}
-.composer{border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.05);padding:8px 12px 10px;display:flex;flex-direction:column}
-.composer:focus-within{border-color:#d4d4d8}
-.composer-toolbar{display:flex;align-items:center;gap:4px;padding:2px 2px 6px;border-bottom:1px solid var(--line-soft);margin-bottom:6px}
-.toolbar-spacer{flex:1}
-.tool-chip{width:28px;height:28px;display:grid;place-items:center;border-radius:7px;color:#86868b}
-.tool-chip svg{width:16px;height:16px}
-.tool-chip:hover{background:var(--hover)}
-textarea{border:0;resize:none;min-height:44px;max-height:200px;flex:1;min-width:0;width:100%;background:transparent;color:#1d1d1f;line-height:1.65;padding:4px 4px 6px}
-textarea:focus{outline:none}
-textarea::placeholder{color:#aeaeb2}
-.composer-bottom{display:flex;align-items:center;gap:6px}
-.round-btn{width:30px;height:30px;display:grid;place-items:center;border-radius:50%;border:1px solid var(--line);color:#6e6e73;background:#fff}
+.dock{flex:none;padding:var(--sp-2) max(var(--sp-4), calc((100% - var(--measure)) / 2)) var(--sp-3);background:var(--bg)}
+.status-line{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);min-height:24px;
+  padding:0 var(--sp-2);font-size:var(--text-meta);color:var(--ink-3)}
+.stop-btn{min-height:26px;padding:0 var(--sp-2);border-radius:var(--r-1);font-size:var(--text-meta);color:var(--danger)}
+.stop-btn:hover{background:var(--danger-soft)}
+.composer{display:flex;flex-direction:column;padding:var(--sp-2);border:1px solid var(--line-strong);
+  border-radius:var(--r-4);background:var(--bg);box-shadow:var(--shadow-1);
+  transition:border-color var(--dur-short) var(--ease), box-shadow var(--dur-short) var(--ease)}
+.composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+textarea#input{width:100%;min-height:52px;max-height:220px;padding:var(--sp-2);border:0;background:transparent;
+  font-size:var(--text-body);line-height:1.6;color:var(--ink);resize:none}
+textarea#input::placeholder{color:var(--ink-4)}
+textarea#input:focus-visible{outline:0}
+.composer-bottom{display:flex;align-items:center;gap:var(--sp-1);padding:0 2px}
+.round-btn{width:var(--control);height:var(--control);display:grid;place-items:center;border:1px solid var(--line);
+  border-radius:var(--r-full);background:var(--bg);color:var(--ink-2)}
 .round-btn svg{width:15px;height:15px}
-.round-btn:hover{background:var(--hover)}
-.model-pill{font-size:12.5px;color:#3c3c40;padding:6px 8px;border-radius:8px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
-.send-btn{width:34px;height:34px;border-radius:50%;background:var(--accent);display:grid;place-items:center;margin-left:4px}
+.round-btn:hover{background:var(--surface);color:var(--ink)}
+.round-btn:active{background:var(--surface-2)}
+/* One control shape in the composer row. ``tool-chip`` stays as the marker the
+   markup test reads; it no longer draws a second border style beside the two
+   round buttons it sits with. */
+.toolbar-spacer{flex:1}
+.model-pill{max-width:220px;padding:0 var(--sp-2);font-size:var(--text-label);line-height:var(--control);
+  color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.send-btn{width:var(--control-lg);height:var(--control-lg);display:grid;place-items:center;margin-left:var(--sp-1);
+  border-radius:var(--r-full);background:var(--accent);color:var(--on-accent)}
 .send-btn svg{width:17px;height:17px}
-.send-btn:hover{background:#2c66d9}
-.dock-hint{text-align:center;color:#c2c2c7;font-size:10.5px;margin-top:9px}
+.send-btn:hover{background:var(--accent-hover)}
+.send-btn:active{background:var(--accent-hover)}
+.send-btn:disabled{background:var(--surface-2);color:var(--ink-3);cursor:not-allowed}
+.dock-hint{margin-top:var(--sp-2);text-align:center;font-size:var(--text-meta);color:var(--ink-3)}
 
 /* ---------- 右侧上下文面板 ---------- */
-.tools-panel{width:300px;flex-shrink:0;display:flex;flex-direction:column;border-left:1px solid var(--line-soft);background:#fff}
+.tools-panel{width:var(--tools-w);flex:0 0 var(--tools-w);display:flex;flex-direction:column;min-height:0;
+  background:var(--surface);border-left:1px solid var(--line-soft)}
 body.tools-collapsed .tools-panel{display:none}
-.tools-body{padding:16px;overflow-y:auto;flex:1}
-#context-panel{font-size:11.5px;color:#6e6e73}
-#context-panel>summary{cursor:pointer;padding:5px 0;font-size:12px;color:#3c3c40}
-#context-info{max-height:260px;overflow:auto;border:1px solid var(--line-soft);border-radius:10px;background:var(--panel);padding:10px 13px;line-height:1.7;margin-top:6px}
-#context-info p{margin:5px 0}
-#context-info pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit}
-#context-info details{padding:5px 0}
+.tools-body{flex:1;padding:var(--sp-4);overflow-y:auto}
+#context-panel{font-size:var(--text-label);color:var(--ink-2)}
+#context-panel>summary{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-1) 0;
+  font-size:var(--text-label);font-weight:600;color:var(--ink)}
+#context-panel>summary:hover{color:var(--ink-2)}
+#context-info{margin-top:var(--sp-2);font-size:var(--text-label);line-height:1.7}
+/* Facts as pairs, not a paragraph: the numbers are scanned, not read. */
+.context-facts{display:grid;grid-template-columns:auto minmax(0, 1fr);gap:var(--sp-1) var(--sp-3);margin:0}
+.context-facts dt{color:var(--ink-3);white-space:nowrap}
+.context-facts dd{margin:0;color:var(--ink);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.context-note{margin:var(--sp-3) 0 0;color:var(--ink-3);font-size:var(--text-meta);line-height:1.7}
+#context-info details{margin-top:var(--sp-2);padding-top:var(--sp-2);border-top:1px solid var(--line-soft)}
+#context-info summary{cursor:pointer;color:var(--ink-2);font-weight:550}
+#context-info pre{margin:var(--sp-1) 0 0;max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;
+  font-family:inherit;font-size:var(--text-meta);line-height:1.7;color:var(--ink-2)}
 
-/* ---------- 记忆对话框 ---------- */
-.quiet{background:transparent;color:#6e6e73;font-size:12px;padding:6px 9px}
-.quiet:hover{background:var(--hover)}
-#memory-dialog{width:min(720px,95vw);max-height:90dvh;border:1px solid var(--line);border-radius:16px;padding:26px;background:#fff;color:#2b2b2e;box-shadow:0 18px 60px rgba(0,0,0,.14)}
-#memory-dialog::backdrop{background:#00000033}
-.memory-heading{display:flex;justify-content:space-between;align-items:flex-start}
-.memory-heading h2{font-size:20px;font-weight:500;margin:0}
-.memory-heading p,.memory-footnote{font-size:11.5px;color:var(--sub)}
-.memory-toolbar{display:flex;align-items:center;gap:10px;margin:20px 0}
-.memory-toolbar button,#memory-editor button[type=submit],.memory-accept{background:var(--accent);color:#fff;padding:8px 13px;border-radius:8px}
+/* ---------- 对话框与表单 ---------- */
+dialog{padding:var(--sp-5);border:1px solid var(--line);border-radius:var(--r-4);
+  background:var(--bg);color:var(--ink);box-shadow:var(--shadow-2)}
+dialog::backdrop{background:var(--scrim)}
+#memory-dialog{width:min(720px, 95vw);max-height:90dvh;overflow:auto}
+#workspace-dialog,#config-dialog{width:min(620px, 95vw);max-height:88dvh;overflow:auto}
+#usage-dialog{width:min(760px, 95vw);max-height:88dvh;overflow:auto}
+.memory-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-4)}
+.memory-heading h2{margin:0;font-size:var(--text-title);font-weight:650;letter-spacing:-.01em}
+.memory-heading p{margin:var(--sp-1) 0 0;max-width:52ch;font-size:var(--text-label);color:var(--ink-3)}
+.quiet{min-height:30px;padding:var(--sp-1) var(--sp-2);border-radius:var(--r-1);font-size:var(--text-label);color:var(--ink-2)}
+.quiet:hover{background:var(--surface-2);color:var(--ink)}
+dialog input:not([type="checkbox"]),dialog select,dialog textarea{height:var(--control);padding:0 var(--sp-2);
+  border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--bg);font-size:var(--text-body);color:var(--ink)}
+dialog textarea{height:auto;padding:var(--sp-2);line-height:1.6;resize:vertical}
+.memory-toolbar{display:flex;align-items:center;gap:var(--sp-2);margin:var(--sp-4) 0}
+.memory-toolbar label{font-size:var(--text-label);color:var(--ink-3)}
 .memory-toolbar button{margin-left:auto}
-.memory-toolbar button:hover,#memory-editor button[type=submit]:hover,.memory-accept:hover{background:#2c66d9}
-#memory-dialog select,#memory-dialog input:not([type=checkbox]),#memory-dialog textarea{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px;font:inherit}
-#memory-editor{display:grid;gap:8px;background:var(--panel);padding:16px;border-radius:11px;margin-bottom:16px}
-#memory-editor label{font-size:12px}
-#memory-editor textarea{width:100%;resize:vertical}
-.memory-pin{display:flex;align-items:center;gap:6px}
-.memory-card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:15px 16px;margin:12px 0;font-size:13px}
-.memory-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75;margin:10px 0}
-.memory-card details{font-size:11.5px;color:var(--sub);margin:10px 0}
-.memory-card pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;overflow:auto}
+.memory-toolbar button,.memory-accept,#memory-editor button[type="submit"],#workspace-form button{
+  min-height:var(--control);padding:0 var(--sp-3);border-radius:var(--r-2);background:var(--accent);
+  color:var(--on-accent);font-size:var(--text-label);font-weight:600}
+.memory-toolbar button:hover,.memory-accept:hover,#memory-editor button[type="submit"]:hover,#workspace-form button:hover{background:var(--accent-hover)}
+#memory-editor{display:grid;gap:var(--sp-2);margin-bottom:var(--sp-4);padding:var(--sp-4);
+  border:1px solid var(--line-soft);border-radius:var(--r-3);background:var(--surface)}
+#memory-editor label{font-size:var(--text-label);color:var(--ink-2)}
+#memory-editor textarea{width:100%}
+#memory-editor>div{display:flex;gap:var(--sp-2);margin-top:var(--sp-1)}
+.memory-pin{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--text-label);color:var(--ink-2)}
+.memory-card{margin:var(--sp-3) 0;padding:var(--sp-3) var(--sp-4);border:1px solid var(--line);
+  border-radius:var(--r-3);font-size:var(--text-label)}
+.memory-card strong{font-size:var(--text-body);font-weight:600}
+.memory-body{margin:var(--sp-2) 0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:var(--leading-prose);color:var(--ink)}
+.memory-card details{margin:var(--sp-2) 0;font-size:var(--text-meta);color:var(--ink-3)}
 .memory-card summary{cursor:pointer}
-.memory-conflict,#memory-notice.failed{color:#b3452e;background:#fdf0ee;padding:10px;border-radius:8px}
-#memory-notice{font-size:12.5px;color:#3c6e4a}
-.memory-conflict{font-size:12.5px;white-space:pre-wrap}
-.memory-footnote{line-height:1.7}
+.memory-card pre{max-height:200px;overflow:auto;font-family:var(--font-mono);font-size:var(--text-meta);
+  white-space:pre-wrap;overflow-wrap:anywhere}
+.memory-conflict{margin:var(--sp-2) 0;padding:var(--sp-2);border-radius:var(--r-2);background:var(--danger-soft);
+  color:var(--danger);font-size:var(--text-label);white-space:pre-wrap}
+.memory-footnote{margin:var(--sp-3) 0 0;font-size:var(--text-meta);color:var(--ink-3);line-height:1.7}
+#memory-notice,#workspace-notice,#config-notice,#usage-notice{min-height:1lh;font-size:var(--text-label);color:var(--ink-3)}
+#memory-notice.failed,#workspace-notice.failed,#config-notice.failed,#usage-notice.failed{color:var(--danger)}
+.muted{font-size:var(--text-meta);color:var(--ink-3)}
+.memory-card strong+.muted{margin-left:var(--sp-2)}
+
+.workspace-list{display:flex;flex-direction:column;gap:2px;max-height:38dvh;margin:var(--sp-4) 0;overflow:auto}
+.workspace-row{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);min-height:var(--control);
+  padding:var(--sp-2) var(--sp-3);border-radius:var(--r-2);font-size:var(--text-label);color:var(--ink);text-align:left}
+.workspace-row span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.workspace-row:hover{background:var(--surface-2)}
+.workspace-row.active{background:var(--surface-3);font-weight:600}
+.workspace-row .muted{flex:none}
+#workspace-form{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2);padding-top:var(--sp-4);
+  border-top:1px solid var(--line-soft)}
+#workspace-form label{width:100%;font-size:var(--text-label);color:var(--ink-3)}
+#workspace-form input{flex:1;min-width:200px}
+#config-list{display:grid;grid-template-columns:auto minmax(0, 1fr);gap:var(--sp-2) var(--sp-4);
+  margin:var(--sp-4) 0 var(--sp-1);font-size:var(--text-label)}
+#config-list dt{color:var(--ink-3);white-space:nowrap}
+#config-list dd{margin:0;overflow-wrap:anywhere}
+#config-list .config-behavior{grid-column:1/-1;padding:var(--sp-2) var(--sp-3);border:1px solid var(--line-soft);
+  border-radius:var(--r-2);background:var(--surface);font-family:var(--font-mono);font-size:var(--text-meta);color:var(--ink-2)}
+.dialog-section{margin:var(--sp-5) 0 var(--sp-2);padding-top:var(--sp-4);border-top:1px solid var(--line-soft);
+  font-size:var(--text-label);font-weight:600;color:var(--ink)}
+
+/* ---------- 用量 ---------- */
+#usage-summary{display:grid;grid-template-columns:auto minmax(0, 1fr);gap:var(--sp-1) var(--sp-4);
+  margin:var(--sp-4) 0;font-size:var(--text-label)}
+#usage-summary dt{color:var(--ink-3)}
+#usage-summary dd{margin:0;font-variant-numeric:tabular-nums}
+#usage-table{overflow-x:auto}
+.usage-table{width:100%;border-collapse:collapse;font-size:var(--text-label);font-variant-numeric:tabular-nums}
+.usage-table th{padding:var(--sp-1) var(--sp-2);border-bottom:1px solid var(--line);color:var(--ink-3);
+  font-weight:600;text-align:left;white-space:nowrap}
+.usage-table td{padding:var(--sp-1) var(--sp-2);border-bottom:1px solid var(--line-soft);white-space:nowrap}
+/* Digits line up under their head; only the leading label column reads left. */
+.usage-table th:not(:first-child),.usage-table td:not(:first-child){text-align:right}
+.usage-table tr:last-child td{border-bottom:0}
+.usage-table td:first-child{color:var(--ink-3)}
+#config-usage{font-size:var(--text-label);color:var(--ink-3)}
+#config-usage p{margin:var(--sp-1) 0}
 
 /* ---------- API 文档页 ---------- */
-.api-reference{height:auto;min-height:100dvh;display:block}
-.api-reference main{max-width:1080px;margin:auto}
-.api-reference header{padding:28px 24px}
-.api-reference header p{font-size:12px;color:var(--sub)}
-.api-reference section{padding:12px 24px}
-.api-reference pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:450px;overflow:auto;font-size:12px}
-.api-reference summary{cursor:pointer}
-.api-reference footer{font-size:12px;padding:24px}
+.api-reference{height:auto;min-height:100dvh;display:block;overflow-x:clip}
+.api-reference main{max-width:1080px;margin:0 auto;padding-bottom:var(--sp-6)}
+.api-reference header{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--sp-4);
+  padding:var(--sp-6) var(--sp-5) var(--sp-4)}
+.api-reference h1{margin:0;font-size:var(--text-title);font-weight:650;letter-spacing:-.01em;text-wrap:balance}
+.api-reference header p{margin:var(--sp-1) 0 0;font-size:var(--text-label);color:var(--ink-3)}
+.api-reference section{padding:0 var(--sp-5) var(--sp-3)}
+.api-reference .api-intro{margin:0 0 var(--sp-5);max-width:64ch;font-size:var(--text-body);line-height:var(--leading-prose);color:var(--ink-2)}
+/* One line per group head, then a single ruled list: 26 identical boxes read as
+   a card wall and hide the shape of the surface. */
+.api-group{margin:var(--sp-5) 0 var(--sp-2);font-size:var(--text-label);font-weight:600;color:var(--ink)}
+.api-list{margin:0 0 var(--sp-4);border:1px solid var(--line-soft);border-radius:var(--r-3);overflow:hidden;
+  background:var(--bg)}
+.api-reference pre{padding:var(--sp-3);border:0;background:var(--surface);font-family:var(--font-mono);
+  font-size:var(--text-meta);line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;max-height:450px;overflow:auto}
+.api-reference .api-row pre{margin:0;max-height:360px;border-top:1px solid var(--line-soft)}
+.api-reference footer{padding:var(--sp-5);font-size:var(--text-label);color:var(--ink-3)}
 .api-reference a{color:var(--accent)}
+.api-reference a:active{color:var(--accent-hover)}
+.api-reference header a{white-space:nowrap}
+.api-row{border-top:1px solid var(--line-soft);font-size:var(--text-label);background:var(--bg)}
+.api-row:first-child{border-top:0}
+.api-row>summary{display:flex;align-items:baseline;gap:var(--sp-2);min-height:38px;padding:0 var(--sp-3);
+  color:var(--ink)}
+.api-row>summary:hover{background:var(--surface)}
+.api-row>summary:focus-visible{outline-offset:-2px}
+.api-row>p{margin:0;padding:0 var(--sp-3) var(--sp-2);color:var(--ink-2);line-height:var(--leading-prose)}
+.api-method{flex:none;min-width:46px;padding:1px var(--sp-1);border-radius:var(--r-1);
+  font-family:var(--font-mono);font-size:var(--text-meta);font-weight:600;text-align:center}
+.api-get{background:var(--accent-soft);color:var(--accent)}
+.api-post{background:var(--ok-soft);color:var(--ok)}
+.api-patch,.api-put{background:var(--warn-soft);color:var(--warn)}
+.api-delete{background:var(--danger-soft);color:var(--danger)}
+.api-path{min-width:0;font-family:var(--font-mono);font-size:var(--text-meta);font-weight:500;
+  overflow-wrap:anywhere;color:var(--ink)}
+.api-name{margin-left:auto;flex:none;font-weight:400;color:var(--ink-3)}
 
 /* ---------- 响应式 ---------- */
-@media(max-width:1180px){.tools-panel{display:none}}
-@media(max-width:860px){
-  .rail{display:none}
-  .sidebar{width:200px}
-  .message.user{margin-left:20px}
-  #conversation{padding:18px 16px}
-  .dock{padding:6px 16px 12px}
-  #empty h2{font-size:21px}
+/* The toggle reads as pressed only where it hides a column; on a phone the
+   drawer is closed by default, so a permanent highlight would be noise. */
+@media (min-width:961px){
+  body.sidebar-collapsed #toggle-sidebar,body.tools-collapsed #toggle-tools{background:var(--surface-2);color:var(--ink)}
+}
+@media (max-width:1180px){
+  .tools-panel{display:none}
+  #toggle-tools{display:none}
 }
 
-.approval {
-  display: flex; flex-direction: column; gap: 6px;
-  margin: 12px 0; padding: 12px 14px; border-radius: 10px;
-  border: 1px solid #d8a531; background: #fff8e6;
+@media (max-width:960px){
+  .sidebar{position:fixed;top:0;bottom:0;left:0;z-index:40;width:min(300px, 86vw);
+    box-shadow:var(--shadow-3);
+    transition:translate var(--dur-short) var(--ease), display var(--dur-short) var(--ease);
+    transition-behavior:allow-discrete}
+  body.sidebar-collapsed .sidebar{display:none;translate:-100% 0;box-shadow:none}
+  body:not(.sidebar-collapsed) .sidebar{translate:0 0}
+  @starting-style{body:not(.sidebar-collapsed) .sidebar{translate:-100% 0}}
+  .scrim{display:block;position:fixed;inset:0;z-index:30;background:var(--scrim);opacity:0;
+    pointer-events:none;transition:opacity var(--dur-short) var(--ease)}
+  body:not(.sidebar-collapsed) .scrim{opacity:1;pointer-events:auto}
+  .tabbar{padding:0 var(--sp-2)}
+  #conversation{padding:var(--sp-4) var(--sp-3)}
+  .dock{padding:var(--sp-2) var(--sp-3) var(--sp-3)}
+  .message.user .content{max-width:88%}
+  #empty h2{font-size:var(--text-title)}
+  textarea#input{font-size:16px}
+  .model-pill{max-width:30vw}
 }
-.approval-title { font-weight: 600; }
-.approval-command {
-  white-space: pre-wrap; word-break: break-all;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
-}
-.approval-note { font-size: 12px; opacity: 0.75; }
-.approval-actions { display: flex; gap: 8px; }
 
-/* ---------- 工作区与配置对话框 ---------- */
-#workspace-dialog,#config-dialog{width:min(620px,95vw);max-height:88dvh;border:1px solid var(--line);border-radius:16px;padding:26px;background:#fff;color:#2b2b2e;box-shadow:0 18px 60px rgba(0,0,0,.14)}
-#workspace-dialog::backdrop,#config-dialog::backdrop{background:#00000033}
-.workspace-list{display:flex;flex-direction:column;gap:4px;margin:18px 0;max-height:38dvh;overflow:auto}
-.workspace-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 11px;border-radius:9px;text-align:left;font-size:13px}
-.workspace-row:hover{background:var(--hover)}
-.workspace-row.active{background:var(--panel);font-weight:500}
-.workspace-row .muted{color:var(--sub);font-size:11.5px;flex-shrink:0}
-#workspace-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:16px}
-#workspace-form label{font-size:12px;color:var(--sub);width:100%}
-#workspace-form input{flex:1;min-width:200px;border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit}
-#workspace-form button{background:var(--accent);color:#fff;padding:8px 14px;border-radius:8px}
-#workspace-form button:hover{background:#2c66d9}
-#config-list{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin:18px 0 4px;font-size:13px}
-#config-list dt{color:var(--sub);white-space:nowrap}
-#config-list dd{margin:0;word-break:break-all}
-#config-list .config-behavior{grid-column:1/-1;background:var(--panel);border-radius:8px;padding:9px 11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#3c3c40}
-#workspace-notice,#config-notice{font-size:12px;color:var(--sub);min-height:1px}
-#workspace-notice.failed,#config-notice.failed{color:#c0392b}
+@media (max-width:560px){
+  .dock-hint,.model-pill{display:none}
+  .message.user .content{max-width:92%}
+  #empty h2{font-size:var(--text-title)}
+  .starters{width:100%}
+}
+
+/* 触摸设备：菜单跟着选中行出现，控件放大到 44px 命中区 */
+@media (max-width:960px){
+  .session-row.active .session-menu{opacity:1}
+}
+@media (pointer:coarse){
+  .ghost-icon,.round-btn,.tool-chip{width:40px;height:40px}
+  .send-btn{width:44px;height:44px}
+}
+
+/* ---------- 动效退化 ---------- */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important;scroll-behavior:auto!important}
+}

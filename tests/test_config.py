@@ -41,6 +41,8 @@ class SettingsTests(unittest.TestCase):
             {"db_timeout": 0},
             {"db_timeout": float("nan")},
             {"db_timeout": float("inf")},
+            {"approval_unwatched_grace": -1},
+            {"approval_unwatched_grace": float("nan")},
             {"max_turns": 0},
             {"max_turns": 129},
             {"max_tool_concurrency": 0},
@@ -61,6 +63,11 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.memory_worker_concurrency, 3)
         # A single-connection pool still allows one worker: they serialize anyway.
         self.assertEqual(Settings(db_pool_max_size=1, memory_worker_concurrency=1).memory_worker_concurrency, 1)
+
+    def test_unwatched_grace_is_configurable_and_zero_disables_it(self):
+        self.assertEqual(Settings.from_env({}).approval_unwatched_grace, 10.0)
+        self.assertEqual(Settings.from_env({"CHAGENT_APPROVAL_UNWATCHED_GRACE": "0"}).approval_unwatched_grace, 0.0)
+        self.assertEqual(Settings.from_env({"CHAGENT_APPROVAL_UNWATCHED_GRACE": "2.5"}).approval_unwatched_grace, 2.5)
 
     def test_host_commands_require_explicit_boolean_setting(self):
         self.assertFalse(Settings.from_env({}).allow_host_commands)

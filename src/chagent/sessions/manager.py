@@ -29,9 +29,12 @@ class SessionManager:
 
     async def list(
         self, *, workspace: Path | None = None, include_archived: bool = False,
+        archived: str | None = None, query: str | None = None,
         limit: int = 50, before: UUID | None = None,
     ) -> SessionPage:
-        return await self.repository.list_sessions(workspace=workspace, include_archived=include_archived, limit=limit, before=before)
+        return await self.repository.list_sessions(
+            workspace=workspace, include_archived=include_archived, archived=archived,
+            query=query, limit=limit, before=before)
 
     async def rename(self, session_id: UUID, title: str) -> Session:
         await self.repository.rename_session(session_id, self._title(title))

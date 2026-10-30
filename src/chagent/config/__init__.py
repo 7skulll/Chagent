@@ -29,6 +29,9 @@ class Settings:
     approval: str = "never"
     approval_allowlist: str = ""
     approval_timeout: float = 300.0
+    #: Seconds a remote approval may wait with no browser attached before it is
+    #: denied as unwatched. 0 keeps the absolute deadline (the pre-Z4 rule).
+    approval_unwatched_grace: float = 10.0
     # Long-running host commands started with ``yield_time_ms``: how many one
     # run may hold at once, and the wall clock that bounds each of them.
     max_processes: int = 4
@@ -70,6 +73,8 @@ class Settings:
             raise ValueError("CHAGENT_APPROVAL must be never, on-request or untrusted")
         if not math.isfinite(self.approval_timeout) or self.approval_timeout <= 0:
             raise ValueError("CHAGENT_APPROVAL_TIMEOUT must be finite and positive")
+        if not math.isfinite(self.approval_unwatched_grace) or self.approval_unwatched_grace < 0:
+            raise ValueError("CHAGENT_APPROVAL_UNWATCHED_GRACE must be finite and nonnegative")
         if isinstance(self.max_processes, bool) or not isinstance(self.max_processes, int) \
                 or not 1 <= self.max_processes <= 16:
             raise ValueError("CHAGENT_MAX_PROCESSES must be an integer between 1 and 16")
@@ -118,6 +123,7 @@ class Settings:
             approval=values.get("CHAGENT_APPROVAL", "never").strip().lower(),
             approval_allowlist=values.get("CHAGENT_APPROVAL_ALLOWLIST", ""),
             approval_timeout=float(values.get("CHAGENT_APPROVAL_TIMEOUT", "300")),
+            approval_unwatched_grace=float(values.get("CHAGENT_APPROVAL_UNWATCHED_GRACE", "10")),
             max_processes=int(values.get("CHAGENT_MAX_PROCESSES", "4")),
             process_timeout=float(values.get("CHAGENT_PROCESS_TIMEOUT", "600")),
             web_access=values.get("CHAGENT_WEB_ACCESS", "off").strip().lower(),

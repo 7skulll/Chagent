@@ -15,8 +15,11 @@ def describe(settings: Settings, compaction: CompactionPolicy | None = None,
     sandbox = settings.sandbox
     if sandbox != "off":
         sandbox += "/network" if settings.sandbox_network else "/no-network"
+    # A browser question with nobody watching has its own deadline; 0 means the
+    # absolute approval timeout is the only limit.
+    grace = f"{settings.approval_unwatched_grace:g}s" if settings.approval_unwatched_grace else "off"
     line = (f"sandbox={sandbox}"
-            f" approval={settings.approval}"
+            f" approval={settings.approval}/unwatched={grace}"
             f" host_commands={'on' if settings.allow_host_commands else 'off'}"
             # The one path that leaves the machine is worth naming on the same
             # line as the one that confines it.

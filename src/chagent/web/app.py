@@ -29,12 +29,13 @@ from chagent.diagnostics.behavior import describe as describe_behavior
 from chagent.domain.summaries import CompactionPolicy
 from chagent.models.factory import create_model_client
 from chagent.models.settings import ModelSettings
-from chagent.sessions.errors import SessionArchivedError, SessionNotFoundError
+from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError
 from chagent.sessions.manager import SessionManager
 from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
 from chagent.storage.repositories import ConversationRepository, RunBusyError
 from chagent.storage.summaries import SummaryRepository
+from chagent.storage.usage import UsageRepository
 from chagent.storage.artifacts import ArtifactRepository
 from chagent.domain.artifacts import artifact_text
 from chagent.domain.messages import ToolResultMessage
@@ -44,10 +45,10 @@ from chagent.storage.memories import MemoryRepository
 from chagent.storage.memory_jobs import MemoryJobRepository
 from chagent.web.schemas import MemoryJobState
 from chagent.sessions.errors import StateConflictError
-from chagent.web.schemas import (AppInfo, ApprovalDecision, ArtifactPage, Cancellation, CancelRequest, ConfigView,
-    ContextView, ErrorResponse, MemoryCreate, MemoryDetail, MemoryEdit, MemoryPage, MemoryReview, MessagePage,
-    RevisionRequest, RunAccepted, RunCreate, RunView, SessionCreate, SessionDetail, SessionPage, UploadView,
-    WorkspaceCreate, WorkspacePage, WorkspaceView)
+from chagent.web.schemas import (ActiveRunPage, AppInfo, ApprovalDecision, ArtifactPage, Cancellation,
+    CancelRequest, ConfigView, ContextView, DailyUsageView, ErrorResponse, MemoryCreate, MemoryDetail, MemoryEdit,
+    MemoryPage, MemoryReview, MessagePage, RevisionRequest, RunAccepted, RunCreate, RunView, SessionCreate,
+    SessionDetail, SessionEdit, SessionPage, UploadView, UsageView, WorkspaceCreate, WorkspacePage, WorkspaceView)
 from chagent.web.uploads import save as save_upload
 from chagent.domain.sessions import Session
 from chagent.domain.memories import Memory
@@ -86,6 +87,28 @@ class WebRuntime:
         self.closing = False
         self._workspace_ids: dict[Path, UUID] = {}
         self._recovery_task: asyncio.Task | None = None
+        #: How many browser streams are attached to each run. A count, not a
+        #: flag: two tabs on one run means closing one is not "nobody is left".
+        self.viewers: dict[UUID, int] = {}
+        # The broker asks this before letting a question wait for a human who
+        # may have closed the browser; the runtime is the only object that sees
+        # streams come and go.
+        broker = getattr(getattr(runner, "scheduler", None), "approvals", None)
+        if broker is not None:
+            broker.audience = self.has_viewer
+
+    def watch(self, run_id: UUID) -> None:
+        self.viewers[run_id] = self.viewers.get(run_id, 0) + 1
+
+    def unwatch(self, run_id: UUID) -> None:
+        remaining = self.viewers.get(run_id, 0) - 1
+        if remaining > 0:
+            self.viewers[run_id] = remaining
+        else:
+            self.viewers.pop(run_id, None)
+
+    def has_viewer(self, run_id: UUID) -> bool:
+        return self.viewers.get(run_id, 0) > 0
 
     def open_workspace(self, raw: str) -> Path:
         """Resolve one directory and add it to the open set."""
@@ -245,6 +268,7 @@ async def config(current: Current):
         "run_timeout": current.runner.timeout,
         "sandbox": settings.sandbox, "sandbox_network": settings.sandbox_network,
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
+        "approval_grace": settings.approval_unwatched_grace,
         "host_commands": settings.allow_host_commands,
         "web_access": settings.web_access,
         "web_key": "set" if settings.tavily_api_key.strip() else "missing",
@@ -311,8 +335,44 @@ async def memory_history(memory_id: UUID, current: Current, workspace: Workspace
 
 @api.get("/sessions", response_model=SessionPage, tags=["会话"])
 async def sessions(current: Current, limit: PageLimit = 50, before: UUID | None = None,
-                   workspace: WorkspacePath = None):
-    return await current.sessions.list(workspace=current.root(workspace), before=before, limit=limit)
+                   workspace: WorkspacePath = None,
+                   archived: Literal["hide", "include", "only"] = "hide",
+                   q: Annotated[str | None, Query(max_length=200)] = None):
+    """Sessions of one workspace; archived ones are hidden unless asked for.
+
+    ``q`` searches titles only. Message bodies are not searched: that would need
+    an index over every payload and would answer a different question than the
+    one the box in the sidebar asks.
+    """
+    return await current.sessions.list(workspace=current.root(workspace), before=before, limit=limit,
+                                       archived=archived, query=q)
+
+
+@api.patch("/sessions/{session_id}", response_model=Session, tags=["会话"])
+async def edit_session(session_id: UUID, value: SessionEdit, current: Current):
+    """Rename or archive; both are the same question about session metadata."""
+    await current.session(session_id)
+    session = await current.sessions.get(session_id)
+    if value.title is not None:
+        session = await current.sessions.rename(session_id, value.title)
+    if value.archived is not None:
+        session = (await current.sessions.archive(session_id) if value.archived
+                   else await current.sessions.restore(session_id))
+    return session
+
+
+@api.get("/sessions/{session_id}/usage", response_model=UsageView, tags=["用量"])
+async def session_usage(session_id: UUID, current: Current,
+                        limit: Annotated[int, Query(ge=1, le=200)] = 50):
+    await current.session(session_id)
+    return await UsageRepository(current.runner.conversations.database).session(session_id, limit=limit)
+
+
+@api.get("/usage", response_model=DailyUsageView, tags=["用量"])
+async def usage(current: Current, days: Annotated[int, Query(ge=1, le=90)] = 7):
+    """Tokens per day across the workspaces this process has opened."""
+    return await UsageRepository(current.runner.conversations.database).daily(
+        days=days, roots=sorted(str(root) for root in current.roots))
 
 
 @api.post("/sessions", response_model=Session, status_code=201, tags=["会话"])
@@ -379,6 +439,21 @@ async def send(session_id: UUID, value: RunCreate, current: Current):
     return {"run_id": await current.start(session_id, value.text), "session_id": session_id}
 
 
+@api.get("/runs", response_model=ActiveRunPage, tags=["运行"])
+async def active_runs(current: Current, active: bool = True):
+    """Runs that have not converged yet across the opened workspaces.
+
+    Only the active view exists: a list of every run ever would be a different
+    endpoint with pagination, and nothing asks for it.
+    """
+    if not active:
+        raise HTTPException(400, "Only active runs are listed; omit the parameter or pass active=true")
+    rows = await current.runner.runs.active(roots=sorted(str(root) for root in current.roots))
+    return {"items": [{"run_id": row["id"], "session_id": row["session_id"],
+                        "started_at": row["started_at"], "current_tool": row["current_tool"]}
+                       for row in rows]}
+
+
 @api.get("/runs/{run_id}", response_model=RunView, tags=["运行"])
 async def run_detail(run_id: UUID, current: Current):
     return await current.run(run_id)
@@ -442,34 +517,42 @@ async def events(run_id: UUID, request: Request, current: Current, after: Sequen
         sequence = after
         heartbeat = monotonic()
         runs = current.runner.runs
-        with runs.notifications.subscribe(identity) as subscription:
-            while True:
-                # Capture before catchup, so commits between querying and waiting
-                # change the version and cannot be lost.
-                version = subscription.version
-                run = await runs.get(identity)
-                stop_at = await runs.terminal_sequence(identity) if run["status"] in TERMINAL else None
-                if stop_at is not None and sequence >= stop_at:
-                    yield "event: end\ndata: {}\n\n"
-                    return
-                batch = await runs.events(identity, sequence, limit=200)
-                for event in batch:
-                    sequence = event["sequence"]
-                    payload = json.dumps({"type": event["type"], "payload": event["payload"]}, ensure_ascii=False)
-                    yield f"id: {sequence}\nevent: update\ndata: {payload}\n\n"
-                    if event["type"] in TERMINAL_EVENTS:
+        # A viewer is counted for as long as this generator runs. The broker
+        # reads the count to decide whether a waiting command still has a page
+        # to be approved on; ``finally`` is what keeps a dropped connection from
+        # leaving a phantom audience behind.
+        current.watch(identity)
+        try:
+            with runs.notifications.subscribe(identity) as subscription:
+                while True:
+                    # Capture before catchup, so commits between querying and waiting
+                    # change the version and cannot be lost.
+                    version = subscription.version
+                    run = await runs.get(identity)
+                    stop_at = await runs.terminal_sequence(identity) if run["status"] in TERMINAL else None
+                    if stop_at is not None and sequence >= stop_at:
                         yield "event: end\ndata: {}\n\n"
                         return
-                if run["status"] in TERMINAL and len(batch) < 200:
-                    yield "event: end\ndata: {}\n\n"
-                    return
-                if await request.is_disconnected():
-                    return
-                if monotonic() - heartbeat > 15:
-                    yield ": heartbeat\n\n"
-                    heartbeat = monotonic()
-                if len(batch) < 200:
-                    await subscription.wait(version, timeout=SSE_POLL_INTERVAL)
+                    batch = await runs.events(identity, sequence, limit=200)
+                    for event in batch:
+                        sequence = event["sequence"]
+                        payload = json.dumps({"type": event["type"], "payload": event["payload"]}, ensure_ascii=False)
+                        yield f"id: {sequence}\nevent: update\ndata: {payload}\n\n"
+                        if event["type"] in TERMINAL_EVENTS:
+                            yield "event: end\ndata: {}\n\n"
+                            return
+                    if run["status"] in TERMINAL and len(batch) < 200:
+                        yield "event: end\ndata: {}\n\n"
+                        return
+                    if await request.is_disconnected():
+                        return
+                    if monotonic() - heartbeat > 15:
+                        yield ": heartbeat\n\n"
+                        heartbeat = monotonic()
+                    if len(batch) < 200:
+                        await subscription.wait(version, timeout=SSE_POLL_INTERVAL)
+        finally:
+            current.unwatch(identity)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
@@ -503,7 +586,7 @@ async def application_error(request, error):
         return reply({"error": str(error)}, 404)
     if isinstance(error, SessionNotFoundError):
         return reply({"error": str(error)}, 404)
-    if isinstance(error, (RunBusyError, SessionArchivedError, StateConflictError)):
+    if isinstance(error, (RunBusyError, SessionBusyError, SessionArchivedError, StateConflictError)):
         return reply({"error": str(error)}, 409)
     if isinstance(error, ValueError):
         return reply({"error": str(error)}, 400)
@@ -600,6 +683,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                                 memory_worker_concurrency=configured.memory_worker_concurrency,
                                                 sandbox=sandbox, approval_policy=approval,
                                                 approval_timeout=configured.approval_timeout,
+                                                approval_grace=configured.approval_unwatched_grace,
                                                 process_wall_timeout=configured.process_timeout,
                                                 max_processes=configured.max_processes, web=web)
                 else:
@@ -610,6 +694,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            memory_worker_concurrency=configured.memory_worker_concurrency,
                                            sandbox=sandbox, approval_policy=approval,
                                            approval_timeout=configured.approval_timeout,
+                                           approval_grace=configured.approval_unwatched_grace,
                                            process_wall_timeout=configured.process_timeout,
                                            max_processes=configured.max_processes, web=web)
                 app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env())
@@ -628,6 +713,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
         lifespan=lifespan, docs_url=None, redoc_url=None,
         exception_handlers={HTTPException: http_error, RequestValidationError: validation_error,
                             SessionNotFoundError: application_error, RunBusyError: application_error,
+                            SessionBusyError: application_error,
                             SessionArchivedError: application_error, ValueError: application_error,
                             LookupError: application_error, StateConflictError: application_error,
                             Exception: application_error},
