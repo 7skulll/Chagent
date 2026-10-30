@@ -99,6 +99,20 @@ class ConversationRepository:
         items = [self._session(row) for row in rows[:limit]]
         return SessionPage(items, items[-1].id if len(rows) > limit else None)
 
+    async def workspaces(self) -> list[dict]:
+        """Known workspaces with their live session counts, newest activity first.
+
+        The row is a hint for the picker, not a permission: opening a directory
+        is what makes it addressable, and that decision lives in the web layer.
+        """
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT w.root_path AS path, count(s.id) AS sessions, max(s.updated_at) AS last_used "
+                "FROM workspaces w LEFT JOIN sessions s ON s.workspace_id = w.id AND s.archived_at IS NULL "
+                "GROUP BY w.root_path ORDER BY max(s.updated_at) DESC NULLS LAST, w.root_path"
+            )
+            return [{"path": row["path"], "sessions": row["sessions"]} for row in await cursor.fetchall()]
+
     async def _lock_session(self, connection: AsyncConnection[DictRow], session_id: UUID, *, idle: bool = False) -> None:
         cursor = await connection.execute("SELECT archived_at FROM sessions WHERE id = %s FOR UPDATE", (session_id,))
         if await cursor.fetchone() is None:

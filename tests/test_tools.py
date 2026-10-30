@@ -2,6 +2,7 @@ import asyncio
 import unittest
 
 from chagent.domain.messages import ToolCall
+from chagent.tools.builtin import create_builtin_registry
 from chagent.tools.echo import EchoTool
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.registry import ToolRegistry
@@ -45,3 +46,18 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         result = await self.executor.execute(ToolCall("a", "echo", {"text": "原样返回"}))
         self.assertFalse(result.is_error)
         self.assertEqual(result.content[0].text, "原样返回")
+
+
+class BuiltinSurfaceTests(unittest.TestCase):
+    """``echo`` is a probe tool; the live surface must not spend a slot on it."""
+
+    def test_echo_is_not_registered_by_default(self):
+        registry = create_builtin_registry()
+        self.assertIsNone(registry.get("echo"))
+        self.assertEqual({tool.name for tool in registry.definitions()},
+                         {"list_dir", "read_file", "write_file", "edit_file", "glob", "grep", "apply_patch"})
+
+    def test_demo_path_opts_in(self):
+        registry = create_builtin_registry(include_echo=True)
+        self.assertIsNotNone(registry.get("echo"))
+        self.assertEqual(len(registry.definitions()), 8)

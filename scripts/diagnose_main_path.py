@@ -160,6 +160,9 @@ def runner_for(database, client, *, memory=False, extract=True, timeout=10, coun
         timeout=timeout, max_turns=32, token_counter=counter, max_tool_concurrency=max_concurrency,
         compaction_policy=CompactionPolicy(enabled=False),
         memory_policy=MemoryPolicy(enabled=memory, extract=extract, timeout=2),
+        # The scripted client calls ``echo`` and the timing case patches it, which
+        # is exactly the probe role the live registry no longer spends a slot on.
+        include_echo=True,
     )
 
 

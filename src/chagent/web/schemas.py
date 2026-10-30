@@ -27,6 +27,8 @@ class CancelRequest(InputModel):
 
 class SessionCreate(InputModel):
     title: Annotated[StrictStr, Field(max_length=200)] = "新会话"
+    # Absent means the workspace the server was started in.
+    workspace: Annotated[StrictStr, Field(min_length=1, max_length=4096)] | None = None
 
 
 class RunCreate(InputModel):
@@ -100,6 +102,46 @@ class AppInfo(BaseModel):
     workspace: Path
     provider: str
     model: str
+
+
+class WorkspaceView(BaseModel):
+    path: Path
+    sessions: int
+
+
+class WorkspacePage(BaseModel):
+    items: list[WorkspaceView]
+
+
+class WorkspaceCreate(InputModel):
+    path: Annotated[StrictStr, Field(min_length=1, max_length=4096)]
+
+
+class ConfigView(BaseModel):
+    """What the running process will actually do, not what the environment said.
+
+    Secrets are reduced to ``set``/``missing``: the page is read-only and must
+    never become a way to read a key back out of the server.
+    """
+
+    provider: str
+    model: str
+    run_timeout: float
+    sandbox: str
+    sandbox_network: bool
+    approval: str
+    approval_timeout: float
+    host_commands: bool
+    web_access: str
+    web_key: Literal["set", "missing"]
+    compaction: bool
+    tokenizer: str
+    max_turns: int
+    max_tool_concurrency: int
+    max_processes: int
+    process_timeout: float
+    tools: int
+    behavior: str
 
 
 class SessionPage(BaseModel):
@@ -199,3 +241,12 @@ class MemoryJobView(BaseModel):
 
 class MemoryJobState(BaseModel):
     job: MemoryJobView | None
+
+
+class UploadView(BaseModel):
+    """The stored location of one uploaded file, relative to the workspace."""
+
+    path: Annotated[StrictStr, Field(min_length=1, max_length=200)]
+    name: Annotated[StrictStr, Field(min_length=1, max_length=200)]
+    size: Annotated[int, Field(ge=1)]
+    sha256: Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]

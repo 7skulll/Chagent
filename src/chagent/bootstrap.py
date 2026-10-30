@@ -58,6 +58,9 @@ def create_demo_runner(
         approval_decider=approval_decider, approval_remote=approval_remote,
         process_wall_timeout=process_wall_timeout, max_processes=max_processes,
         web=web,
+        # The demo client calls a tool by name, and ``echo`` is the neutral one
+        # that needs no filesystem: this is the only path that gets it.
+        include_echo=True,
     )
 
 
@@ -78,13 +81,14 @@ def create_runner(
     process_wall_timeout: float = 600.0,
     max_processes: int = 4,
     web: WebAccess | None = None,
+    include_echo: bool = False,
 ) -> AgentRunner:
     # One manager per runner: process ownership is per run, and the runner is
     # the only object that knows when a run ends.
     processes = ProcessManager(wall_timeout=process_wall_timeout, max_per_run=max_processes)
     registry = create_builtin_registry(allow_host_commands=allow_host_commands,
                                        artifacts=ArtifactRepository(database), sandbox=sandbox,
-                                       processes=processes, web=web)
+                                       processes=processes, web=web, include_echo=include_echo)
     builder = BasicContextBuilder(policy=context_policy,
                                   counter=token_counter or select_counter(model))
     conversations, runs = ConversationRepository(database), RunRepository(database)

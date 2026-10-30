@@ -368,7 +368,9 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=text)
 
             async with create_model_client(settings, transport=httpx.MockTransport(handler)) as client:
-                runner = create_runner(self.database, settings.model(), client)
+                # The scripted provider calls ``echo``; the live surface does not
+                # carry it, so the probe tool is opted in explicitly here.
+                runner = create_runner(self.database, settings.model(), client, include_echo=True)
                 result = await runner.run(self.session, "完成一次真实协议的工具调用")
             self.assertEqual(result.message.content[0].text, "provider completed")
             self.assertEqual(len(calls), 2)

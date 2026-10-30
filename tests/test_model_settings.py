@@ -61,7 +61,15 @@ class ModelSettingsTests(unittest.TestCase):
             {"CHAGENT_BASE_URL": "http://example.com/v1"},
             {"CHAGENT_CONTEXT_WINDOW": "1"}, {"CHAGENT_MAX_TOKENS": "not-a-number"},
             {"CHAGENT_MODEL_TIMEOUT": "nan"}, {"CHAGENT_RUN_TIMEOUT": "0"},
+            {"CHAGENT_RETRY_ATTEMPTS": "-1"}, {"CHAGENT_RETRY_ATTEMPTS": "many"},
         ):
             with self.subTest(fields=list(override)), self.assertRaises(ModelConfigurationError) as raised:
                 ModelSettings.from_env({"OPENAI_API_KEY": "private-secret", **override})
             self.assertNotIn("private-secret", str(raised.exception))
+
+    def test_retry_is_visible_and_can_be_switched_off(self):
+        # A stale export must show up as a wrong line, not as a mystery later.
+        self.assertIn("retry 2", ModelSettings.from_env({"OPENAI_API_KEY": "unit-test-key"}).describe())
+        off = ModelSettings.from_env({"OPENAI_API_KEY": "unit-test-key", "CHAGENT_RETRY_ATTEMPTS": "0"})
+        self.assertEqual(off.retry_attempts, 0)
+        self.assertIn("no retry", off.describe())

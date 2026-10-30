@@ -48,7 +48,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.lifespan = self.app.router.lifespan_context(self.app)
         await self.lifespan.__aenter__()
         self.addAsyncCleanup(self.lifespan.__aexit__, None, None, None)
-        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1")
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1", trust_env=False)
         self.addAsyncCleanup(self.client.aclose)
 
     async def drop_schema(self):
@@ -235,7 +235,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         async with asyncio.timeout(5):
             while not server.started:
                 await asyncio.sleep(.01)
-        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{sock.getsockname()[1]}", timeout=5) as client:
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{sock.getsockname()[1]}", timeout=5, trust_env=False) as client:
             response = await client.post(f"/api/sessions/{identity}/runs", json={"text": "持续运行"})
             run_id = response.json()["run_id"]
             await asyncio.wait_for(entered.wait(), 5)
@@ -376,6 +376,57 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status_code, 413)
         self.assertEqual((await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"], [])
 
+    async def test_workspace_is_opened_before_it_can_be_addressed(self):
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        target = Path(other.name).resolve()
+
+        # Not open yet: listing, uploading and creating all refuse by name.
+        self.assertEqual((await self.client.get("/api/sessions", params={"workspace": str(target)})).status_code, 400)
+        self.assertEqual((await self.client.post("/api/uploads", params={"name": "a.txt", "workspace": str(target)},
+                                                 content=b"hello")).status_code, 400)
+        self.assertEqual((await self.client.post("/api/sessions", json={"title": "t", "workspace": str(target)})).status_code, 400)
+        self.assertEqual((await self.client.post("/api/workspaces", json={"path": str(target / "missing")})).status_code, 400)
+
+        opened = await self.client.post("/api/workspaces", json={"path": str(target)})
+        self.assertEqual(opened.status_code, 201, opened.text)
+        self.assertEqual(Path(opened.json()["path"]), target)
+
+        created = await self.client.post("/api/sessions", json={"title": "另一个工作区", "workspace": str(target)})
+        self.assertEqual(created.status_code, 201, created.text)
+        identity = created.json()["id"]
+        self.assertEqual(Path(created.json()["workspace"]), target)
+
+        # Each list is scoped to the workspace asked for, not to the startup one.
+        here = (await self.client.get("/api/sessions")).json()["items"]
+        self.assertNotIn(identity, [item["id"] for item in here])
+        there = (await self.client.get("/api/sessions", params={"workspace": str(target)})).json()["items"]
+        self.assertIn(identity, [item["id"] for item in there])
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).status_code, 200)
+
+        upload = await self.client.post("/api/uploads", params={"name": "note.txt", "workspace": str(target)},
+                                        content=b"hello")
+        self.assertEqual(upload.status_code, 201, upload.text)
+        self.assertTrue((target / "uploads" / "note.txt").is_file())
+        self.assertFalse((self.workspace / "uploads" / "note.txt").exists())
+
+        listed = (await self.client.get("/api/workspaces")).json()["items"]
+        self.assertIn(str(target), [row["path"] for row in listed])
+        self.assertGreaterEqual(next(row["sessions"] for row in listed if row["path"] == str(target)), 1)
+
+    async def test_config_reports_the_resolved_switches(self):
+        value = (await self.client.get("/api/config")).json()
+        self.assertEqual(value["provider"], "local-test")
+        self.assertGreaterEqual(value["tools"], 8)
+        self.assertIn(value["sandbox"], {"off", "workspace-write"})
+        self.assertIn(value["approval"], {"never", "on-request", "untrusted"})
+        self.assertEqual(value["web_key"], "missing")
+        self.assertIn("sandbox=", value["behavior"])
+        self.assertIn("max_turns=", value["behavior"])
+        # A read-only page must never become a way to read a credential back out.
+        self.assertNotIn("postgres", json.dumps(value))
+        self.assertNotIn("api_key", json.dumps(value))
+
 
 @unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")
 class ApprovalApiTests(unittest.IsolatedAsyncioTestCase):
@@ -401,7 +452,7 @@ class ApprovalApiTests(unittest.IsolatedAsyncioTestCase):
         self.lifespan = self.app.router.lifespan_context(self.app)
         await self.lifespan.__aenter__()
         self.addAsyncCleanup(self.lifespan.__aexit__, None, None, None)
-        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1")
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1", trust_env=False)
         self.addAsyncCleanup(self.client.aclose)
         self.session = await self.runner.conversations.create_session(self.workspace)
         self.run_id = await self.runner.runs.begin(self.session, UserMessage("需要批准", 0))
@@ -446,7 +497,7 @@ class ApprovalApiTests(unittest.IsolatedAsyncioTestCase):
         other_runtime = WebRuntime(self.runner, other)
         app = create_app(workspace=other, injected_runtime=other_runtime)
         async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1", trust_env=False) as client:
                 self.assertEqual((await client.get(f"/api/runs/{self.run_id}")).status_code, 404)
                 self.assertEqual((await client.post(f"/api/approvals/{self.request.id}/decide",
                                                     json={"approve": True})).status_code, 404)

@@ -8,6 +8,7 @@ import json
 import os
 
 from chagent.domain.messages import JsonObject, TextContent
+from chagent.documents import ParseCache, is_binary_document, parse_with_cache
 from chagent.tools.base import AgentTool, AgentToolResult, AgentToolUpdateCallback
 from chagent.tools.context import ToolContext
 from chagent.tools.edit_diff import Edit, apply_edits
@@ -16,6 +17,15 @@ from chagent.tools.workspace import WorkspaceFS
 
 PATH_SCHEMA = {"type": "string", "minLength": 1}
 HASH_SCHEMA = {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+
+#: Binary documents are parsed rather than decoded, so the 1 MiB text limit
+#: does not apply. Parsing runs in the tool's worker thread, and this bound
+#: keeps one pathological file from holding that thread for the whole timeout.
+DOCUMENT_MAX_BYTES = 32 * 1024 * 1024
+
+#: Shared across calls so paging through a long PDF parses it once. Keyed by
+#: content digest, so an overwritten file is re-parsed instead of going stale.
+_DOCUMENT_CACHE = ParseCache(limit=8)
 
 
 def text_result(text: str, details: JsonObject) -> AgentToolResult:
@@ -92,13 +102,20 @@ class ListDirTool(FileTool):
 
 class ReadFileTool(FileTool):
     def __init__(self):
-        super().__init__("read_file", "Read a UTF-8 regular file (up to 1 MiB) with 1-based line numbers and a SHA-256 revision.", {
+        super().__init__("read_file", (
+            "Read one workspace file, paged. Text files come back as UTF-8 lines with a SHA-256 "
+            "revision. PDF, DOCX and XLSX are parsed into numbered text blocks tagged with their "
+            "page or sheet, and offset/limit then count blocks instead of lines. Always continue "
+            "from the reported Next offset until it is 'none'."
+        ), {
             "path": PATH_SCHEMA, "offset": {"type": "integer", "minimum": 1},
             "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
         }, ["path"], read_only=True)
 
     def handle(self, filesystem: WorkspaceFS, params: JsonObject) -> AgentToolResult:
         path, offset, limit = params["path"], params.get("offset", 1), params.get("limit", 200)
+        if is_binary_document(path):
+            return read_document(filesystem, path, offset, limit)
         data = filesystem.read(path)
         lines = data.decode("utf-8").splitlines()
         selected = lines[offset - 1:offset - 1 + limit]
@@ -109,6 +126,29 @@ class ReadFileTool(FileTool):
             "path": path, "sha256": digest, "total_lines": len(lines), "offset": offset,
             "next_offset": next_offset,
         })
+
+
+def read_document(filesystem: WorkspaceFS, path: str, offset: int, limit: int) -> AgentToolResult:
+    """Read one parsed page of a binary document.
+
+    The page boundary is a text block, not a character window, so a table never
+    arrives cut in half and every block carries the page it came from.
+    """
+    data = filesystem.read(path, limit=DOCUMENT_MAX_BYTES)
+    digest = sha256(data).hexdigest()
+    blocks = parse_with_cache(_DOCUMENT_CACHE, digest, path, data)
+    selected = blocks[offset - 1:offset - 1 + limit]
+    rows = []
+    for number, block in enumerate(selected, start=offset):
+        locator = f" [page {block.page}]" if block.page else (f" [{block.section}]" if block.section else "")
+        rows.append(f"B{number}{locator}: {block.text}")
+    next_offset = offset + len(selected) if offset - 1 + len(selected) < len(blocks) else None
+    header = (f"File: {path}\nSHA256: {digest}\nFormat: parsed document\n"
+              f"Total blocks: {len(blocks)}\nNext offset: {next_offset or 'none'}\n")
+    return text_result(header + ("\n".join(rows) or "[Empty page]"), {
+        "path": path, "sha256": digest, "format": "document", "total_blocks": len(blocks),
+        "offset": offset, "next_offset": next_offset,
+    })
 
 
 class WriteFileTool(FileTool):

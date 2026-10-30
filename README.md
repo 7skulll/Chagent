@@ -1,8 +1,8 @@
 # Chagent
 
-本机单用户 Agent：命令行或本地网页输入，模型在 Python 进程内以「模型 → 工具 → 模型」循环推进任务，消息、请求、工具调用与事件都落在本机 PostgreSQL。支持 OpenAI、DeepSeek、Anthropic、通义千问及自定义兼容服务，也提供无需网络的固定响应模型。
+本机单用户 Agent：在本地网页里对话，模型在 Python 进程内以「模型 → 工具 → 模型」循环推进任务，消息、请求、工具调用与事件都落在本机 PostgreSQL。支持 OpenAI、DeepSeek、Anthropic、通义千问及自定义兼容服务，也提供无需网络的固定响应模型。
 
-能力：会话与显式任务状态、上下文预算与自动摘要（可选真 tokenizer，缺省回退字节估算）、运行级环境快照、大工具输出产物化、用户／工作区长期记忆（`/remember` 由本地命令直接回答，不经过模型）、文件检索、一次调用多处编辑与多文件补丁、宿主命令与测试运行、跨调用存活的长命令会话（`exec_command` 的 `yield_time_ms` + `process` 分次读／写 stdin／杀进程组）、联网检索与正文抓取（`web_search` + `web_fetch`，默认关闭）、重复调用拦截（无进展时以 `repeated_tool_call` 结束）、宿主命令审批（`CHAGENT_APPROVAL`，网页确认卡或 CLI 交互式提问）、网页流式对话与事件回放。
+能力：会话与显式任务状态、上下文预算与自动摘要（可选真 tokenizer，缺省回退字节估算）、运行级环境快照、大工具输出产物化、用户／工作区长期记忆（`/remember` 由本地命令直接回答，不经过模型）、文件检索、一次调用多处编辑与多文件补丁、PDF／Word／Excel 直接读取与网页上传、宿主命令与测试运行、跨调用存活的长命令会话（`exec_command` 的 `yield_time_ms` + `process` 分次读／写 stdin／杀进程组）、联网检索与正文抓取（`web_search` + `web_fetch`，默认关闭）、重复调用拦截（无进展时以 `repeated_tool_call` 结束）、宿主命令审批（`CHAGENT_APPROVAL`，网页确认卡或 CLI 交互式提问）、可切换工作区的网页流式对话与事件回放。
 
 整体设计与模块划分见[设计总览](docs/设计总览.md)。
 
@@ -17,28 +17,36 @@ uv sync --extra tokenizer
 cp -n .env.example .env          # 已有 .env 时保留自己的配置
 createdb chagent                 # 仅在数据库尚未创建时执行
 # 在 .env 配置一种供应商 Key，例如 DEEPSEEK_API_KEY=你的Key
-uv run --env-file .env python -m chagent "你好，介绍一下这个项目"
+./scripts/start.command          # 或 uv run --env-file .env python -m chagent
 ```
 
-只有一个命名 Key 时自动使用该供应商的预设模型；多个 Key 时用 `CHAGENT_PROVIDER` 或 `--provider` 选择，`--model` 可临时切换模型。若 `uv run` 报 `No module named chagent`（外层 `sitecustomize` 接管解释器时，editable 安装的 `.pth` 可能不生效），用 `PYTHONPATH=src uv run --env-file .env python -m chagent ...` 绕开即可。配置检查不发送请求：
+启动即打开 <http://127.0.0.1:8765>。网页是默认入口：对话、审批、长期记忆、上下文快照、文档上传都在里面。启动器还有三条行为——端口被别的程序占用时自动顺延到下一个空闲端口；同一端口已在运行 Chagent 时不再起第二个进程，只打开浏览器；`--no-open` 可关掉自动打开。
+
+网页左下的工作区按钮可以切换目录：会话、上传与文件工具都限定在选中的目录内，未打开的目录连带 workspace 参数请求会被拒绝。工具条上的齿轮显示当前生效的配置（沙箱、审批、联网、压缩、工具数、预算），与命令行打印的 `Behavior:` 同源。工作区在服务重启后需要重新打开一次。
+
+只有一个命名 Key 时自动使用该供应商的预设模型；多个 Key 时用 `CHAGENT_PROVIDER` 或 `--provider` 选择，`--model` 可临时切换模型。若 `uv run` 或 `.venv/bin/chagent` 报 `No module named chagent`（外层 `sitecustomize` 接管解释器时，editable 安装的 `.pth` 可能不生效），用 `PYTHONPATH=src` 绕开即可——`scripts/start.command` 已经替你加好了。配置检查不发送请求：
 
 ```sh
 uv run --env-file .env python -m chagent.models check
 # 人读的完整解析：行为开关、预算、数据库，以及被 shell 覆盖的 .env 值
 uv run --env-file .env python -m chagent.config show
-uv run --env-file .env python -m chagent --demo "无需 API Key 的离线演示"
 ```
 
-启动时先打印 `Resolved:`（供应商／模型／地址／Key 来源）与 `Behavior:`（沙箱、宿主命令、压缩、轮数上限），因此 shell 里遗留的 `CHAGENT_*` 变量不会静默改变行为。
+启动时先打印 `Resolved:`（供应商／模型／地址／Key 来源）与 `Behavior:`（沙箱、宿主命令、压缩、轮数上限），因此 shell 里遗留的 `CHAGENT_*` 变量不会静默改变行为；这两行在网页里对应工具条的齿轮面板。
 
 预设模型、兼容范围与预算配置见[模型配置](docs/模型配置.md)。
 
-启动时自动应用未执行的迁移，输出会话 ID、运行 ID、结束原因、最终回答与持久化记录数。继续同一会话：
+启动时自动应用未执行的迁移，网页里每个会话的运行会记录运行 ID、结束原因与持久化记录数。
+
+### 命令行（已冻结）
+
+`python -m chagent.cli` 保留两条网页替代不了的路径：不经浏览器的一次性运行，以及 `--tool` 确定性工具注入（探针用）。它不再接收新功能：
 
 ```sh
-uv run --env-file .env python -m chagent --session <会话UUID> "继续对话"
+uv run --env-file .env python -m chagent.cli "你好，介绍一下这个项目"
+uv run --env-file .env python -m chagent.cli --session <会话UUID> "继续对话"
 # 显式验证文件工具（--tool 隐含 --demo）
-uv run --env-file .env python -m chagent --tool read_file --arguments '{"path":"README.md","limit":40}'
+uv run --env-file .env python -m chagent.cli --tool read_file --arguments '{"path":"README.md","limit":40}'
 ```
 
 工作区默认当前目录，`--workspace /absolute/path` 只影响新会话；继续会话时保留其原工作区。工具接口、工作区边界与宿主命令开关见[基础工具设计](docs/基础工具设计.md)。
@@ -71,14 +79,39 @@ CHAGENT_TAVILY_API_KEY=tvly-...  # 免费额度 1000 次/月
 
 它跑在 agent 进程里，**沙箱管不到它**——`CHAGENT_SANDBOX` 断的是 `exec_command` 的子进程。所以这个开关是唯一的闸门，默认关。边界、契约与回退见[执行边界设计](docs/执行边界设计.md) §13。
 
+## 文档与上传
+
+`read_file` 能直接读 PDF、Word 和 Excel——不需要先转成文本，也没有新增工具：
+
+```bash
+uv sync --extra documents   # pypdf + python-docx + openpyxl
+```
+
+装好之后对 `.pdf`／`.docx`／`.xlsx` 调 `read_file`，返回的是**带位置的编号文本块**，`offset`／`limit` 从「行」变成「块」：
+
+```text
+File: uploads/出差制度.pdf
+Format: parsed document
+Total blocks: 6
+Next offset: 4
+B1 [page 1]: ACME Travel Policy
+B2 [page 1]: Page one body line.
+```
+
+块边界就是段落边界，所以表格不会从中间被切开；PDF 每块带页码，Word 带标题路径，Excel 带工作表名。翻页方式和文本文件一致，一直读到 `Next offset: none`。解析结果按内容哈希缓存（最多 8 份），翻 400 页的 PDF 只解析一次。
+
+网页对话框左下角的 **＋** 可以上传文件，落在工作区的 `uploads/` 下并自动把路径写进输入框。同名文件加序号，文件名里的路径分隔符与 `..` 会被剥掉，单文件上限 20 MiB。
+
+四个边界：**扫描件读不了**（没有文本层，OCR 不在范围内，明确报错而不是返回空）、**旧格式 `.doc`／`.xls` 不读**（提示另存为 `.docx`／`.xlsx`）、**只提文本**（不解析图片、批注、公式计算）、**解析在工具线程里**（单文件 32 MiB 上限，挡住超大文件把工具超时耗尽）。
+
 ## 网页对话
 
 ```sh
-uv run --env-file .env python -m chagent.web
-uv run --env-file .env python -m chagent.web --demo    # 离线演示
+uv run --env-file .env python -m chagent         # 等价于 ./scripts/start.command
+uv run --env-file .env python -m chagent --demo  # 离线演示
 ```
 
-打开 <http://127.0.0.1:8765>。支持创建与切换会话、加载历史、流式回答、工具状态与停止生成；刷新后恢复当前会话。`--workspace`、`--port`、`--provider`、`--model` 与命令行一致。接口文档在 `/docs`，OpenAPI 在 `/openapi.json`，均不依赖 CDN。详见[网页对话设计](docs/网页对话设计.md)。
+打开 <http://127.0.0.1:8765>。支持创建与切换会话、加载历史、流式回答、工具状态与停止生成；刷新后恢复当前会话。`--workspace`、`--port`、`--provider`、`--model`、`--no-open` 与命令行一致。接口文档在 `/docs`，OpenAPI 在 `/openapi.json`，均不依赖 CDN。详见[网页对话设计](docs/网页对话设计.md)。
 
 ## 会话、上下文与记忆
 
@@ -98,7 +131,7 @@ uv run --env-file .env python -m chagent.memory list
 
 ## 验证
 
-已交付批次的实现、实测、边界与回退方式统一记在[实施记录](docs/实施记录.md)：记忆提取移出运行与上下文投影缓存、A 批文本合并与提交后通知、B1 运行所有权与失联收敛、B2 失败事实恢复、F1 事件批量提交、F2 一个事务一道所有权门、P0 检索与补丁工具、P1 提示缓存不变量、M 轮次度量、G 一次调用多处编辑、H 运行级环境快照、G2 编辑失败路径的搜索预算与线程化、N `/remember` 本地短路、S 宿主机命令沙箱、M2 缓存归因与 `config show`、I 重复调用拦截、L 真 tokenizer 与保留式压缩、K 宿主命令审批、J 会话进程（`long` 场景 45 秒命令由必然失败变为 3 轮／2 次调用成功）、W 联网检索与正文抓取。
+已交付批次的实现、实测、边界与回退方式统一记在[实施记录](docs/实施记录.md)：记忆提取移出运行与上下文投影缓存、A 批文本合并与提交后通知、B1 运行所有权与失联收敛、B2 失败事实恢复、F1 事件批量提交、F2 一个事务一道所有权门、P0 检索与补丁工具、P1 提示缓存不变量、M 轮次度量、G 一次调用多处编辑、H 运行级环境快照、G2 编辑失败路径的搜索预算与线程化、N `/remember` 本地短路、S 宿主机命令沙箱、M2 缓存归因与 `config show`、I 重复调用拦截、L 真 tokenizer 与保留式压缩、K 宿主命令审批、J 会话进程（`long` 场景 45 秒命令由必然失败变为 3 轮／2 次调用成功）、W 联网检索与正文抓取、X 文档读取与上传、Y 网页成为唯一入口、Z0 还债（`echo` 退出生产工具面、429／5xx 重试、`test_sandbox` canary）、Z1 删掉不存在的界面（44→20 个按钮，孤儿归零）。
 
 写路径两批合起来的效果：1.6 秒流式回答从 260 条 SQL／81 个事务降到 59／21，两轮加一次工具从 57 条降到 46 条，事务数与失权判定不变。
 
@@ -108,9 +141,9 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   uv run python -m unittest discover -s tests -q
 ```
 
-数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **410 项通过**。
+数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **455 项**：本机 445 通过、**10 项 `test_sandbox` 跳过**——`sandbox-exec` 存在但在这个嵌套环境里拒绝应用 profile（exit 71），模块级 canary 探测到之后把整类用例标为 `skipped` 并带上原因。跳过不是通过：沙箱能力以[执行边界设计](docs/执行边界设计.md) §10.4 的能力表为准，在允许 seatbelt 的机器上这 10 项会真正执行。
 
-真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/diagnose_main_path.py`、`scripts/bench_write_path.py`。链路报告为每个用例带上本地计算的 `cache{hit,reusable,breaks}`（不额外请求），失败时可用 `--keep-schema docs/diagnostics` 保留一次性 schema，再用 `report_prompt_cache.py --schema <名称>` 事后审计。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求；`scripts/report_token_estimates.py` 对同一批请求比较本地 token 估算与供应商实际用量。结论与实测数据见[实施记录](docs/实施记录.md)与[执行效率优化](docs/执行效率优化.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
+真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/bench_write_path.py`。链路报告为每个用例带上本地计算的 `cache{hit,reusable,breaks}`（不额外请求），失败时可用 `--keep-schema docs/diagnostics` 保留一次性 schema，再用 `report_prompt_cache.py --schema <名称>` 事后审计。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求；`scripts/report_token_estimates.py` 对同一批请求比较本地 token 估算与供应商实际用量。结论与实测数据见[实施记录](docs/实施记录.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
 
 四场景任务探针用固定临时仓库与一次性 schema 运行真实供应商，报告轮次、工具调用、重复调用、墙钟与正确性；`--repeats 2` 用来检查轮次波动：
 
@@ -134,8 +167,7 @@ uv run --env-file .env python scripts/probe_task.py --case all --repeats 2 \
 | 数据库、连接池、迁移 | [数据库配置](docs/数据库配置.md) |
 | 供应商与模型预算 | [模型配置](docs/模型配置.md) |
 | 已交付批次的实现、实测、边界与回退 | [实施记录](docs/实施记录.md) |
-| 写入路径实测与收敛方案（F3 已决定不做） | [执行效率优化](docs/执行效率优化.md) |
-| 路线图、诊断基线、未实施项 | [下一阶段实施方案](docs/下一阶段实施方案.md) |
+| 路线图、已交付结论表、下一阶段 Z 批、验收口径 | [下一阶段实施方案](docs/下一阶段实施方案.md) |
 | 沙箱、审批、会话进程、出网与事件通道（S／K／J／W 均已实施） | [执行边界设计](docs/执行边界设计.md) |
 
 诊断与真实链路的原始结果归档在 [`docs/diagnostics/`](docs/diagnostics/)。

@@ -2,7 +2,7 @@
 
 const $ = id => document.getElementById(id);
 const terminal = new Set(["completed", "failed", "cancelled", "interrupted"]);
-const state = {session: null, run: null, source: null, version: 0, before: null, sessionCursor: null, busy: false, loading: false};
+const state = {session: null, run: null, source: null, version: 0, before: null, sessionCursor: null, busy: false, loading: false, workspace: null};
 let liveText = null;
 const toolRows = new Map();
 
@@ -13,6 +13,11 @@ async function api(path, options = {}) {
   return value;
 }
 const post = (path, value) => api(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(value)});
+// Every workspace-scoped call names its workspace; the server refuses ones that
+// were never opened, so a stale tab cannot act in a directory it did not pick.
+const withWorkspace = path => state.workspace
+  ? `${path}${path.includes("?") ? "&" : "?"}workspace=${encodeURIComponent(state.workspace)}`
+  : path;
 function showError(error) { $("error").textContent = error.message || String(error); $("error").hidden = false; }
 function clearError() { $("error").hidden = true; }
 function textNode(tag, text, className) {
@@ -80,7 +85,11 @@ function resetStream() {
   state.source = null; state.run = null; liveText = null; toolRows.clear(); $("live").replaceChildren();
 }
 async function listSessions(append = false) {
-  const page = await api(`/api/sessions${append && state.sessionCursor ? `?before=${state.sessionCursor}` : ""}`);
+  const params = new URLSearchParams();
+  if (state.workspace) params.set("workspace", state.workspace);
+  if (append && state.sessionCursor) params.set("before", state.sessionCursor);
+  const query = params.toString();
+  const page = await api(`/api/sessions${query ? `?${query}` : ""}`);
   if (!append) $("sessions").replaceChildren();
   for (const session of page.items) {
     const button = textNode("button", session.title || "未命名会话");
@@ -253,7 +262,7 @@ $("composer").addEventListener("submit", async event => {
   clearError(); state.loading = true; $("send").disabled = true;
   try {
     if (!state.session) {
-      const session = await post("/api/sessions", {title: text.trim().slice(0, 30)}); state.session = session.id;
+      const session = await post("/api/sessions", {title: text.trim().slice(0, 30), workspace: state.workspace}); state.session = session.id;
       await listSessions();
     }
     const id = state.session;
@@ -266,9 +275,49 @@ $("composer").addEventListener("submit", async event => {
 $("input").addEventListener("keydown", event => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); $("composer").requestSubmit(); }
 });
+
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// The file body is posted as-is: the endpoint takes raw bytes with any content
+// type, so a 20 MiB report never becomes a base64 string inside JSON.
+async function uploadFile(file) {
+  const response = await fetch(withWorkspace(`/api/uploads?name=${encodeURIComponent(file.name)}`), {
+    method: "POST",
+    headers: {"Content-Type": file.type || "application/octet-stream"},
+    body: file,
+  });
+  const value = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(value.error || `上传失败 (${response.status})`);
+  return value;
+}
+
+$("attach").addEventListener("click", () => $("file-input").click());
+$("file-input").addEventListener("change", async event => {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  clearError();
+  $("status").textContent = `正在上传 ${file.name}…`;
+  try {
+    const saved = await uploadFile(file);
+    const input = $("input");
+    const ask = `请阅读 ${saved.path}`;
+    const rest = input.value.trim();
+    input.value = rest ? `${ask}：${rest}` : `${ask}：`;
+    input.focus();
+    $("status").textContent = `已上传 ${saved.name}（${formatSize(saved.size)}）`;
+  } catch (error) {
+    showError(error);
+    $("status").textContent = "就绪";
+  }
+});
 $("new-session").addEventListener("click", async () => {
   try {
-    const session = await post("/api/sessions", {title: "新会话"});
+    const session = await post("/api/sessions", {title: "新会话", workspace: state.workspace});
     await listSessions(); await openSession(session.id); $("input").focus();
   } catch (error) { showError(error); }
 });
@@ -317,10 +366,23 @@ async function loadContext() {
   }
 }
 $("context-panel").addEventListener("toggle", () => { if ($("context-panel").open) loadContext().catch(showError); });
+// Opening a directory is a server-side decision: it joins the set of roots this
+// process may touch. The choice is remembered per browser, not per session.
+async function ensureWorkspace(path) {
+  const opened = await post("/api/workspaces", {path});
+  state.workspace = opened.path;
+  localStorage.setItem("chagent.workspace", opened.path);
+  $("workspace").textContent = opened.path; $("workspace").title = opened.path;
+  return opened;
+}
 async function init() {
   const info = await api("/api/info");
   $("model").textContent = `${info.provider} / ${info.model}`;
-  $("workspace").textContent = info.workspace; $("workspace").title = info.workspace;
+  const stored = localStorage.getItem("chagent.workspace");
+  if (stored && stored !== info.workspace) {
+    try { await ensureWorkspace(stored); }
+    catch { await ensureWorkspace(info.workspace); }
+  } else await ensureWorkspace(info.workspace);
   await listSessions();
   const previous = localStorage.getItem("chagent.session");
   if (previous) {
@@ -330,7 +392,8 @@ async function init() {
 }
 init().catch(showError);
 
-// New UI wiring: rail button opens the context panel inside the tools sidebar.
+// The rail's single button opens the context panel; the panel is open by
+// default, so this is a jump-to rather than a toggle.
 $("open-context").addEventListener("click", () => {
   const panel = $("context-panel");
   panel.open = true;
@@ -375,7 +438,7 @@ async function loadMemories(append = false) {
   const version = ++memoryState.version;
   const status = $("memory-filter").value;
   const cursor = append && memoryState.cursor ? `&before=${memoryState.cursor}` : "";
-  const page = await api(`/api/memories?status=${status}${cursor}`);
+  const page = await api(withWorkspace(`/api/memories?status=${status}${cursor}`));
   if (version !== memoryState.version) return;
   if (!append) $("memory-list").replaceChildren();
   if (!page.items.length && !append) $("memory-list").append(textNode("p", "暂无记录。", "muted"));
@@ -389,14 +452,14 @@ async function loadMemories(append = false) {
     const history = textNode("button", "查看版本记录", "quiet");
     history.addEventListener("click", async () => {
       try {
-        const revisions = await api(`/api/memories/${memory.id}/revisions`);
+        const revisions = await api(withWorkspace(`/api/memories/${memory.id}/revisions`));
         history.remove();
         for (const revision of revisions) source.append(textNode("pre", `v${revision.revision} · ${revision.action}\n${revision.payload.content}`));
       } catch (error) { memoryNotice(error.message, true); }
     });
     source.append(history); card.append(source);
     if (memory.status === "candidate") {
-      const detail = await api(`/api/memories/${memory.id}`);
+      const detail = await api(withWorkspace(`/api/memories/${memory.id}`));
       if (version !== memoryState.version) return;
       const conflict = detail.conflict;
       if (conflict) card.append(textNode("p", `将替换当前版本 v${conflict.revision}：${conflict.content}`, "memory-conflict"));
@@ -404,14 +467,14 @@ async function loadMemories(append = false) {
       accept.addEventListener("click", async () => {
         accept.disabled = true;
         try {
-          await post(`/api/memories/${memory.id}/accept`, {expected_revision: memory.revision,
+          await post(withWorkspace(`/api/memories/${memory.id}/accept`), {expected_revision: memory.revision,
             replace_id: conflict?.id || null, replace_revision: conflict?.revision || null});
           memoryNotice("候选已采纳。"); await loadMemories();
         } catch (error) { memoryNotice(error.message, true); accept.disabled = false; }
       });
       const reject = textNode("button", "拒绝", "quiet");
       reject.addEventListener("click", async () => {
-        try { await post(`/api/memories/${memory.id}/reject`, {expected_revision: memory.revision}); await loadMemories(); }
+        try { await post(withWorkspace(`/api/memories/${memory.id}/reject`), {expected_revision: memory.revision}); await loadMemories(); }
         catch (error) { memoryNotice(error.message, true); }
       });
       card.append(accept, reject);
@@ -421,7 +484,7 @@ async function loadMemories(append = false) {
       const remove = textNode("button", "删除", "quiet");
       remove.addEventListener("click", async () => {
         try {
-          await memoryRequest(`/api/memories/${memory.id}`, "DELETE", {expected_revision: memory.revision});
+          await memoryRequest(withWorkspace(`/api/memories/${memory.id}`), "DELETE", {expected_revision: memory.revision});
           memoryNotice("已停止使用这条记忆。"); await loadMemories();
         } catch (error) { memoryNotice(error.message, true); }
       });
@@ -444,8 +507,90 @@ $("memory-editor").addEventListener("submit", async event => {
   try {
     const memory = memoryState.editing;
     const fields = {content: $("memory-content").value, pinned: $("memory-pinned").checked};
-    if (memory) await memoryRequest(`/api/memories/${memory.id}`, "PATCH", {...fields, expected_revision: memory.revision});
-    else await post("/api/memories", {...fields, scope: $("memory-scope").value, key: $("memory-key").value});
+    if (memory) await memoryRequest(withWorkspace(`/api/memories/${memory.id}`), "PATCH", {...fields, expected_revision: memory.revision});
+    else await post(withWorkspace("/api/memories"), {...fields, scope: $("memory-scope").value, key: $("memory-key").value});
     $("memory-editor").hidden = true; memoryState.editing = null; memoryNotice("已保存。"); await loadMemories();
   } catch (error) { memoryNotice(error.message, true); }
 });
+
+// Workspace picker: what the database has seen, plus any directory the user
+// types. Switching keeps the chat surface but drops the previous session.
+function workspaceNotice(message, failed = false) {
+  $("workspace-notice").textContent = message;
+  $("workspace-notice").classList.toggle("failed", failed);
+}
+async function switchWorkspace(path) {
+  await ensureWorkspace(path);
+  state.session = null; localStorage.removeItem("chagent.session");
+  resetStream(); state.loading = false; setBusy(false);
+  $("messages").replaceChildren(); $("empty").hidden = false; $("session-title").textContent = "聊天";
+  await listSessions();
+}
+async function loadWorkspaces() {
+  const page = await api("/api/workspaces");
+  const target = $("workspace-list"); target.replaceChildren();
+  for (const item of page.items) {
+    const row = document.createElement("button");
+    row.type = "button"; row.className = "workspace-row";
+    row.classList.toggle("active", item.path === state.workspace);
+    row.append(textNode("span", item.path), textNode("span", `${item.sessions} 个会话`, "muted"));
+    row.addEventListener("click", () => {
+      switchWorkspace(item.path).then(() => $("workspace-dialog").close())
+        .catch(error => workspaceNotice(error.message, true));
+    });
+    target.append(row);
+  }
+  if (!page.items.length) target.append(textNode("p", "还没有记录。", "muted"));
+}
+$("workspace-button").addEventListener("click", () => {
+  workspaceNotice(""); $("workspace-path").value = "";
+  $("workspace-dialog").showModal();
+  loadWorkspaces().catch(error => workspaceNotice(error.message, true));
+});
+$("close-workspace").addEventListener("click", () => $("workspace-dialog").close());
+$("workspace-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const path = $("workspace-path").value.trim();
+  if (!path) return;
+  try {
+    await switchWorkspace(path);
+    $("workspace-dialog").close();
+  } catch (error) { workspaceNotice(error.message, true); }
+});
+
+// Runtime configuration: the same facts the CLI prints as `Behavior:`.
+const configLabels = [
+  ["provider", "供应商"], ["model", "模型"], ["tools", "工具数"],
+  ["run_timeout", "单次运行上限"], ["sandbox", "沙箱"], ["approval", "审批"],
+  ["host_commands", "宿主命令"], ["web_access", "联网"], ["compaction", "上下文压缩"],
+  ["tokenizer", "token 计数"], ["max_turns", "最大轮数"], ["max_processes", "会话进程"],
+];
+function configValue(key, c) {
+  switch (key) {
+    case "tools": return `${c.tools} 个`;
+    case "run_timeout": return `${Math.round(c.run_timeout)} 秒`;
+    case "sandbox": return c.sandbox === "off" ? "关闭" : `${c.sandbox} · ${c.sandbox_network ? "允许出网" : "禁止出网"}`;
+    case "approval": return `${c.approval} · 等待 ${Math.round(c.approval_timeout)} 秒`;
+    case "host_commands": return c.host_commands ? "开启" : "关闭";
+    case "web_access": return c.web_access === "off" ? "关闭" : `${c.web_access} · 密钥${c.web_key === "set" ? "已配置" : "缺失"}`;
+    case "compaction": return c.compaction ? "开启" : "关闭";
+    case "max_turns": return `${c.max_turns} 轮`;
+    case "max_processes": return `${c.max_processes} 个 · 单个 ${Math.round(c.process_timeout)} 秒`;
+    default: return String(c[key]);
+  }
+}
+async function loadConfig() {
+  const config = await api("/api/config");
+  const target = $("config-list"); target.replaceChildren();
+  for (const [key, label] of configLabels) {
+    target.append(textNode("dt", label), textNode("dd", configValue(key, config)));
+  }
+  target.append(textNode("dd", config.behavior, "config-behavior"));
+}
+$("open-config").addEventListener("click", () => {
+  const notice = $("config-notice");
+  notice.textContent = ""; notice.classList.remove("failed");
+  $("config-dialog").showModal();
+  loadConfig().catch(error => { notice.textContent = error.message; notice.classList.add("failed"); });
+});
+$("close-config").addEventListener("click", () => $("config-dialog").close());

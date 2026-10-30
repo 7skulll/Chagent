@@ -16,10 +16,19 @@ dependencies = [
     "uvicorn>=0.35,<1",
 ]
 
+# The browser is the entry point: `chagent` starts the local web app and opens
+# it. The frozen command-line runner stays reachable as `python -m chagent.cli`.
+[project.scripts]
+chagent = "chagent.web.__main__:main"
+
 [project.optional-dependencies]
 # A real BPE counter for context budgeting. Optional: without it the builder
 # falls back to the byte estimate and records that in the snapshot.
 tokenizer = ["tiktoken>=0.7,<1"]
+# Readers for binary documents behind read_file. Optional for the same reason:
+# text-only work never pays for them, and a missing reader is reported as an
+# install hint on the call that needs it, not as a startup failure.
+documents = ["pypdf>=5,<7", "python-docx>=1.1,<2", "openpyxl>=3.1,<4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chagent"]

@@ -44,7 +44,8 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
         model = ModelSettings.from_env(env)
         sections["model"] = model.describe()
         sections["budgets"] = (f"context_window={model.context_window} max_tokens={model.max_tokens} "
-                               f"request_timeout={model.request_timeout:g} run_timeout={model.run_timeout:g}")
+                               f"request_timeout={model.request_timeout:g} run_timeout={model.run_timeout:g} "
+                               f"retries={model.retry_attempts}")
         # Which counter is in effect decides when compaction triggers; a fallback
         # here is invisible in every other output.
         sections["tokenizer"] = select_counter(model.model(), env).name

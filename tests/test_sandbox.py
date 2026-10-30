@@ -1,14 +1,19 @@
 """Sandbox profiles and the probe that decides whether they may be used.
 
 The pure cases pin the profile text, because a profile is a string that either
-means what we think or silently means something else. The platform cases are
-skipped where seatbelt does not exist; a skip is not a pass, so the capability
-table in ``docs/执行边界设计.md`` §10.4 is the only claim of support.
+means what we think or silently means something else. The platform cases need a
+working seatbelt, which is not the same thing as the binary existing: a nested
+sandbox, a hardened runner, or a broken install lets ``sandbox-exec`` be present
+and fail every command. ``_canary`` runs it once, and if the mechanism itself
+does not work the class is skipped rather than reported as eight failures that
+look like regressions. A skip is still not a pass: the capability table in
+``docs/执行边界设计.md`` §10.4 is the only claim of support.
 """
 
 import asyncio
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,7 +25,35 @@ from chagent.tools.sandbox import (
     SandboxSupport, SeatbeltBackend, _sbpl, profile,
 )
 
-DARWIN = sys.platform == "darwin" and SeatbeltBackend().available
+
+def _canary() -> tuple[bool, str]:
+    """Is the sandbox mechanism itself working on this machine?
+
+    The profile here is the smallest one that proves execution, not containment:
+    if this cannot start, every denial below would "pass" for the wrong reason
+    (the command fails at launch, not at the boundary).
+    """
+    backend = SeatbeltBackend()
+    if sys.platform != "darwin":
+        return False, "not macOS"
+    if not backend.available:
+        return False, f"{backend.binary} is missing"
+    try:
+        completed = subprocess.run(
+            [backend.binary, "-p", "(version 1)(allow default)", "--", "/bin/echo", "canary"],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, f"cannot run {backend.binary}: {error}"
+    if completed.returncode != 0 or "canary" not in completed.stdout:
+        reason = (completed.stderr or completed.stdout).strip().splitlines()
+        return False, f"sandbox-exec unusable (exit {completed.returncode}: {reason[0] if reason else 'no output'})"
+    return True, "ok"
+
+
+SEATBELT_READY, SEATBELT_DETAIL = _canary()
+DARWIN = SEATBELT_READY
+SKIP_REASON = f"seatbelt not usable: {SEATBELT_DETAIL}"
 # The real policy grants the user's TMPDIR so ordinary tools keep working, so
 # "outside" has to mean outside TMPDIR as well. The shared /private/tmp is not
 # granted, which makes it the honest target for a containment assertion.
@@ -84,7 +117,7 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(record, {"backend": "none", "network_allowed": True, "denied_reads": [], "unsandboxed": True})
 
 
-@unittest.skipUnless(DARWIN, "macOS seatbelt sandbox")
+@unittest.skipUnless(DARWIN, SKIP_REASON)
 class SeatbeltTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="chagent-sb-")
@@ -149,6 +182,12 @@ class SeatbeltTests(unittest.IsolatedAsyncioTestCase):
         return await _run(self.sandbox.backend.wrap(argv, policy or self.policy))
 
     async def test_descendants_inherit_the_profile(self):
+        # Positive control first: the canary proves ``sandbox-exec`` starts, this
+        # proves the profile still lets ordinary work through. Without it, a
+        # sandbox that refuses every command would look exactly like successful
+        # containment.
+        code, output = await self.run_in_sandbox(["/bin/sh", "-c", "printf alive"])
+        self.assertEqual((code, output), (0, "alive"))
         script = f"sh -c 'sh -c \"printf no > {OUTSIDE}\"'"
         code, _ = await self.run_in_sandbox(["/bin/sh", "-c", script])
         self.assertNotEqual(code, 0)
@@ -163,7 +202,7 @@ class SeatbeltTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(audit["unsandboxed"])  # never claims containment either way
 
 
-@unittest.skipUnless(DARWIN, "macOS seatbelt sandbox")
+@unittest.skipUnless(DARWIN, SKIP_REASON)
 class SandboxedToolTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="chagent-sb-")

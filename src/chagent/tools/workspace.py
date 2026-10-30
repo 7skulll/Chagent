@@ -58,30 +58,34 @@ class WorkspaceFS:
         with self.directory(parts[:-1]) as descriptor:
             yield descriptor, parts[-1]
 
-    def _read_at(self, parent: int, name: str) -> tuple[bytes, int]:
+    def _read_at(self, parent: int, name: str, limit: int = MAX_FILE_BYTES) -> tuple[bytes, int]:
         descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         with os.fdopen(descriptor, "rb") as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode):
                 raise ValueError("Only regular files are supported")
-            data = stream.read(MAX_FILE_BYTES + 1)
-            if len(data) > MAX_FILE_BYTES:
-                raise ValueError("File exceeds the 1 MiB file-tool limit")
+            data = stream.read(limit + 1)
+            if len(data) > limit:
+                raise ValueError(f"File exceeds the {limit} byte file-tool limit")
             return data, stat.S_IMODE(info.st_mode) & 0o777
 
-    def read(self, path: str) -> bytes:
+    def read(self, path: str, *, limit: int = MAX_FILE_BYTES) -> bytes:
+        """Read one file; ``limit`` is raised only for formats that get parsed."""
         with self.parent(path) as (parent, name):
-            return self._read_at(parent, name)[0]
+            return self._read_at(parent, name, limit)[0]
 
     def write(
         self, path: str, data: bytes, *, overwrite: bool = False, expected_hash: str | None = None,
+        limit: int = MAX_FILE_BYTES,
     ) -> str:
-        if len(data) > MAX_FILE_BYTES:
-            raise ValueError("Content exceeds the 1 MiB file-tool limit")
+        if len(data) > limit:
+            raise ValueError(f"Content exceeds the {limit} byte limit")
         with self.parent(path) as (parent, name):
             mode = 0o600
             try:
-                current, mode = self._read_at(parent, name)
+                # Same limit as the write, so an oversized existing file is
+                # reported as "exists" rather than as a size violation.
+                current, mode = self._read_at(parent, name, limit)
             except FileNotFoundError:
                 if expected_hash is not None:
                     raise ValueError("Expected file no longer exists") from None

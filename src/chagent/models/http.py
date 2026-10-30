@@ -15,7 +15,29 @@ from chagent.models.settings import ModelSettings
 
 
 class ModelProtocolError(ValueError):
-    pass
+    """A provider failure, with what the retry loop observed.
+
+    ``details`` exists so the surfaced reason and any audit record describe the
+    same facts (how many attempts, which status) instead of re-parsing text.
+    """
+
+    def __init__(self, message: str, *, details: dict | None = None) -> None:
+        super().__init__(message)
+        self.details: dict = details or {}
+
+
+def retryable_status(status: int) -> bool:
+    """Only these are worth repeating.
+
+    A 429 is a transient throttle and a 5xx is the provider's own problem; both
+    may answer differently a second later. A 4xx answers the same forever, so
+    retrying it would only delay the diagnosis.
+    """
+    return status == 429 or 500 <= status <= 599
+
+
+# Backoff grows geometrically from the configured first delay (0.5s, 1.5s, 4.5s).
+RETRY_BACKOFF_FACTOR = 3.0
 
 
 @dataclass(slots=True)
@@ -112,6 +134,24 @@ class HTTPModelClient:
         raise NotImplementedError
         yield  # pragma: no cover
 
+    def _failure(self, response: httpx.Response, retries: int = 0) -> ModelProtocolError:
+        hints = {401: "API key rejected", 403: "Access denied", 404: "Model or endpoint not found",
+                 429: "Rate limit or quota exceeded"}
+        status = response.status_code
+        reason = f"HTTP {status}: {hints.get(status, 'Provider request failed')}"
+        # A generic key silently wins over the provider's own variable. Say so,
+        # because the usual first move is to re-check a file that was never the
+        # problem.
+        if status == 401 and self.settings.shadowed_key_env:
+            reason += (f" (CHAGENT_API_KEY is set and overrides {self.settings.shadowed_key_env}; "
+                       "unset it to fall back to the named key)")
+        if retries:
+            reason += f" (after {retries} {'retry' if retries == 1 else 'retries'})"
+        # The body is never read into the reason: provider error payloads can
+        # echo credentials or request content.
+        return ModelProtocolError(reason, details={"status": status, "retries": retries,
+                                                   "attempts": retries + 1})
+
     async def stream(self, request: ModelRequest) -> AsyncIterator[AssistantMessageEvent]:
         started = monotonic_ns()
         partial = AssistantMessage([], request.model.api, request.model.provider, request.model.id,
@@ -127,26 +167,25 @@ class HTTPModelClient:
                     timeout=httpx.Timeout(self.settings.request_timeout),
                     transport=self.transport, follow_redirects=False,
                 )
-            async with self._client.stream("POST", self.endpoint, headers=self.headers(), json=payload) as response:
-                if not 200 <= response.status_code < 300:
-                    hints = {401: "API key rejected", 403: "Access denied", 404: "Model or endpoint not found",
-                             429: "Rate limit or quota exceeded"}
-                    reason = f"HTTP {response.status_code}: {hints.get(response.status_code, 'Provider request failed')}"
-                    # A generic key silently wins over the provider's own variable.
-                    # Say so, because the usual first move is to re-check a file
-                    # that was never the problem.
-                    if response.status_code == 401 and self.settings.shadowed_key_env:
-                        reason += (f" (CHAGENT_API_KEY is set and overrides {self.settings.shadowed_key_env}; "
-                                   "unset it to fall back to the named key)")
-                    # Provider error bodies can echo credentials or request content.
-                    raise ModelProtocolError(reason)
-                if "text/event-stream" not in response.headers.get("content-type", "").lower():
-                    raise ModelProtocolError("Expected a server-sent event response")
-                yield StartEvent(partial)
-                async for event in self.decode(response, partial):
-                    if event.type in {"done", "error"}:
-                        partial.duration_ms = (monotonic_ns() - started) // 1_000_000
-                    yield event
+            retries = 0
+            while True:
+                async with self._client.stream("POST", self.endpoint, headers=self.headers(), json=payload) as response:
+                    if not 200 <= response.status_code < 300:
+                        # Nothing has been yielded yet, so repeating the request
+                        # cannot duplicate a partial answer.
+                        if retryable_status(response.status_code) and retries < self.settings.retry_attempts:
+                            retries += 1
+                            await asyncio.sleep(self.settings.retry_delay * RETRY_BACKOFF_FACTOR ** (retries - 1))
+                            continue
+                        raise self._failure(response, retries)
+                    if "text/event-stream" not in response.headers.get("content-type", "").lower():
+                        raise ModelProtocolError("Expected a server-sent event response")
+                    yield StartEvent(partial)
+                    async for event in self.decode(response, partial):
+                        if event.type in {"done", "error"}:
+                            partial.duration_ms = (monotonic_ns() - started) // 1_000_000
+                        yield event
+                    return
         except asyncio.CancelledError:
             raise
         except Exception as error:

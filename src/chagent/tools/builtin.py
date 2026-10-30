@@ -17,10 +17,18 @@ from chagent.tools.web import WebAccess, create_web_tools
 def create_builtin_registry(*, allow_host_commands: bool = False, artifacts: ArtifactRepository | None = None,
                             sandbox: Sandbox | None = None,
                             processes: ProcessManager | None = None,
-                            web: WebAccess | None = None) -> ToolRegistry:
+                            web: WebAccess | None = None,
+                            include_echo: bool = False) -> ToolRegistry:
     registry = ToolRegistry()
-    for tool in (EchoTool(), ListDirTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
-                 GlobTool(), GrepTool(), ApplyPatchTool()):
+    # ``echo`` exists to verify the execution chain (demo runs, ``--tool``
+    # probes, tests), not to do work. Registered by default it was a 201-byte
+    # declaration the model could call every turn, so the live surface is the
+    # seven real tools and demo paths opt in explicitly.
+    tools = [ListDirTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
+             GlobTool(), GrepTool(), ApplyPatchTool()]
+    if include_echo:
+        tools.insert(0, EchoTool())
+    for tool in tools:
         registry.register(tool)
     if allow_host_commands:
         # Both run host processes; the executor enforces the same switch.

@@ -16,31 +16,24 @@ svg{display:block}
 
 /* ---------- 最左图标栏 ---------- */
 .rail{width:56px;flex-shrink:0;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:14px 0 12px;border-right:1px solid var(--line-soft);background:#fff}
-.rail-top,.rail-bottom{display:flex;flex-direction:column;align-items:center;gap:6px}
 .rail-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:10px;color:#6e6e73}
 .rail-icon svg{width:21px;height:21px}
 .rail-icon:hover{background:var(--hover)}
 .rail-icon.active{background:var(--panel);color:#1d1d1f}
-.rail-avatar{width:30px;height:30px;border-radius:50%;background:#e8734a;color:#fff;display:grid;place-items:center;font-size:12px;font-weight:500;margin-top:8px}
+.rail-avatar{width:30px;height:30px;border-radius:50%;background:#e8734a;color:#fff;display:grid;place-items:center;font-size:12px;font-weight:500}
 
 /* ---------- 会话侧栏 ---------- */
 .sidebar{width:268px;flex-shrink:0;display:flex;flex-direction:column;background:#fbfbfc;border-right:1px solid var(--line-soft);padding:12px 10px 10px}
 body.sidebar-collapsed .sidebar{display:none}
 body.sidebar-collapsed #toggle-sidebar,body.tools-collapsed #toggle-tools{background:var(--panel)}
 .sidebar-head{display:flex;align-items:center;justify-content:space-between;padding:2px 6px 10px}
-.brand{display:flex;align-items:center;gap:5px;font-size:19px;font-weight:500;letter-spacing:-.2px;padding:6px 8px;border-radius:8px}
-.brand:hover{background:var(--hover)}
-.brand .chev{width:16px;height:16px;color:var(--sub)}
-.head-actions{display:flex;gap:2px}
+.brand{display:flex;align-items:center;gap:5px;font-size:19px;font-weight:500;letter-spacing:-.2px;padding:6px 8px}
 .ghost-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:#7c7c81;flex-shrink:0}
 .ghost-icon svg{width:17px;height:17px}
 .ghost-icon:hover{background:var(--hover)}
 .new-chat{display:flex;align-items:center;gap:10px;width:100%;padding:10px 10px;border-radius:9px;font-size:15px;font-weight:500;color:#3c3c40;text-align:left}
 .new-chat svg{width:18px;height:18px;color:var(--sub)}
 .new-chat:hover{background:var(--hover)}
-.side-row{display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 10px;border-radius:9px;font-size:15px;color:#3c3c40;text-align:left}
-.side-row .chev-r{width:14px;height:14px;color:var(--faint)}
-.side-row:hover{background:var(--hover)}
 .section-label{font-size:12px;color:var(--faint);padding:16px 10px 7px}
 #sessions{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:1px;scrollbar-width:thin}
 #sessions button{display:block;width:100%;padding:9px 11px;text-align:left;font-size:14.5px;color:#48484d;border-radius:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -50,7 +43,10 @@ body.sidebar-collapsed #toggle-sidebar,body.tools-collapsed #toggle-tools{backgr
 .load-more:hover{color:#1d1d1f}
 .load-more.in-chat{margin:0 auto;display:block}
 .sidebar-foot{padding:10px 6px 2px;border-top:1px solid var(--line-soft)}
-.workspace{display:block;font-size:12px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.workspace{display:flex;align-items:center;gap:6px;width:100%;font-size:12px;color:var(--sub);padding:6px;overflow:hidden;text-align:left}
+.workspace svg{width:15px;height:15px;flex-shrink:0;color:var(--faint)}
+.workspace span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.workspace:hover{background:var(--hover);color:#3c3c40}
 
 /* ---------- 中间聊天区 ---------- */
 .chat{display:flex;flex-direction:column;flex:1;min-width:0;background:#fff}
@@ -58,9 +54,6 @@ body.sidebar-collapsed #toggle-sidebar,body.tools-collapsed #toggle-tools{backgr
 .tabbar-left{display:flex;gap:2px}
 .tabbar-title{flex:1;text-align:center;font-size:13.5px;font-weight:500;color:#3c3c40;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tabbar-right{display:flex;align-items:center;gap:4px}
-.fake-tab{display:flex;align-items:center;gap:7px;font-size:12.5px;color:#5a5a5f;background:var(--panel);border:1px solid var(--line-soft);border-radius:8px;padding:6px 10px}
-.fake-tab svg{width:14px;height:14px;color:var(--sub)}
-.tab-x{color:var(--faint);font-size:13px}
 #error{margin:10px 24px 0;background:#fdf0ee;color:#b3452e;border:1px solid #f2d8d2;padding:10px 16px;border-radius:10px;font-size:12.5px}
 
 #conversation{overflow-y:auto;flex:1;position:relative;padding:24px max(28px,calc((100% - 780px)/2));scrollbar-width:thin}
@@ -112,22 +105,11 @@ textarea::placeholder{color:#aeaeb2}
 .send-btn:hover{background:#2c66d9}
 .dock-hint{text-align:center;color:#c2c2c7;font-size:10.5px;margin-top:9px}
 
-/* ---------- 右侧工具面板 ---------- */
+/* ---------- 右侧上下文面板 ---------- */
 .tools-panel{width:300px;flex-shrink:0;display:flex;flex-direction:column;border-left:1px solid var(--line-soft);background:#fff}
 body.tools-collapsed .tools-panel{display:none}
-.browser-bar{height:46px;flex-shrink:0;display:flex;align-items:center;gap:4px;padding:0 10px;border-bottom:1px solid var(--line-soft)}
-.url-pill{flex:1;min-width:0;background:var(--panel);border-radius:9px;padding:7px 12px;font-size:12.5px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tools-body{padding:18px 16px;overflow-y:auto;flex:1}
-.tools-body h3{font-size:13px;font-weight:500;color:#3c3c40;margin:0 0 12px}
-.tool-card{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;margin-bottom:8px;border:1px solid var(--line-soft);border-radius:11px;font-size:13px;color:#3c3c40;text-align:left}
-.tool-card:hover{background:var(--panel)}
-.tool-ico{display:grid;place-items:center;color:#6e6e73}
-.tool-ico svg{width:16px;height:16px}
-.tool-card kbd{margin-left:auto;font-size:11px;color:var(--faint);background:var(--panel);border:1px solid var(--line-soft);border-radius:5px;padding:2px 6px}
-.tool-extra{margin-left:auto;display:flex;align-items:center;gap:6px}
-.tool-extra kbd{margin-left:0}
-.tool-extra .dots{width:15px;height:15px;color:var(--faint)}
-#context-panel{margin-top:20px;font-size:11.5px;color:#6e6e73}
+.tools-body{padding:16px;overflow-y:auto;flex:1}
+#context-panel{font-size:11.5px;color:#6e6e73}
 #context-panel>summary{cursor:pointer;padding:5px 0;font-size:12px;color:#3c3c40}
 #context-info{max-height:260px;overflow:auto;border:1px solid var(--line-soft);border-radius:10px;background:var(--panel);padding:10px 13px;line-height:1.7;margin-top:6px}
 #context-info p{margin:5px 0}
@@ -181,7 +163,6 @@ body.tools-collapsed .tools-panel{display:none}
   #conversation{padding:18px 16px}
   .dock{padding:6px 16px 12px}
   #empty h2{font-size:21px}
-  .fake-tab{display:none}
 }
 
 .approval {
@@ -196,3 +177,23 @@ body.tools-collapsed .tools-panel{display:none}
 }
 .approval-note { font-size: 12px; opacity: 0.75; }
 .approval-actions { display: flex; gap: 8px; }
+
+/* ---------- 工作区与配置对话框 ---------- */
+#workspace-dialog,#config-dialog{width:min(620px,95vw);max-height:88dvh;border:1px solid var(--line);border-radius:16px;padding:26px;background:#fff;color:#2b2b2e;box-shadow:0 18px 60px rgba(0,0,0,.14)}
+#workspace-dialog::backdrop,#config-dialog::backdrop{background:#00000033}
+.workspace-list{display:flex;flex-direction:column;gap:4px;margin:18px 0;max-height:38dvh;overflow:auto}
+.workspace-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 11px;border-radius:9px;text-align:left;font-size:13px}
+.workspace-row:hover{background:var(--hover)}
+.workspace-row.active{background:var(--panel);font-weight:500}
+.workspace-row .muted{color:var(--sub);font-size:11.5px;flex-shrink:0}
+#workspace-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:16px}
+#workspace-form label{font-size:12px;color:var(--sub);width:100%}
+#workspace-form input{flex:1;min-width:200px;border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit}
+#workspace-form button{background:var(--accent);color:#fff;padding:8px 14px;border-radius:8px}
+#workspace-form button:hover{background:#2c66d9}
+#config-list{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin:18px 0 4px;font-size:13px}
+#config-list dt{color:var(--sub);white-space:nowrap}
+#config-list dd{margin:0;word-break:break-all}
+#config-list .config-behavior{grid-column:1/-1;background:var(--panel);border-radius:8px;padding:9px 11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#3c3c40}
+#workspace-notice,#config-notice{font-size:12px;color:var(--sub);min-height:1px}
+#workspace-notice.failed,#config-notice.failed{color:#c0392b}

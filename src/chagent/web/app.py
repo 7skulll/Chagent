@@ -25,13 +25,15 @@ from chagent.tools.policy import ApprovalPolicy
 from chagent.tools.sandbox import Sandbox
 from chagent.tools.web import WebAccess
 from chagent.domain.codec import message_to_dict
+from chagent.diagnostics.behavior import describe as describe_behavior
+from chagent.domain.summaries import CompactionPolicy
 from chagent.models.factory import create_model_client
 from chagent.models.settings import ModelSettings
 from chagent.sessions.errors import SessionArchivedError, SessionNotFoundError
 from chagent.sessions.manager import SessionManager
 from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
-from chagent.storage.repositories import RunBusyError
+from chagent.storage.repositories import ConversationRepository, RunBusyError
 from chagent.storage.summaries import SummaryRepository
 from chagent.storage.artifacts import ArtifactRepository
 from chagent.domain.artifacts import artifact_text
@@ -42,9 +44,11 @@ from chagent.storage.memories import MemoryRepository
 from chagent.storage.memory_jobs import MemoryJobRepository
 from chagent.web.schemas import MemoryJobState
 from chagent.sessions.errors import StateConflictError
-from chagent.web.schemas import (AppInfo, ApprovalDecision, ArtifactPage, Cancellation, CancelRequest, ContextView, ErrorResponse,
-    MemoryCreate, MemoryDetail, MemoryEdit, MemoryPage, MemoryReview, MessagePage, RevisionRequest,
-    RunAccepted, RunCreate, RunView, SessionCreate, SessionDetail, SessionPage)
+from chagent.web.schemas import (AppInfo, ApprovalDecision, ArtifactPage, Cancellation, CancelRequest, ConfigView,
+    ContextView, ErrorResponse, MemoryCreate, MemoryDetail, MemoryEdit, MemoryPage, MemoryReview, MessagePage,
+    RevisionRequest, RunAccepted, RunCreate, RunView, SessionCreate, SessionDetail, SessionPage, UploadView,
+    WorkspaceCreate, WorkspacePage, WorkspaceView)
+from chagent.web.uploads import save as save_upload
 from chagent.domain.sessions import Session
 from chagent.domain.memories import Memory
 
@@ -52,6 +56,9 @@ from chagent.domain.memories import Memory
 SSE_POLL_INTERVAL = 1.0
 TERMINAL_EVENTS = {"run_completed", "run_failed", "run_cancelled", "run_interrupted"}
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
+#: The one write that is not JSON: the browser sends the file body directly, so
+#: a 20 MiB document never has to become a base64 string inside a JSON envelope.
+UPLOAD_PATH = "/api/uploads"
 logger = logging.getLogger(__name__)
 
 
@@ -61,31 +68,63 @@ def reply(value, status=200, headers=None):
 
 
 class WebRuntime:
-    def __init__(self, runner: AgentRunner, workspace: Path):
+    def __init__(self, runner: AgentRunner, workspace: Path, settings: Settings | None = None,
+                 compaction: CompactionPolicy | None = None):
         self.runner = runner
         self.workspace = workspace.resolve(strict=True)
         if not self.workspace.is_dir():
             raise NotADirectoryError("Workspace must be a directory")
+        self.settings = settings
+        self.compaction = compaction
         self.sessions = SessionManager(runner.conversations)
         self.approvals = ApprovalRepository(runner.runs.database, runner.runs)
+        # Workspaces the user has opened in this process. A session outside this
+        # set is not addressable, so a stale tab cannot act across workspaces it
+        # never selected. The startup directory is open by construction.
+        self.roots: set[Path] = {self.workspace}
         self.tasks: set[asyncio.Task] = set()
         self.closing = False
-        self._workspace_id = None
+        self._workspace_ids: dict[Path, UUID] = {}
         self._recovery_task: asyncio.Task | None = None
 
-    async def workspace_id(self):
-        if self._workspace_id is None:
+    def open_workspace(self, raw: str) -> Path:
+        """Resolve one directory and add it to the open set."""
+        try:
+            target = Path(raw).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise ValueError("工作区目录不存在") from None
+        if not target.is_dir():
+            raise ValueError("工作区必须是目录")
+        self.roots.add(target)
+        return target
+
+    def root(self, raw: str | None) -> Path:
+        """The workspace a request is about; ``None`` means the startup one."""
+        if raw is None or not raw.strip():
+            return self.workspace
+        target = Path(raw).expanduser().resolve(strict=False)
+        if target not in self.roots:
+            raise ValueError("该工作区尚未打开")
+        return target
+
+    async def workspace_id(self, workspace: Path | None = None):
+        root = self.workspace if workspace is None else workspace
+        if root not in self._workspace_ids:
             async with self.runner.conversations.database.connection() as connection:
                 cursor = await connection.execute(
                     "INSERT INTO workspaces (id, root_path) VALUES (%s, %s) ON CONFLICT (root_path) "
-                    "DO UPDATE SET root_path = EXCLUDED.root_path RETURNING id", (uuid4(), str(self.workspace)))
-                self._workspace_id = (await cursor.fetchone())["id"]
-        return self._workspace_id
+                    "DO UPDATE SET root_path = EXCLUDED.root_path RETURNING id", (uuid4(), str(root)))
+                self._workspace_ids[root] = (await cursor.fetchone())["id"]
+        return self._workspace_ids[root]
+
+    async def memory_scope(self, raw: str | None):
+        """The workspace UUID memory rows are scoped to, for one request."""
+        return await self.workspace_id(self.root(raw))
 
     async def session(self, identity: UUID):
         session = await self.sessions.get(identity)
-        if session.workspace != self.workspace:
-            raise SessionNotFoundError("Session does not belong to this workspace")
+        if session.workspace not in self.roots:
+            raise SessionNotFoundError("Session belongs to a workspace that is not open")
         return session
 
     async def run(self, identity: UUID):
@@ -162,6 +201,9 @@ def runtime(request: Request) -> WebRuntime:
 Current = Annotated[WebRuntime, Depends(runtime)]
 PageLimit = Annotated[int, Query(ge=1, le=100)]
 MessageLimit = Annotated[int, Query(ge=1, le=200)]
+#: A workspace comes from the client on every call that needs one; the startup
+#: directory is the default, and anything else must be opened first.
+WorkspacePath = Annotated[str | None, Query(max_length=4096)]
 SequenceCursor = Annotated[int, Query(ge=0, le=9_223_372_036_854_775_807)]
 api = APIRouter(prefix="/api", responses={code: {"model": ErrorResponse} for code in (400, 403, 404, 409, 413, 415, 503)})
 
@@ -171,67 +213,119 @@ async def info(current: Current):
     return {"workspace": current.workspace, "provider": current.runner.model.provider, "model": current.runner.model.id}
 
 
+@api.get("/workspaces", response_model=WorkspacePage, tags=["本地 Agent"])
+async def workspaces(current: Current):
+    """Every workspace this installation has seen, most recently used first.
+
+    Rows whose directory is gone are dropped: a picker entry that cannot be
+    opened is worse than no entry, and tests leave temporary roots behind.
+    """
+    rows = await ConversationRepository(current.runner.conversations.database).workspaces()
+    return {"items": [row for row in rows if Path(row["path"]).is_dir()]}
+
+
+@api.post("/workspaces", response_model=WorkspaceView, status_code=201, tags=["本地 Agent"])
+async def open_workspace(value: WorkspaceCreate, current: Current):
+    """Open one directory; from then on requests may name it as their workspace."""
+    path = current.open_workspace(value.path)
+    await current.workspace_id(path)
+    repository = ConversationRepository(current.runner.conversations.database)
+    return next((row for row in await repository.workspaces() if Path(row["path"]) == path),
+                {"path": path, "sessions": 0})
+
+
+@api.get("/config", response_model=ConfigView, tags=["本地 Agent"])
+async def config(current: Current):
+    """The resolved switches, so the browser is not blind to what the CLI prints."""
+    settings = current.settings or Settings.from_env()
+    policy = current.compaction or CompactionPolicy.from_env()
+    tokenizer = current.runner.context.counter.name
+    return {
+        "provider": current.runner.model.provider, "model": current.runner.model.id,
+        "run_timeout": current.runner.timeout,
+        "sandbox": settings.sandbox, "sandbox_network": settings.sandbox_network,
+        "approval": settings.approval, "approval_timeout": settings.approval_timeout,
+        "host_commands": settings.allow_host_commands,
+        "web_access": settings.web_access,
+        "web_key": "set" if settings.tavily_api_key.strip() else "missing",
+        "compaction": policy.enabled, "tokenizer": tokenizer,
+        "max_turns": settings.max_turns, "max_tool_concurrency": settings.max_tool_concurrency,
+        "max_processes": settings.max_processes, "process_timeout": settings.process_timeout,
+        "tools": len(current.runner.tools.registry.definitions()),
+        "behavior": describe_behavior(settings, policy, tokenizer),
+    }
+
+
 @api.get("/memories", response_model=MemoryPage, tags=["长期记忆"])
 async def memories(current: Current, status: Literal["active", "candidate", "deleted", "rejected", "all"] = "active",
-                   limit: PageLimit = 50, before: UUID | None = None):
+                   limit: PageLimit = 50, before: UUID | None = None, workspace: WorkspacePath = None):
     repository = MemoryRepository(current.runner.conversations.database)
-    return await repository.list(await current.workspace_id(), status=status, limit=limit, before=before)
+    return await repository.list(await current.memory_scope(workspace), status=status, limit=limit, before=before)
 
 
 @api.post("/memories", response_model=Memory, status_code=201, tags=["长期记忆"])
-async def create_memory(value: MemoryCreate, current: Current):
+async def create_memory(value: MemoryCreate, current: Current, workspace: WorkspacePath = None):
     repository = MemoryRepository(current.runner.conversations.database)
     return await repository.propose(MemoryProposal(value.key, value.content, value.scope, value.pinned, "manual"),
-                                    await current.workspace_id())
+                                    await current.memory_scope(workspace))
 
 
 @api.get("/memories/{memory_id}", response_model=MemoryDetail, tags=["长期记忆"])
-async def memory_detail(memory_id: UUID, current: Current):
+async def memory_detail(memory_id: UUID, current: Current, workspace: WorkspacePath = None):
     repository = MemoryRepository(current.runner.conversations.database)
-    memory = await repository.get(memory_id, await current.workspace_id())
+    memory = await repository.get(memory_id, await current.memory_scope(workspace))
     active = await repository.current(memory.scope, memory.workspace_id, memory.key) if memory.status == "candidate" else None
     return {"memory": memory, "conflict": active}
 
 
 @api.patch("/memories/{memory_id}", response_model=Memory, tags=["长期记忆"])
-async def edit_memory(memory_id: UUID, value: MemoryEdit, current: Current):
+async def edit_memory(memory_id: UUID, value: MemoryEdit, current: Current, workspace: WorkspacePath = None):
     return await MemoryRepository(current.runner.conversations.database).change(
-        memory_id, await current.workspace_id(), expected_revision=value.expected_revision,
+        memory_id, await current.memory_scope(workspace), expected_revision=value.expected_revision,
         content=value.content, pinned=value.pinned)
 
 
 @api.delete("/memories/{memory_id}", response_model=Memory, tags=["长期记忆"])
-async def delete_memory(memory_id: UUID, value: RevisionRequest, current: Current):
+async def delete_memory(memory_id: UUID, value: RevisionRequest, current: Current, workspace: WorkspacePath = None):
     return await MemoryRepository(current.runner.conversations.database).change(
-        memory_id, await current.workspace_id(), expected_revision=value.expected_revision, action="delete")
+        memory_id, await current.memory_scope(workspace), expected_revision=value.expected_revision, action="delete")
 
 
 @api.post("/memories/{memory_id}/accept", response_model=Memory, tags=["长期记忆"])
-async def accept_memory(memory_id: UUID, value: MemoryReview, current: Current):
+async def accept_memory(memory_id: UUID, value: MemoryReview, current: Current, workspace: WorkspacePath = None):
     return await MemoryRepository(current.runner.conversations.database).change(
-        memory_id, await current.workspace_id(), expected_revision=value.expected_revision, action="accept",
+        memory_id, await current.memory_scope(workspace), expected_revision=value.expected_revision, action="accept",
         replace_revision=value.replace_revision, replace_id=value.replace_id)
 
 
 @api.post("/memories/{memory_id}/reject", response_model=Memory, tags=["长期记忆"])
-async def reject_memory(memory_id: UUID, value: RevisionRequest, current: Current):
+async def reject_memory(memory_id: UUID, value: RevisionRequest, current: Current, workspace: WorkspacePath = None):
     return await MemoryRepository(current.runner.conversations.database).change(
-        memory_id, await current.workspace_id(), expected_revision=value.expected_revision, action="reject")
+        memory_id, await current.memory_scope(workspace), expected_revision=value.expected_revision, action="reject")
 
 
 @api.get("/memories/{memory_id}/revisions", tags=["长期记忆"])
-async def memory_history(memory_id: UUID, current: Current):
-    return await MemoryRepository(current.runner.conversations.database).revisions(memory_id, await current.workspace_id())
+async def memory_history(memory_id: UUID, current: Current, workspace: WorkspacePath = None):
+    return await MemoryRepository(current.runner.conversations.database).revisions(memory_id, await current.memory_scope(workspace))
 
 
 @api.get("/sessions", response_model=SessionPage, tags=["会话"])
-async def sessions(current: Current, limit: PageLimit = 50, before: UUID | None = None):
-    return await current.sessions.list(workspace=current.workspace, before=before, limit=limit)
+async def sessions(current: Current, limit: PageLimit = 50, before: UUID | None = None,
+                   workspace: WorkspacePath = None):
+    return await current.sessions.list(workspace=current.root(workspace), before=before, limit=limit)
 
 
 @api.post("/sessions", response_model=Session, status_code=201, tags=["会话"])
 async def create_session(value: SessionCreate, current: Current):
-    return await current.sessions.create(current.workspace, value.title)
+    return await current.sessions.create(current.root(value.workspace), value.title)
+
+
+@api.post("/uploads", response_model=UploadView, status_code=201, tags=["会话"])
+async def upload(request: Request, current: Current,
+                 name: Annotated[str, Query(min_length=1, max_length=300)] = "upload",
+                 workspace: WorkspacePath = None):
+    """Store one file under the workspace, where read_file can parse it."""
+    return await save_upload(current.root(workspace), name, request.stream())
 
 
 @api.get("/sessions/{session_id}", response_model=SessionDetail, tags=["会话"])
@@ -431,7 +525,11 @@ class LocalBoundary:
         if (origin is not None and origin != expected) or headers.get(b"sec-fetch-site") == b"cross-site":
             return await JSONResponse({"error": "Cross-origin access is disabled"}, 403)(scope, receive, send)
 
-        if scope["path"].startswith("/api/") and scope["method"] in {"POST", "PATCH", "DELETE"}:
+        # The upload route reads its own body: it accepts any content type and
+        # enforces its limit while streaming. Buffering it here would hold a
+        # whole document in memory twice and reject it for not being JSON.
+        if (scope["path"].startswith("/api/") and scope["method"] in {"POST", "PATCH", "DELETE"}
+                and not scope["path"].startswith(UPLOAD_PATH)):
             content = bytearray()
             while True:
                 message = await receive()
@@ -514,7 +612,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            approval_timeout=configured.approval_timeout,
                                            process_wall_timeout=configured.process_timeout,
                                            max_processes=configured.max_processes, web=web)
-                app.state.runtime = WebRuntime(runner, workspace)
+                app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env())
                 app.state.runtime.start_worker()
                 try:
                     yield

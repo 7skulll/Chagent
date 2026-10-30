@@ -1,5 +1,5 @@
 import asyncio
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import unittest
 
@@ -54,8 +54,9 @@ class FragmentedBody(httpx.AsyncByteStream):
 
 
 class AdapterTests(unittest.IsolatedAsyncioTestCase):
-    def settings(self, provider="openai"):
-        return ModelSettings.from_env({"CHAGENT_PROVIDER": provider, "CHAGENT_API_KEY": "test-provider-secret"})
+    def settings(self, provider="openai", **overrides):
+        base = ModelSettings.from_env({"CHAGENT_PROVIDER": provider, "CHAGENT_API_KEY": "test-provider-secret"})
+        return replace(base, **overrides) if overrides else base
 
     def request(self, settings):
         return ModelRequest(settings.model(), [
@@ -64,11 +65,14 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         ])
 
     async def collect(self, settings, body, *, status=200, headers=None):
+        """``status`` may be a sequence: one entry per attempt, last one repeats."""
         requests = []
+        statuses = list(status) if isinstance(status, (list, tuple)) else [status]
 
         async def handler(request):
             requests.append(request)
-            return httpx.Response(status, headers=headers or {"content-type": "text/event-stream"}, stream=FragmentedBody(body))
+            code = statuses[min(len(requests), len(statuses)) - 1]
+            return httpx.Response(code, headers=headers or {"content-type": "text/event-stream"}, stream=FragmentedBody(body))
 
         async with create_model_client(settings, transport=httpx.MockTransport(handler)) as client:
             events = [event async for event in client.stream(self.request(settings))]
@@ -123,13 +127,54 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                 events, _ = await self.collect(self.settings(), body)
                 self.assertIsInstance(events[-1], ErrorEvent)
                 self.assertFalse(any(isinstance(event, DoneEvent) for event in events))
-        for status in (401, 403, 404, 429, 503, 302):
+        for status in (401, 403, 404, 302):
             events, requests = await self.collect(self.settings(), '{"error":"test-provider-secret"}', status=status,
                                                   headers={"location": "https://other-host.test"})
             self.assertEqual(len(requests), 1)
             self.assertIsInstance(events[-1], ErrorEvent)
             self.assertIn(str(status), events[-1].error.error_message)
             self.assertNotIn("test-provider-secret", json.dumps(asdict(events[-1])))
+
+    async def test_transient_statuses_are_retried_inside_the_same_turn(self):
+        body = chat_sse([chat_choice({"content": "重试后成功"}), chat_choice(finish="stop")])
+        events, requests = await self.collect(self.settings(retry_delay=0), body, status=[429, 503, 200])
+        self.assertEqual(len(requests), 3)
+        # A retry is invisible to the caller: one start, one done, no error.
+        self.assertEqual(sum(isinstance(event, StartEvent) for event in events), 1)
+        self.assertIsInstance(events[-1], DoneEvent)
+        self.assertEqual(events[-1].message.content[0].text, "重试后成功")
+
+    async def test_client_errors_and_disabled_retry_ask_once(self):
+        for statuses, attempts in (([400], 2), ([429], 0), ([503], 0)):
+            with self.subTest(statuses=statuses, attempts=attempts):
+                events, requests = await self.collect(self.settings(retry_delay=0, retry_attempts=attempts),
+                                                      "{}", status=statuses)
+                self.assertEqual(len(requests), 1)
+                self.assertIsInstance(events[-1], ErrorEvent)
+                self.assertNotIn("retry", events[-1].error.error_message)
+
+    async def test_exhausted_retries_report_the_count_and_the_last_error(self):
+        events, requests = await self.collect(self.settings(retry_delay=0, retry_attempts=2), "{}",
+                                              status=503)
+        self.assertEqual(len(requests), 3)
+        message = events[-1].error.error_message
+        self.assertIn("HTTP 503", message)
+        self.assertIn("after 2 retries", message)
+
+    async def test_cancellation_during_backoff_ends_the_turn(self):
+        async def never(request):
+            return httpx.Response(429, headers={"content-type": "text/event-stream"},
+                                  stream=FragmentedBody("{}"))
+
+        settings = self.settings(retry_delay=30)
+        async with create_model_client(settings, transport=httpx.MockTransport(never)) as client:
+            async def consume():
+                return [event async for event in client.stream(self.request(settings))]
+            task = asyncio.create_task(consume())
+            await asyncio.sleep(0.05)  # inside the first backoff
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
 
     async def test_rejected_key_names_the_variable_that_overrode_the_file(self):
         settings = ModelSettings.from_env({"CHAGENT_PROVIDER": "deepseek", "CHAGENT_API_KEY": "stale",
