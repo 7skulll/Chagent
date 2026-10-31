@@ -300,7 +300,11 @@ class WebAccessTests(unittest.TestCase):
     def test_the_search_key_falls_back_to_the_provider_key(self):
         settings = Settings.from_env({"CHAGENT_WEB_ACCESS": "deepseek", "DEEPSEEK_API_KEY": "sk-provider"})
         self.assertEqual(settings.search_api_key, "sk-provider")
+        # Diagnostics must be able to say "fallback" without re-deriving it.
+        self.assertEqual(settings.search_api_key_source, "DEEPSEEK_API_KEY")
         explicit = Settings.from_env({"CHAGENT_WEB_ACCESS": "deepseek", "DEEPSEEK_API_KEY": "sk-provider",
                                       "CHAGENT_SEARCH_API_KEY": " sk-search "})
         self.assertEqual(explicit.search_api_key, "sk-search")
+        self.assertEqual(explicit.search_api_key_source, "CHAGENT_SEARCH_API_KEY")
         self.assertIn("web=deepseek", describe(explicit))
+        self.assertEqual(Settings.from_env({}).search_api_key_source, "")

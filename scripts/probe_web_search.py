@@ -57,7 +57,8 @@ async def run(session_query: str, count: int, recency: str | None, fetch: bool) 
         "provider": settings.web_access,
         "endpoints": {"search": SEARCH_ENDPOINT, "fetch": FETCH_ENDPOINT},
         "budgets": {"search_chars": MAX_SEARCH_CHARS, "fetch_chars": MAX_FETCH_CHARS},
-        "key_source": "CHAGENT_SEARCH_API_KEY" if settings.search_api_key else "missing",
+        #: Named by ``Settings.from_env`` so a fallback is recorded as a fallback.
+        "key_source": settings.search_api_key_source or "missing",
         "results": [],
     }
 

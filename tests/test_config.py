@@ -132,6 +132,8 @@ class ResolvedConfigurationTests(unittest.TestCase):
         self.assertEqual(problems, [])
         self.assertIn("deepseek/shell-model", sections["model"])
         self.assertIn("sandbox=workspace-write", sections["behavior"])
+        # The web key is reported by source, not value; the fallback is visible.
+        self.assertIn("key=set (DEEPSEEK_API_KEY)", sections["web"])
         self.assertEqual(sections["shadowed"],
                          ["CHAGENT_MODEL from .env 'file-model' is overridden by environment 'shell-model'"])
         self.assertNotIn("file-secret", json.dumps(sections))

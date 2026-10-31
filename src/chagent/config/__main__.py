@@ -66,9 +66,13 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
         sections["memory"] = f"worker_concurrency={settings.memory_worker_concurrency}"
         sections["processes"] = (f"max_per_run={settings.max_processes} "
                                  f"wall_timeout={settings.process_timeout:g}s")
-        # The key itself never appears here; only whether one is present.
-        sections["web"] = (f"provider={settings.web_access} "
-                           f"key={'set' if settings.search_api_key.strip() else 'missing'}")
+        # The key itself never appears here; only whether one is present, and
+        # which variable supplied it — the fallback is easy to forget otherwise.
+        key = "missing"
+        if settings.search_api_key.strip():
+            source = settings.search_api_key_source
+            key = f"set ({source})" if source else "set"
+        sections["web"] = f"provider={settings.web_access} key={key}"
         sections["database"] = (f"dbname={conninfo_to_dict(settings.database_url).get('dbname')} "
                                f"pool={settings.db_pool_min_size}..{settings.db_pool_max_size} "
                                f"timeout={settings.db_timeout:g}s")

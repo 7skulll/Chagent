@@ -8,6 +8,22 @@ import os
 from psycopg.conninfo import conninfo_to_dict
 
 
+def _search_api_key(values: Mapping[str, str]) -> dict[str, str]:
+    """Resolve the outbound key and name the variable that won.
+
+    The search key is a separate credential even when it holds the same value as
+    the provider key; the provider key is only a fallback. Resolving both here
+    keeps diagnostics from re-deriving precedence and disagreeing with runtime.
+    """
+    explicit = (values.get("CHAGENT_SEARCH_API_KEY") or "").strip()
+    if explicit:
+        return {"search_api_key": explicit, "search_api_key_source": "CHAGENT_SEARCH_API_KEY"}
+    fallback = (values.get("DEEPSEEK_API_KEY") or "").strip()
+    if fallback:
+        return {"search_api_key": fallback, "search_api_key_source": "DEEPSEEK_API_KEY"}
+    return {"search_api_key": "", "search_api_key_source": ""}
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     # Prevent accidental disclosure of credentials in repr/logs.
@@ -45,6 +61,11 @@ class Settings:
     #: credential even when the same value is used for both. ``from_env`` falls
     #: back to the provider key so one key is enough to try it.
     search_api_key: str = field(default="", repr=False)
+    #: Which variable supplied ``search_api_key``: ``CHAGENT_SEARCH_API_KEY``,
+    #: ``DEEPSEEK_API_KEY`` (the fallback) or empty when neither is set. The name
+    #: only — ``Settings.from_env`` is the single place that resolves precedence,
+    #: so diagnostics do not have to re-derive it and get it wrong.
+    search_api_key_source: str = ""
     #: Build-level switch for the write/execute face. ``off`` means no session can
     #: select ``code`` and the code face is never constructed at all: the model
     #: cannot call a tool that was not registered.
@@ -160,8 +181,7 @@ class Settings:
             max_processes=int(values.get("CHAGENT_MAX_PROCESSES", "4")),
             process_timeout=float(values.get("CHAGENT_PROCESS_TIMEOUT", "600")),
             web_access=values.get("CHAGENT_WEB_ACCESS", "off").strip().lower(),
-            search_api_key=(values.get("CHAGENT_SEARCH_API_KEY")
-                            or values.get("DEEPSEEK_API_KEY") or "").strip(),
+            **_search_api_key(values),
             code_mode=code_mode == "on",
             default_mode=values.get("CHAGENT_DEFAULT_MODE", "work").strip().lower(),
         )
