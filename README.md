@@ -172,6 +172,7 @@ uv run --env-file .env python scripts/probe_task.py --case all --repeats 2 \
 | 供应商与模型预算 | [模型配置](docs/模型配置.md) |
 | 已交付批次的实现、实测、边界与回退 | [实施记录](docs/实施记录.md) |
 | 路线图、已交付结论表、work 模式批次、验收口径 | [下一阶段实施方案](docs/下一阶段实施方案.md) |
+| code 模式：六条门槛核对、C0–C5 批次、验收与回退 | [第五版方案](docs/第五版方案.md) |
 | 沙箱、审批、会话进程、出网与事件通道（S／K／J／W 均已实施） | [执行边界设计](docs/执行边界设计.md) |
 
 诊断与真实链路的原始结果归档在 [`docs/diagnostics/`](docs/diagnostics/)。

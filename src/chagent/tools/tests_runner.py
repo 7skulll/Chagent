@@ -142,6 +142,9 @@ class RunTestsTool(AgentTool):
             }, requires_workspace=True, requires_host_execution=True, execution_mode="sequential",
         )
 
+    def execution_timeout(self, params: JsonObject) -> float:
+        return params.get("timeout_ms", 120_000) / 1000 + 10
+
     async def execute(
         self, tool_call_id: str, params: JsonObject, signal: asyncio.Event | None = None,
         on_update: AgentToolUpdateCallback | None = None, *, context: ToolContext | None = None,

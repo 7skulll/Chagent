@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from unittest.mock import patch
 
 from chagent.domain.messages import ToolCall
 from chagent.tools.builtin import create_builtin_registry
@@ -38,6 +39,25 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await task
+
+    async def test_tool_budget_and_ceiling(self):
+        class BudgetEcho(EchoTool):
+            def execution_timeout(self, params):
+                return 0.08
+
+            async def execute(self, *args, **kwargs):
+                await asyncio.sleep(0.04)
+                return await super().execute(*args, **kwargs)
+
+        registry = ToolRegistry()
+        registry.register(BudgetEcho())
+        call = ToolCall("a", "echo", {"text": "x"})
+        with patch.dict("os.environ", {"CHAGENT_TOOL_TIMEOUT_CEILING": "1"}):
+            self.assertFalse((await ToolExecutor(registry, timeout=0.01).execute(call)).is_error)
+        with patch.dict("os.environ", {"CHAGENT_TOOL_TIMEOUT_CEILING": "0.02"}):
+            result = await ToolExecutor(registry, timeout=0.01).execute(call)
+            self.assertTrue(result.is_error)
+            self.assertIn("0.02 seconds", result.content[0].text)
 
     async def test_declarations_are_isolated_and_duplicates_rejected(self):
         with self.assertRaises(ValueError):

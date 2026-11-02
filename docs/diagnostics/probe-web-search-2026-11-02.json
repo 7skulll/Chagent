@@ -1,0 +1,95 @@
+{
+  "recorded_at_utc": "2026-11-02T00:47:08.885442+00:00",
+  "provider": "deepseek",
+  "endpoints": {
+    "search": "https://api.deepseek.com/v1/tools/search",
+    "fetch": "https://api.deepseek.com/v1/tools/fetch"
+  },
+  "budgets": {
+    "search_chars": 8000,
+    "fetch_chars": 20000
+  },
+  "key_source": "CHAGENT_SEARCH_API_KEY",
+  "results": [
+    {
+      "name": "search",
+      "passed": true,
+      "elapsed_ms": 595.3,
+      "query": {
+        "query": "Python 3.13 whats new official documentation",
+        "count": 5
+      },
+      "sent_query": "Python 3.13 whats new official documentation",
+      "result_count": 5,
+      "text_chars": 4268,
+      "text_truncated": false,
+      "text_head": "Results for 'Python 3.13 whats new official documentation' (5 shown, at most 5)\n[1] What’s New In Python 3.13\nhttps://docs.python.org/3.14/whatsnew/3.13.html (2026-10-30)\nFree-threaded execution allows for full utilization of the available processing power by running threads in parallel on available CPU cores. While not all software will benefit from this automatically, programs designed with thre",
+      "details_chars": 2627,
+      "cards": [
+        {
+          "title": "What’s New In Python 3.13",
+          "url": "https://docs.python.org/3.14/whatsnew/3.13.html",
+          "site_name": "Python documentation",
+          "date": "2026-10-30",
+          "authority": 4,
+          "score": 2.570354461669922,
+          "snippet_chars": 240
+        },
+        {
+          "title": "Python 3.13 有什么新变化",
+          "url": "https://docs.python.org/zh-cn/3.13/whatsnew/3.13.html",
+          "site_name": "Python documentation",
+          "date": null,
+          "authority": 4,
+          "score": 2.476604461669922,
+          "snippet_chars": 161
+        },
+        {
+          "title": "O que há de novo no Python 3.13",
+          "url": "https://docs.python.org/pt-br/3.13/whatsnew/3.13.html#whatsnew313-locals-semantics",
+          "site_name": "Python documentation",
+          "date": null,
+          "authority": 4,
+          "score": 2.445354461669922,
+          "snippet_chars": 240
+        },
+        {
+          "title": "Python 3.13 有什麼新功能¶ - Python 3.13 有什麼新功能¶",
+          "url": "https://python.github.io/python-docs-zh-tw/pr-preview/pr-1148/whatsnew/3.13.html#index-20#1",
+          "site_name": "python.github.io",
+          "date": null,
+          "authority": 4,
+          "score": 2.320354461669922,
+          "snippet_chars": 240
+        },
+        {
+          "title": "Doc/whatsnew/3.13.rst - external/github.com/python/cpython -",
+          "url": "https://chromium.googlesource.com/external/github.com/python/cpython/+/ded5f1f287674ad404ddd042745433388dc073a5/Doc/whatsnew/3.13.rst#1",
+          "site_name": "Google Open Source",
+          "date": null,
+          "authority": 4,
+          "score": 2.164104461669922,
+          "snippet_chars": 240
+        }
+      ],
+      "quality": {
+        "score_ge_1_5": 5,
+        "authority_ge_3": 5,
+        "dated": 1,
+        "named_site": 5
+      }
+    },
+    {
+      "name": "fetch",
+      "passed": true,
+      "url": "https://docs.python.org/3.14/whatsnew/3.13.html",
+      "elapsed_ms": 5131.6,
+      "text_chars": 12121,
+      "source_chars": 104176,
+      "markdown": true,
+      "has_headings": true,
+      "truncated": true,
+      "head": "[https://docs.python.org/3.14/whatsnew/3.13.html — 104176 characters, cut at max_chars=12000]\nWhat’s New In Python 3.13\n\n# What’s New In Python 3.13¶\n\n- Editors:\n\nAdam Turner and Thomas Wouters\n\nThis article explains the new features in Python 3.13, compared to 3.12. Python 3.13 was released on Octo"
+    }
+  ]
+}

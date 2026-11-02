@@ -56,6 +56,10 @@ class AgentTool(Tool, ABC):
     # tool, never inferred from its name.
     mutates_workspace: bool = False
 
+    def execution_timeout(self, params: JsonObject) -> float | None:
+        """Requested execution budget, including cleanup time."""
+        return None
+
     @abstractmethod
     async def execute(
         self,

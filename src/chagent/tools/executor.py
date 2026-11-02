@@ -3,6 +3,7 @@
 import asyncio
 from copy import deepcopy
 import math
+import os
 
 from jsonschema import Draft202012Validator
 
@@ -16,6 +17,9 @@ class ToolExecutor:
     def __init__(self, registry: ToolRegistry, timeout: float = 35, *, allow_host_commands: bool = False):
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("Tool timeout must be finite and positive")
+        self.ceiling = float(os.environ.get("CHAGENT_TOOL_TIMEOUT_CEILING", "310"))
+        if not math.isfinite(self.ceiling) or self.ceiling <= 0:
+            raise ValueError("Tool timeout ceiling must be finite and positive")
         self.registry = registry
         self.timeout = timeout
         self.allow_host_commands = allow_host_commands
@@ -23,6 +27,7 @@ class ToolExecutor:
     async def execute(self, call: ToolCall, *, context: ToolContext | None = None,
                       signal: asyncio.Event | None = None, on_update: AgentToolUpdateCallback | None = None) -> AgentToolResult:
         execution_started = False
+        effective_timeout = self.timeout
         try:
             tool = self.registry.get(call.name)
             if tool is None:
@@ -39,7 +44,11 @@ class ToolExecutor:
                 raise PermissionError("Host command execution is disabled")
             if signal is not None and signal.is_set():
                 raise asyncio.CancelledError()
-            async with asyncio.timeout(self.timeout):
+            requested = tool.execution_timeout(arguments)
+            if requested is not None and (not math.isfinite(requested) or requested <= 0):
+                raise ValueError("Tool requested an invalid timeout")
+            effective_timeout = min(self.ceiling, max(self.timeout, requested or self.timeout))
+            async with asyncio.timeout(effective_timeout):
                 execution_started = True
                 if tool.requires_workspace:
                     result = await tool.execute(call.id, deepcopy(arguments), signal=signal,
@@ -54,7 +63,7 @@ class ToolExecutor:
         except asyncio.CancelledError:
             raise
         except TimeoutError:
-            return AgentToolResult(content=[TextContent("Tool execution timed out")], is_error=True,
+            return AgentToolResult(content=[TextContent(f"Tool did not return within {effective_timeout:g} seconds (execution timed out)")], is_error=True,
                                    outcome_unknown=execution_started)
         except Exception as error:
             return AgentToolResult(

@@ -48,6 +48,9 @@ class ExecCommandTool(AgentTool):
             }, requires_workspace=True, requires_host_execution=True,
         )
 
+    def execution_timeout(self, params: JsonObject) -> float:
+        return params.get("yield_time_ms", params.get("timeout_ms", 10_000)) / 1000 + 10
+
     async def execute(
         self, tool_call_id: str, params: JsonObject, signal: asyncio.Event | None = None,
         on_update: AgentToolUpdateCallback | None = None, *, context: ToolContext | None = None,
