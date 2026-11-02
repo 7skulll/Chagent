@@ -44,6 +44,7 @@ from chagent.domain.memories import MemoryProposal
 from chagent.storage.approvals import ApprovalRepository
 from chagent.storage.memories import MemoryRepository
 from chagent.storage.memory_jobs import MemoryJobRepository
+from chagent.web.policy import validate_web_settings, validate_web_runner
 from chagent.web.schemas import MemoryJobState
 from chagent.sessions.errors import StateConflictError
 from chagent.web.schemas import (ActiveRunPage, AppInfo, ApprovalDecision, ArtifactPage, Cancellation,
@@ -52,7 +53,7 @@ from chagent.web.schemas import (ActiveRunPage, AppInfo, ApprovalDecision, Artif
     SessionDetail, SessionEdit, SessionPage, SessionSources, UploadView, UsageView, WorkspaceCreate, WorkspacePage,
     WorkspaceView)
 from chagent.web.uploads import save as save_upload
-from chagent.web.workspaces import validate_workspace
+from chagent.boundaries import validate_workspace
 from chagent.domain.sessions import Session
 from chagent.domain.memories import Memory
 
@@ -79,8 +80,7 @@ class WebRuntime:
         # Resolved once: the mode gate below is a policy decision, and reading it
         # per request could let the environment change under a running server.
         self.settings = settings or Settings.from_env()
-        if self.settings.code_mode:
-            raise ValueError("网页暂不支持 code 模式；请设置 CHAGENT_CODE_MODE=off")
+        validate_web_runner(self.settings, runner)
         self.compaction = compaction
         self.sessions = SessionManager(runner.conversations)
         self.approvals = ApprovalRepository(runner.runs.database, runner.runs)
@@ -148,10 +148,24 @@ class WebRuntime:
         return await self.workspace_id(self.root(raw))
 
     async def session(self, identity: UUID):
-        session = await self.sessions.get(identity)
+        try:
+            session = await self.sessions.get(identity)
+        except (ValueError, OSError):
+            raise SessionNotFoundError("Session workspace is no longer available") from None
         if session.workspace not in self.roots:
             raise SessionNotFoundError("Session belongs to a workspace that is not open")
+        if session.mode == "code":
+            await self.require_code(session.workspace)
         return session
+
+    async def require_code(self, workspace: Path) -> None:
+        if not self.settings.code_mode:
+            raise HTTPException(409, "本构建未开启 code 模式（CHAGENT_CODE_MODE=off）")
+        validate_web_runner(self.settings, self.runner)
+        # Explicit preflight owner, separate from all conversation runs.
+        support = await self.runner.sandbox.audit(workspace, owner="web-preflight")
+        if not support["available"]:
+            raise HTTPException(503, "只读隔离探针失败，code 不可用；不会降低隔离等级")
 
     async def run(self, identity: UUID):
         run = await self.runner.runs.get(identity)
@@ -219,6 +233,8 @@ class WebRuntime:
         # queue and picked up by the next process.
         if getattr(self.runner, "memory_worker", None) is not None:
             await self.runner.memory_worker.stop()
+        if self.runner.sandbox is not None:
+            self.runner.sandbox.close()
 
 
 def runtime(request: Request) -> WebRuntime:
@@ -286,6 +302,8 @@ async def config(current: Current):
         "provider": current.runner.model.provider, "model": current.runner.model.id,
         "run_timeout": current.runner.timeout,
         "sandbox": settings.sandbox, "sandbox_network": settings.sandbox_network,
+        "workspace_writable": False, "process_stdin": False,
+        "readonly_code": settings.readonly_code_available,
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
         "approval_grace": settings.approval_unwatched_grace,
         "host_commands": settings.allow_host_commands,
@@ -296,7 +314,9 @@ async def config(current: Current):
         "max_processes": settings.max_processes, "process_timeout": settings.process_timeout,
         "default_mode": settings.default_mode, "code_mode": settings.code_mode,
         "tools": tools,
-        "behavior": describe_behavior(settings, policy, tokenizer),
+        # ``writes=off`` here is not a setting: it is what this entry point
+        # assembles, and the page should not have to guess it.
+        "behavior": describe_behavior(settings, policy, tokenizer, workspace_writes=False),
     }
 
 
@@ -399,8 +419,8 @@ async def usage(current: Current, days: Annotated[int, Query(ge=1, le=90)] = 7):
 async def create_session(value: SessionCreate, current: Current):
     """Mode is chosen once, here, and only if this build can serve it."""
     mode = value.mode or current.settings.default_mode
-    if mode == "code" and not current.settings.code_mode:
-        raise HTTPException(409, "本构建未开启 code 模式（CHAGENT_CODE_MODE=off）")
+    if mode == "code":
+        await current.require_code(current.root(value.workspace))
     return await current.sessions.create(current.root(value.workspace), value.title, mode=mode)
 
 
@@ -769,8 +789,9 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                 await injected_runtime.close()
             return
         configured = settings or Settings.from_env()
-        if configured.code_mode:
-            raise ValueError("网页暂不支持 code 模式；请设置 CHAGENT_CODE_MODE=off")
+        validate_web_settings(configured)
+        if demo and configured.code_mode:
+            raise ValueError("demo 只支持 work；只读 code 需要实际模型 runner")
         selected = None if demo else (model_settings or ModelSettings.from_env())
         approval = ApprovalPolicy.from_settings(configured)
         client = create_model_client(selected) if selected is not None else None
@@ -787,11 +808,17 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                                 approval_timeout=configured.approval_timeout,
                                                 approval_grace=configured.approval_unwatched_grace,
                                                 process_wall_timeout=configured.process_timeout,
-                                                max_processes=configured.max_processes, web=web)
+                                                max_processes=configured.max_processes, web=web,
+                                                allow_workspace_writes=False)
                 else:
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
                                            code_mode=configured.code_mode,
+                                           # The browser has no approval gate for a file
+                                           # mutation and no undo, so this entry point keeps
+                                           # the model to reads. The CLI, which a human is
+                                           # watching line by line, gets the writes.
+                                           allow_workspace_writes=False,
                                            timeout=selected.run_timeout, max_turns=configured.max_turns,
                                            max_tool_concurrency=configured.max_tool_concurrency,
                                            memory_worker_concurrency=configured.memory_worker_concurrency,
@@ -801,8 +828,10 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            process_wall_timeout=configured.process_timeout,
                                            max_processes=configured.max_processes, web=web)
                 app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env())
-                app.state.runtime.start_worker()
                 try:
+                    if configured.code_mode:
+                        await app.state.runtime.require_code(app.state.runtime.workspace)
+                    app.state.runtime.start_worker()
                     yield
                 finally:
                     await app.state.runtime.close()

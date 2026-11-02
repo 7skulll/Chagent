@@ -98,7 +98,11 @@ globalThis.document = {
   querySelector: () => makeEl("div"), querySelectorAll: () => [],
   addEventListener() {}, body: makeEl("body"),
 };
-globalThis.window = {matchMedia: () => ({matches: false, addEventListener() {}})};
+const MEDIA = new Map();
+globalThis.window = {matchMedia: query => {
+  if (!MEDIA.has(query)) MEDIA.set(query, {matches: false, addEventListener(type, fn) { this.changed = fn; }});
+  return MEDIA.get(query);
+}};
 globalThis.matchMedia = globalThis.window.matchMedia;
 globalThis.localStorage = {store: new Map(), getItem(k) { return this.store.has(k) ? this.store.get(k) : null; },
   setItem(k, v) { this.store.set(k, String(v)); }, removeItem(k) { this.store.delete(k); }};
@@ -220,6 +224,12 @@ setTimeout(() => {
       check(queued.includes("超过 20 MiB"), "an oversized file was not refused with a reason");
       check(queued.includes("报告.pdf"), "a readable file did not get a row");
       check(queued.includes("upload-bar"), "an uploading file has no progress element");
+      check(document.getElementById("send").disabled, "send was enabled while attachments were uploading");
+      const runsBefore = CALLS.filter(call => call.path.endsWith("/runs")).length;
+      document.getElementById("input").value = "do not send incomplete attachments";
+      document.getElementById("composer").fire("submit");
+      check(CALLS.filter(call => call.path.endsWith("/runs")).length === runsBefore,
+            "Enter/submit bypassed pending upload guard");
       setTimeout(async () => {
         check(CALLS.some(call => call.body && call.body.regenerate_from), "regenerate did not reach the API");
         check(CALLS.some(call => call.body && call.body.edit_message_id), "edit did not reach the API");
@@ -227,6 +237,24 @@ setTimeout(() => {
         check(composer.startsWith("请阅读 uploads/报告.pdf"), "the composer lost its upload prompt: " + composer);
         check(JSON.stringify(document.getElementById("uploads").children).includes("已上传"),
               "the upload never completed");
+        check(!document.getElementById("send").disabled, "send did not recover after upload completed");
+        const input = document.getElementById("input");
+        input.scrollHeight = 180; input.fire("input");
+        check(input.style.height === "180px", "multiline composer did not grow");
+        const sidebarMedia = MEDIA.get("(max-width: 960px)");
+        const toolsMedia = MEDIA.get("(max-width: 1180px)");
+        sidebarMedia.matches = toolsMedia.matches = true;
+        sidebarMedia.changed();
+        document.getElementById("toggle-sidebar").fire("click");
+        check(document.body.classList.contains("drawer-open"), "sidebar did not show a scrim");
+        document.getElementById("toggle-tools").fire("click");
+        check(document.body.classList.contains("sidebar-collapsed"), "two mobile drawers stayed open together");
+        check(!document.body.classList.contains("tools-collapsed"), "tools drawer did not open");
+        document.getElementById("scrim").fire("click");
+        check(!document.body.classList.contains("drawer-open"), "scrim did not close tools drawer");
+        sidebarMedia.matches = toolsMedia.matches = false;
+        sidebarMedia.changed();
+        check(!document.body.classList.contains("sidebar-collapsed"), "mobile state replaced desktop preference");
         const view = document.getElementById("conversation");
         view.scrollHeight = 5000; view.clientHeight = 500; view.scrollTop = 250;
         testSetFollow(false);

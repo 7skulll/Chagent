@@ -55,7 +55,7 @@ class FileTool(AgentTool):
             raise asyncio.CancelledError()
         if context is None:
             raise PermissionError("A session workspace is required")
-        filesystem = WorkspaceFS(context.workspace)
+        filesystem = WorkspaceFS(context.workspace, expected_identity=context.workspace_identity)
         # Every file tool runs off the event loop, writes included. edit_file
         # searches for a near match when the exact text is absent, and that
         # search is quadratic in the size of old_text: a failing 40-line edit on

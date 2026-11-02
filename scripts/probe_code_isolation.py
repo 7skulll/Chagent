@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import tempfile
+import subprocess
+from hashlib import sha256
 
 from chagent.tools.sandbox import Sandbox, SandboxSettings
 from chagent.tools.command import ExecCommandTool
@@ -15,23 +17,30 @@ from chagent.tools.tests_runner import RunTestsTool
 from uuid import uuid4
 
 
-async def main(output):
+async def main(output, readonly=False):
     with tempfile.TemporaryDirectory(prefix='chagent-code-acceptance-') as directory:
         workspace = Path(directory).resolve()
-        sandbox = Sandbox(SandboxSettings(mode='isolated'))
-        support = await sandbox.support(sandbox.policy(workspace))
+        if readonly:
+            subprocess.run(['/usr/bin/git', 'init', '-q', str(workspace)], check=True)
+        sandbox = Sandbox(SandboxSettings(mode='isolated', writable_workspace=not readonly))
+        context = ToolContext(workspace, run_id=uuid4())
+        support = await sandbox.support(sandbox.policy(workspace, owner=context.run_id))
         result = {'recorded_at_utc': datetime.now(timezone.utc).isoformat(),
-                  'support': asdict(support), 'tools': {}}
+                  'readonly': readonly, 'support': asdict(support), 'tools': {}}
         if support.available:
-            context = ToolContext(workspace, run_id=uuid4())
             manager = ProcessManager(wall_timeout=10)
             tool = ExecCommandTool(sandbox, manager)
-            for name, cmd in [('shell', 'printf shell-ok'), ('git', 'git init -q . && git status --porcelain'),
+            for name, cmd in [('shell', 'printf shell-ok'), ('git', 'git status --porcelain' if readonly else 'git init -q . && git status --porcelain'),
                               ('environment', 'test -d "$HOME" && test "$HOME" != /Users/macbook && test -z "$DEEPSEEK_API_KEY" && test -z "$PYTHONPATH"')]:
                 run = await tool.execute('probe', {'cmd': cmd}, context=context)
                 result['tools'][name] = {'passed': not run.is_error, 'exit_code': run.details['exit_code']}
             (workspace / 'tests').mkdir()
             (workspace / 'tests/test_smoke.py').write_text('import unittest\nclass Smoke(unittest.TestCase):\n def test_sum(self): self.assertEqual(2+2,4)\n')
+            if readonly:
+                before = {str(p.relative_to(workspace)): sha256(p.read_bytes()).hexdigest()
+                          for p in workspace.rglob('*') if p.is_file()}
+                run = await tool.execute('deny', {'cmd': 'printf denied > denied'}, context=context)
+                result['tools']['write_denied'] = {'passed': run.is_error and not (workspace / 'denied').exists()}
             run = await RunTestsTool(sandbox).execute('test', {'suite': 'unittest'}, context=context)
             result['tools']['run_tests'] = {'passed': not run.is_error, 'exit_code': run.details['exit_code']}
             run = await tool.execute('long', {'cmd': 'printf started; sleep 0.3; printf finished', 'yield_time_ms': 10}, context=context)
@@ -42,6 +51,15 @@ async def main(output):
                 text, _ = record.page(0)
                 result['tools']['session_process'] = {'passed': record.exit_code == 0 and text == 'startedfinished'}
                 await manager.terminate_run(context.run_id)
+            if readonly:
+                after = {str(p.relative_to(workspace)): sha256(p.read_bytes()).hexdigest()
+                         for p in workspace.rglob('*') if p.is_file()}
+                result['tools']['workspace_unchanged'] = {'passed': before == after}
+            await manager.terminate_run(context.run_id)
+            scratch = sandbox.policy(workspace, owner=context.run_id).scratch
+            sandbox.release(context.run_id)
+            result['tools']['scratch_cleanup'] = {'passed': not scratch.exists()}
+        sandbox.close()
         result['passed'] = support.available and all(row['passed'] for row in result['tools'].values())
         output.write_text(json.dumps(result, ensure_ascii=False, indent=2)+'\n')
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -51,5 +69,6 @@ async def main(output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument("--readonly", action="store_true")
     args = parser.parse_args()
-    raise SystemExit(0 if asyncio.run(main(args.output)) else 1)
+    raise SystemExit(0 if asyncio.run(main(args.output, args.readonly)) else 1)

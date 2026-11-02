@@ -10,3 +10,4 @@ class ToolContext:
     workspace: Path
     session_id: UUID | None = None
     run_id: UUID | None = None
+    workspace_identity: tuple[int, int] | None = None

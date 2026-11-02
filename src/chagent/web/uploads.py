@@ -62,9 +62,15 @@ async def save(workspace: Path, raw_name: str, read) -> dict:
     ``read`` is an async iterator of byte chunks; the size limit is enforced
     while reading so an oversized body is refused before it reaches disk.
     """
-    directory = workspace / UPLOAD_DIRECTORY
-    if not directory.is_dir():
-        directory.mkdir(mode=0o700, exist_ok=True)
+    filesystem = WorkspaceFS(workspace)
+    with filesystem.directory(()) as descriptor:
+        import os
+        try:
+            os.mkdir(UPLOAD_DIRECTORY, mode=0o700, dir_fd=descriptor)
+        except FileExistsError:
+            pass
+    with filesystem.directory((UPLOAD_DIRECTORY,)):
+        pass
 
     received = bytearray()
     async for chunk in read:
@@ -76,7 +82,6 @@ async def save(workspace: Path, raw_name: str, read) -> dict:
 
     data = bytes(received)
     digest = sha256(data).hexdigest()
-    filesystem = WorkspaceFS(workspace)
     name = safe_name(raw_name)
     for attempt in range(100):
         candidate = _candidate(name, attempt)

@@ -1,0 +1,65 @@
+{
+  "recorded_at_utc": "2026-11-02T11:58:39.626424+00:00",
+  "readonly": true,
+  "support": {
+    "available": true,
+    "backend": "seatbelt",
+    "checks": {
+      "shell_starts": true,
+      "python_starts": true,
+      "workspace_read": true,
+      "workspace_write_denied": true,
+      "workspace_write_errno": true,
+      "other_project_read_denied": true,
+      "symlink_read_denied": true,
+      "source_read_denied": true,
+      "data_volume_alias_denied": true,
+      "outside_write_denied": true,
+      "private_home_tmp": true,
+      "environment_clean": true,
+      "outside_hardlink_denied": true,
+      "foreign_signal_denied": true,
+      "network_denied": true
+    },
+    "detail": ""
+  },
+  "tools": {
+    "shell": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "git": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "environment": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "write_denied": {
+      "passed": true
+    },
+    "run_tests": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "session_process": {
+      "passed": true
+    },
+    "workspace_unchanged": {
+      "passed": true
+    },
+    "scratch_cleanup": {
+      "passed": true
+    }
+  },
+  "passed": true,
+  "regression": {
+    "tests": 538,
+    "passed": 538,
+    "skipped": 0,
+    "seconds": 59.167,
+    "command": "PYTHONPATH=src NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent .venv/bin/python -m unittest discover -s tests -q",
+    "environment": "local macOS, outside Codex execution sandbox, temporary PostgreSQL schemas"
+  }
+}

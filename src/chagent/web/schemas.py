@@ -177,6 +177,9 @@ class ConfigView(BaseModel):
     run_timeout: float
     sandbox: str
     sandbox_network: bool
+    workspace_writable: bool
+    process_stdin: bool
+    readonly_code: bool
     approval: str
     approval_timeout: float
     approval_grace: float

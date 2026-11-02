@@ -24,6 +24,10 @@ from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
 from chagent.tools.echo import EchoTool
 from chagent.web.app import WebRuntime, create_app
+try:  # `discover -s tests` puts tests/ itself on the path and imports flat names.
+    from test_sandbox import SEATBELT_READY, SKIP_REASON
+except ImportError:  # `-m unittest tests.test_web` imports from the package root.
+    from tests.test_sandbox import SEATBELT_READY, SKIP_REASON
 
 
 @unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")
@@ -424,6 +428,69 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status_code, 413)
         self.assertEqual((await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"], [])
 
+    async def enable_readonly(self):
+        from chagent.bootstrap import create_runner
+        from chagent.tools.sandbox import Sandbox, SandboxSettings
+        cfg=Settings(code_mode=True,allow_host_commands=True,sandbox="isolated",sandbox_writable=False)
+        sb=Sandbox(SandboxSettings(mode="isolated",writable_workspace=False))
+        self.addCleanup(sb.close)
+        runner=create_runner(self.database,self.runner.model,FakeModelClient("exec_command", {"cmd":"printf readonly-ok"}),
+                             code_mode=True,allow_host_commands=True,sandbox=sb,allow_workspace_writes=False)
+        self.runner=runner
+        self.runtime=WebRuntime(runner,self.workspace,cfg)
+        self.app.state.runtime=self.runtime
+        self.addAsyncCleanup(self.runtime.close)
+
+    # These two start a real sandboxed child, so they skip where seatbelt cannot
+    # be applied (CI containers, hardened runners) instead of failing as if the
+    # readonly gate had regressed. The API's refusal in that case is fail-closed
+    # and is covered by test_readonly_missing_backend_refuses_api_before_model_call.
+    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
+    async def test_readonly_code_api_runs_and_reports_actual_capabilities(self):
+        await self.enable_readonly()
+        cfg=(await self.client.get("/api/config")).json()
+        self.assertTrue(cfg["readonly_code"])
+        self.assertFalse(cfg["workspace_writable"])
+        self.assertFalse(cfg["process_stdin"])
+        self.assertIn("isolated(ro)",cfg["behavior"])
+        response=await self.client.post("/api/sessions",json={"mode":"code"})
+        self.assertEqual(response.status_code,201,response.text)
+        identity=response.json()["id"]
+        sent=await self.client.post(f"/api/sessions/{identity}/runs",json={"text":"read only"})
+        self.assertEqual(sent.status_code,202,sent.text)
+        run=await self.wait_run(sent.json()["run_id"])
+        self.assertEqual(run["status"],"completed",run)
+        messages=(await self.client.get(f"/api/sessions/{identity}/messages")).json()
+        self.assertIn("readonly-ok",json.dumps(messages))
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).status_code,200)
+        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",json={"text":"switch","mode":"work"})).status_code,409)
+
+    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
+    async def test_readonly_code_rechecks_actual_runner_and_old_sessions(self):
+        await self.enable_readonly()
+        response=await self.client.post("/api/sessions",json={"mode":"code"})
+        identity=response.json()["id"]
+        from dataclasses import replace
+        self.runner.sandbox.settings=replace(self.runner.sandbox.settings,writable_workspace=True)
+        denied=await self.client.post(f"/api/sessions/{identity}/runs",json={"text":"must refuse"})
+        self.assertEqual(denied.status_code,400,denied.text)
+        self.assertEqual((await self.client.post("/api/sessions",json={"mode":"code"})).status_code,400)
+
+    async def test_readonly_missing_backend_refuses_api_before_model_call(self):
+        await self.enable_readonly()
+        from chagent.tools.sandbox import SeatbeltBackend
+        self.runner.sandbox.backend=SeatbeltBackend('/missing/chagent-seatbelt')
+        response=await self.client.post("/api/sessions",json={"mode":"code"})
+        self.assertEqual(response.status_code,503,response.text)
+        async with self.database.connection() as connection:
+            cursor=await connection.execute("SELECT count(*) AS n FROM model_calls")
+            self.assertEqual((await cursor.fetchone())["n"],0)
+
+    async def test_code_old_session_is_rejected_when_feature_is_off(self):
+        identity=await self.runner.conversations.create_session(self.workspace,mode="code")
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).status_code,409)
+        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",json={"text":"deny"})).status_code,409)
+
     async def test_code_mode_cannot_be_enabled_for_web(self):
         from dataclasses import replace
         with self.assertRaisesRegex(ValueError, "code"):
@@ -658,6 +725,9 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value["web_key"], "missing")
         self.assertIn("sandbox=", value["behavior"])
         self.assertIn("max_turns=", value["behavior"])
+        # This entry point assembles ``work`` without the write tools, because
+        # no approval gate exists yet for a file mutation made on its behalf.
+        self.assertIn("writes=off", value["behavior"])
         # A read-only page must never become a way to read a credential back out.
         self.assertNotIn("postgres", json.dumps(value))
         self.assertNotIn("api_key", json.dumps(value))

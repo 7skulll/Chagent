@@ -114,7 +114,7 @@ class ProfileTests(unittest.TestCase):
         self.assertFalse(sandbox.enabled)
         argv, record = asyncio.run(sandbox.wrap(["/bin/echo", "hi"], self.workspace))
         self.assertEqual(argv, ["/bin/echo", "hi"])
-        self.assertEqual(record, {"backend": "none", "network_allowed": True, "denied_reads": [], "unsandboxed": True})
+        self.assertEqual(record, {"backend": "none", "network_allowed": True, "denied_reads": [], "unsandboxed": True, "workspace_writable": True})
 
 
 @unittest.skipUnless(DARWIN, SKIP_REASON)

@@ -76,12 +76,21 @@ function scheduleLiveFlush() {
 // One place decides whether the composer accepts input: a run in flight, a
 // turn loading, and an archived session all block it for different reasons.
 function updateComposer() {
-  const blocked = state.busy || state.loading || state.readonly;
+  const pending = uploads.items.some(item => ["queued", "uploading"].includes(item.status));
+  const blocked = state.busy || state.loading || state.readonly || pending || !$("input").value.trim();
   $("send").disabled = blocked;
   $("attach").disabled = state.readonly;
   $("input").disabled = state.readonly;
-  $("input").placeholder = state.readonly ? "该会话已归档，恢复后可继续" : "随心输入";
+  $("input").placeholder = state.readonly ? "该会话已归档，恢复后可继续" : "输入问题，或上传一份资料…";
+  $("send").title = pending ? "等待附件上传完成" : "发送";
+  $("composer-hint").textContent = pending ? "附件上传中，完成后即可发送" : "Enter 发送，Shift + Enter 换行";
 }
+function resizeComposer() {
+  const input = $("input");
+  input.style.height = "auto";
+  input.style.height = `${Math.max(56, Math.min(220, input.scrollHeight))}px`;
+}
+$("input").addEventListener("input", () => { resizeComposer(); updateComposer(); });
 function setBusy(busy) {
   state.busy = busy;
   updateComposer();
@@ -101,12 +110,16 @@ const STARTERS = [
 function renderStarters() {
   const target = $("starters");
   target.replaceChildren(textNode("p", "试试", "starters-label"));
-  for (const prompt of STARTERS) {
-    const row = textNode("button", prompt, "starter");
+  const labels = [["浏览资料", "看看工作区里有哪些文件"], ["阅读文档", "概括重点，保留原文出处"], ["整理成果", "生成一份可下载的摘要"]];
+  for (const [index, prompt] of STARTERS.entries()) {
+    const row = textNode("button", "", "starter");
+    row.append(textNode("span", labels[index][0], "starter-title"), textNode("span", labels[index][1], "starter-caption"));
+    row.setAttribute("aria-label", prompt);
     row.type = "button";
     row.addEventListener("click", () => {
       if (state.readonly) return;
       $("input").value = prompt;
+      resizeComposer(); updateComposer();
       $("input").focus();
       $("input").setSelectionRange(prompt.length, prompt.length);
     });
@@ -562,6 +575,9 @@ async function openSession(id, {preserveScroll = false} = {}) {
       api(`/api/sessions/${id}/sources`).catch(() => ({runs: []}))]);
     if (version !== state.version) return;
     $("session-title").textContent = session.title || "未命名会话";
+    $("mode-note").hidden = session.mode !== "code";
+    $("mode-note").textContent = session.mode === "code"
+      ? "只读代码分析 · 工作区不可修改 · 命令断网 · 不支持交互输入" : "";
     // An archived session is still readable; only new input is refused. The
     // server enforces the same rule, this is the part the user can see.
     state.readonly = Boolean(session.archived_at);
@@ -834,7 +850,7 @@ async function showApproval(runId) {
 $("composer").addEventListener("submit", async event => {
   event.preventDefault();
   const text = $("input").value;
-  if (!text.trim() || state.busy || state.loading || state.readonly) return;
+  if (!text.trim() || state.busy || state.loading || state.readonly || uploads.items.some(item => ["queued", "uploading"].includes(item.status))) return;
   clearError(); state.loading = true; updateComposer();
   try {
     if (!state.session) {
@@ -844,6 +860,7 @@ $("composer").addEventListener("submit", async event => {
     const id = state.session;
     await post(`/api/sessions/${id}/runs`, {text});
     $("input").value = "";
+    resizeComposer();
     state.promptPrefix = "";
     // The files just sent are part of the message now; a failed one stays in the
     // queue so it can be retried without retyping anything.
@@ -945,6 +962,7 @@ function uploadItemView(item) {
 }
 function renderUploads() {
   $("uploads").replaceChildren(...uploads.items.map(uploadItemView));
+  updateComposer();
 }
 function uploadOne(item) {
   return new Promise(resolve => {
@@ -991,6 +1009,7 @@ async function runUploads() {
       await uploadOne(next);
       renderUploads();
       applyUploadPrompt();
+      resizeComposer(); updateComposer();
     }
   } finally { uploads.running = false; }
 }
@@ -1079,7 +1098,7 @@ $("new-session").addEventListener("click", async () => {
   try {
     // A new session is never archived: leave that view so it is visible.
     if (state.archived) showArchived(false);
-    const session = await post("/api/sessions", {title: "新会话", workspace: state.workspace});
+    const session = await post("/api/sessions", {title: "新会话", workspace: state.workspace, mode: $("new-mode").value || "work"});
     await listSessions(); await openSession(session.id); $("input").focus();
   } catch (error) { showError(error); }
 });
@@ -1194,6 +1213,8 @@ function workspaceParent(path) {
 }
 async function init() {
   const info = await api("/api/info");
+  $("mode-picker").hidden = !info.code_mode;
+  $("new-mode").value = "work";
   $("model").textContent = `${info.provider} / ${info.model}`;
   const stored = localStorage.getItem("chagent.workspace");
   if (stored && stored !== info.workspace) {
@@ -1210,31 +1231,45 @@ async function init() {
 }
 init().catch(showError);
 
-// The rail's single button opened the context panel; the rail is gone, so the
-// panel's own summary is the only way in (it is open by default).
-
-// Collapsible sidebars: state persists across reloads via localStorage. The
-// drawer under 960px always starts closed and never writes that state, so a
-// phone cannot reload into a chat hidden behind the panel.
+// Desktop columns remember their state. Overlay panels start closed and never
+// replace desktop preferences; only one drawer can cover the conversation.
+function syncDrawers() {
+  const sidebarOpen = narrow.matches && !document.body.classList.contains("sidebar-collapsed");
+  const toolsOpen = narrowTools.matches && !document.body.classList.contains("tools-collapsed");
+  document.body.classList.toggle("drawer-open", sidebarOpen || toolsOpen);
+}
 function applyCollapsed(name, collapsed) {
+  if (!collapsed && ((name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches))) {
+    const other = name === "sidebar" ? "tools" : "sidebar";
+    if ((other === "sidebar" && narrow.matches) || (other === "tools" && narrowTools.matches)) {
+      document.body.classList.add(`${other}-collapsed`);
+      $(other === "sidebar" ? "toggle-sidebar" : "toggle-tools").setAttribute("aria-expanded", "false");
+    }
+  }
   document.body.classList.toggle(`${name}-collapsed`, collapsed);
   $(name === "sidebar" ? "toggle-sidebar" : "toggle-tools").setAttribute("aria-expanded", String(!collapsed));
+  syncDrawers();
   if ((name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches)) return;
   localStorage.setItem(`chagent.${name}.collapsed`, collapsed ? "1" : "0");
 }
-for (const name of ["sidebar", "tools"]) {
-  const collapsed = ((name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches))
-    ? true : localStorage.getItem(`chagent.${name}.collapsed`) === "1";
-  document.body.classList.toggle(`${name}-collapsed`, collapsed);
-}
-$("toggle-sidebar").setAttribute("aria-expanded", String(!document.body.classList.contains("sidebar-collapsed")));
-$("toggle-tools").setAttribute("aria-expanded", String(!document.body.classList.contains("tools-collapsed")));
-$("scrim").addEventListener("click", () => applyCollapsed("sidebar", true));
-document.addEventListener("keydown", event => {
-  if (event.key === "Escape" && narrowTools.matches && !document.body.classList.contains("tools-collapsed")) applyCollapsed("tools", true);
-  if (event.key === "Escape" && narrow.matches && !document.body.classList.contains("sidebar-collapsed")) {
-    applyCollapsed("sidebar", true);
+function restorePanels() {
+  for (const name of ["sidebar", "tools"]) {
+    const overlay = (name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches);
+    const saved = localStorage.getItem(`chagent.${name}.collapsed`);
+    applyCollapsed(name, overlay || (saved === null ? name === "tools" : saved === "1"));
   }
+}
+restorePanels();
+narrow.addEventListener("change", restorePanels);
+narrowTools.addEventListener("change", restorePanels);
+function closeDrawers() {
+  if (narrow.matches) applyCollapsed("sidebar", true);
+  if (narrowTools.matches) applyCollapsed("tools", true);
+}
+$("scrim").addEventListener("click", closeDrawers);
+$("close-tools").addEventListener("click", () => { applyCollapsed("tools", true); $("toggle-tools").focus(); });
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") closeDrawers();
 });
 $("toggle-sidebar").addEventListener("click", () =>
   applyCollapsed("sidebar", !document.body.classList.contains("sidebar-collapsed")));
@@ -1354,6 +1389,7 @@ async function switchWorkspace(path) {
   // An upload belongs to the workspace it landed in; carrying the queue across
   // would offer paths that the new workspace cannot see.
   uploads.items = []; state.promptPrefix = ""; $("input").value = ""; renderUploads();
+  $("mode-note").hidden = true;
   $("messages").replaceChildren(); $("empty").hidden = false; $("session-title").textContent = "聊天";
   $("usage-pill").hidden = true;
   await listSessions();
@@ -1396,16 +1432,18 @@ $("workspace-form").addEventListener("submit", async event => {
 const configLabels = [
   ["provider", "供应商"], ["model", "模型"], ["tools", "工具数"],
   ["run_timeout", "单次运行上限"], ["sandbox", "沙箱"], ["approval", "审批"],
-  ["host_commands", "宿主命令"], ["web_access", "联网"], ["compaction", "上下文压缩"],
+  ["host_commands", "宿主命令"], ["workspace_writable", "工作区写入"], ["process_stdin", "交互输入"], ["web_access", "网页搜索"], ["compaction", "上下文压缩"],
   ["tokenizer", "token 计数"], ["max_turns", "最大轮数"], ["max_processes", "会话进程"],
 ];
 function configValue(key, c) {
   switch (key) {
     case "tools": return `${c.tools} 个`;
     case "run_timeout": return `${Math.round(c.run_timeout)} 秒`;
-    case "sandbox": return c.sandbox === "off" ? "关闭" : `${c.sandbox}，${c.sandbox_network ? "允许出网" : "禁止出网"}`;
+    case "sandbox": return c.sandbox === "off" ? "关闭" : `${c.sandbox}${c.readonly_code ? "（只读）" : ""}，${c.sandbox_network ? "允许出网" : "禁止出网"}`;
     case "approval": return `${c.approval}，等待 ${Math.round(c.approval_timeout)} 秒，` +
       (c.approval_grace ? `无人查看 ${Math.round(c.approval_grace)} 秒后放弃` : "无人查看也等到超时");
+    case "workspace_writable": return c.workspace_writable ? "允许" : "关闭";
+    case "process_stdin": return c.process_stdin ? "允许" : "关闭";
     case "host_commands": return c.host_commands ? "开启" : "关闭";
     case "web_access": return c.web_access === "off" ? "关闭" : `${c.web_access}，密钥${c.web_key === "set" ? "已配置" : "缺失"}`;
     case "compaction": return c.compaction ? "开启" : "关闭";

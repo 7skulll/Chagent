@@ -64,7 +64,7 @@ class GrepTool(FileTool):
         rows: list[tuple[str, int, str]] = []
         scanned = 0
         truncated = False
-        for relative, data in self._sources(target, is_file, root, include):
+        for relative, data in self._sources(target, is_file, root, include, filesystem):
             scanned += 1
             if scanned > MAX_SCANNED_FILES:
                 truncated = True
@@ -111,31 +111,22 @@ class GrepTool(FileTool):
         raise PermissionError("Only regular files and directories can be searched")
 
     @staticmethod
-    def _sources(target: Path, is_file: bool, root: Path, include: str | None):
+    def _sources(target: Path, is_file: bool, root: Path, include: str | None, filesystem: WorkspaceFS):
         if is_file:
-            yield target.relative_to(root).as_posix(), _read(target)
+            yield target.relative_to(root).as_posix(), filesystem.read(target.relative_to(root).as_posix())
             return
-        for current, directories, names in os.walk(target, followlinks=False):
-            directories[:] = sorted(
-                name for name in directories
-                if name not in SKIPPED_DIRECTORIES and not os.path.islink(os.path.join(current, name))
-            )
-            for name in sorted(names):
-                path = Path(current, name)
-                if path.is_symlink():
-                    continue
-                relative = path.relative_to(root).as_posix()
-                if include and not (fnmatch(relative, include) or fnmatch(name, include)):
-                    continue
-                yield relative, _read(path)
+        for parts, directory in filesystem.walk(filesystem.parts(str(target)), skipped=SKIPPED_DIRECTORIES):
+            if directory:
+                continue
+            relative = Path(*parts).as_posix()
+            if include and not (fnmatch(relative, include) or fnmatch(parts[-1], include)):
+                continue
+            try:
+                data = filesystem.read(relative)
+            except (OSError, ValueError):
+                continue
+            yield relative, data
 
-
-def _read(path: Path) -> bytes | None:
-    try:
-        with path.open("rb") as stream:
-            return stream.read(MAX_FILE_BYTES + 1)
-    except OSError:
-        return None
 
 
 class GlobTool(FileTool):
@@ -161,23 +152,20 @@ class GlobTool(FileTool):
         parts = filesystem.parts(params.get("path", "."))
         with filesystem.directory(parts):
             pass
-        base = filesystem.root.joinpath(*parts)
         limit = params.get("max_results", 200)
         keep_directories = params.get("include_dirs", False)
         found: list[str] = []
         truncated = False
-        visited = 0
         try:
-            for path in base.glob(pattern):
-                visited += 1
-                if visited > MAX_VISITED_PATHS:
-                    truncated = True
-                    break
-                if path.is_symlink():
+            pattern_parts = tuple(Path(pattern).parts)
+            depth = None if "**" in pattern_parts else len(parts) + len(pattern_parts)
+            for candidate, is_directory in filesystem.walk(parts, max_paths=MAX_VISITED_PATHS, max_depth=depth):
+                relative_base = Path(*candidate[len(parts):]).as_posix()
+                if not _glob_matches(tuple(Path(relative_base).parts), pattern_parts):
                     continue
-                if path.is_dir() and not keep_directories:
+                if is_directory and not keep_directories:
                     continue
-                found.append(path.relative_to(filesystem.root).as_posix())
+                found.append(Path(*candidate).as_posix())
                 if len(found) > limit:
                     truncated = True
                     break
@@ -193,3 +181,15 @@ class GlobTool(FileTool):
             "pattern": pattern, "count": len(selected), "truncated": truncated,
             "paths": selected[:50],
         })
+
+
+def _glob_matches(parts: tuple[str, ...], pattern: tuple[str, ...]) -> bool:
+    from functools import lru_cache
+    @lru_cache(None)
+    def match(i, j):
+        if j == len(pattern):
+            return i == len(parts)
+        if pattern[j] == "**":
+            return match(i, j + 1) or (i < len(parts) and match(i + 1, j))
+        return i < len(parts) and fnmatch(parts[i], pattern[j]) and match(i + 1, j + 1)
+    return match(0, 0)

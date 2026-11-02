@@ -2,8 +2,9 @@
 
 Two layers are asserted here, because either one alone is a decoration:
 
-* ``create_builtin_registry(mode=...)`` must not list write or host tools in
-  ``work``. This is the layer the model can see.
+* ``create_builtin_registry(mode=...)`` must not list host tools outside
+  ``code``, and must honour the caller's write switch. This is the layer the
+  model can see.
 * the executor built for a face must refuse a call naming a tool that face omits,
   even if it arrived from somewhere other than the prompt.
 """
@@ -40,15 +41,16 @@ def names(registry):
 
 
 class ToolFaceTests(unittest.TestCase):
-    def test_work_registers_reads_and_nothing_that_writes_or_runs(self):
+    def test_work_registers_reads_and_writes_but_nothing_that_runs(self):
         registry = create_builtin_registry(mode="work", allow_host_commands=True)
-        self.assertEqual(names(registry), WORK_TOOLS)
-        self.assertFalse(names(registry) & WRITE_TOOLS)
+        self.assertEqual(names(registry), WORK_TOOLS | WRITE_TOOLS)
+        # Reading and writing files is a property of the agent, not of the mode.
+        self.assertTrue(names(registry) & WRITE_TOOLS)
         # Host tools need both the code face and the switch; the switch alone
         # must never be enough.
         self.assertFalse(names(registry) & EXECUTION_TOOLS)
 
-    def test_code_adds_writes_and_only_then_host_tools(self):
+    def test_code_adds_only_the_host_tools(self):
         writes = names(create_builtin_registry(mode="code"))
         self.assertEqual(writes, WORK_TOOLS | WRITE_TOOLS)
         with_host = names(create_builtin_registry(mode="code", allow_host_commands=True))
@@ -58,7 +60,21 @@ class ToolFaceTests(unittest.TestCase):
         """Artifacts and the web are reads: they exist in both faces."""
         registry = create_builtin_registry(mode="work", artifacts=__import__("unittest.mock", fromlist=["MagicMock"]).MagicMock(), web=WebAccess("tvly-k"))
         self.assertLessEqual({"read_artifact", "web_search", "web_fetch"}, names(registry))
+        # ``create_file`` writes a database artifact, not the workspace, so it
+        # stays in ``work`` and is still offered when writes are withheld.
+        self.assertIn("create_file", names(registry))
+
+    def test_an_entry_point_can_withhold_writes_without_a_new_mode(self):
+        """The web assembles ``work`` this way: same mode, smaller face."""
+        registry = create_builtin_registry(mode="work", allow_workspace_writes=False)
+        self.assertEqual(names(registry), WORK_TOOLS)
         self.assertFalse(names(registry) & WRITE_TOOLS)
+        # ``code`` is trimmed by the same switch, so the rule is one switch,
+        # not two mode-specific ones.
+        code = create_builtin_registry(mode="code", allow_workspace_writes=False,
+                                       allow_host_commands=True)
+        self.assertEqual(names(code), WORK_TOOLS | {"exec_command", "run_tests"})
+        self.assertFalse(names(code) & WRITE_TOOLS)
 
     def test_mode_is_required_and_validated(self):
         with self.assertRaises(TypeError):
@@ -69,7 +85,17 @@ class ToolFaceTests(unittest.TestCase):
         self.assertEqual(validate_mode("code"), "code")
 
     def test_the_executor_of_a_face_refuses_a_tool_that_face_omits(self):
-        executor = ToolExecutor(create_builtin_registry(mode="work"))
+        # Host execution is the tool ``work`` never registers, whichever way
+        # the face was assembled.
+        executor = ToolExecutor(create_builtin_registry(mode="work", allow_host_commands=True),
+                                allow_host_commands=True)
+        result = asyncio.run(executor.execute(ToolCall("c1", "exec_command",
+                                                       {"cmd": "echo no"})))
+        self.assertTrue(result.is_error)
+        self.assertIn("Unknown tool", result.content[0].text)
+
+    def test_the_executor_of_a_face_withheld_writes_refuses_them(self):
+        executor = ToolExecutor(create_builtin_registry(mode="work", allow_workspace_writes=False))
         result = asyncio.run(executor.execute(ToolCall("c1", "write_file",
                                                        {"path": "x.txt", "content": "no"})))
         self.assertTrue(result.is_error)
@@ -130,21 +156,33 @@ class RunnerModeTests(unittest.IsolatedAsyncioTestCase):
     async def drop_schema(self):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
 
-    def build(self, *, code_mode: bool, tool_name: str, arguments: dict):
+    def build(self, *, code_mode: bool, tool_name: str, arguments: dict,
+              allow_workspace_writes: bool = True):
         model = Model(id="fake", provider="local-test", api="fake", context_window=16384, max_tokens=512)
-        return create_runner(self.database, model, FakeModelClient(tool_name, arguments), code_mode=code_mode)
+        return create_runner(self.database, model, FakeModelClient(tool_name, arguments),
+                             code_mode=code_mode, allow_workspace_writes=allow_workspace_writes)
 
     async def test_build_switch_decides_which_faces_exist(self):
         off = self.build(code_mode=False, tool_name="read_file", arguments={"path": "a.txt"})
         self.assertEqual(set(off.tool_faces), {"work"})
         on = self.build(code_mode=True, tool_name="read_file", arguments={"path": "a.txt"})
         self.assertEqual(set(on.tool_faces), {"work", "code"})
-        self.assertFalse(names(on.tool_faces["work"].registry) & WRITE_TOOLS)
+        # The two faces differ by host execution only.
+        self.assertTrue(names(on.tool_faces["work"].registry) & WRITE_TOOLS)
         self.assertTrue(names(on.tool_faces["code"].registry) & WRITE_TOOLS)
 
-    async def test_a_work_session_cannot_call_a_write_tool_even_if_the_model_names_it(self):
+    async def test_a_work_session_writes_through_the_same_runner(self):
         runner = self.build(code_mode=True, tool_name="write_file",
-                            arguments={"path": "notes.txt", "content": "no"})
+                            arguments={"path": "notes.txt", "content": "yes\n"})
+        session = await runner.conversations.create_session(self.workspace, mode="work")
+        await runner.run(session, "写文件")
+        self.assertEqual((self.workspace / "notes.txt").read_text(), "yes\n")
+
+    async def test_a_runner_that_withholds_writes_refuses_them_even_if_named(self):
+        """The web's assembly: same mode, no write entry, so an unknown tool."""
+        runner = self.build(code_mode=False, tool_name="write_file",
+                            arguments={"path": "notes.txt", "content": "no"},
+                            allow_workspace_writes=False)
         session = await runner.conversations.create_session(self.workspace, mode="work")
         result = await runner.run(session, "写文件")
         self.assertFalse((self.workspace / "notes.txt").exists())
@@ -157,9 +195,10 @@ class RunnerModeTests(unittest.IsolatedAsyncioTestCase):
         await runner.run(session, "写文件")
         self.assertEqual((self.workspace / "notes.txt").read_text(), "yes\n")
 
-    async def test_a_mode_this_build_does_not_enable_still_resolves_safely(self):
+    async def test_a_disabled_mode_is_refused_by_programmatic_entry(self):
         runner = self.build(code_mode=False, tool_name="read_file", arguments={"path": "a.txt"})
-        self.assertIs(runner.executor_for("code"), runner.tool_faces["work"])
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            runner.executor_for("code")
         self.assertIs(runner.executor_for(None), runner.tool_faces["work"])
 
     async def test_new_sessions_default_to_work_and_old_rows_do_too(self):

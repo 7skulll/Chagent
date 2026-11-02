@@ -22,6 +22,7 @@ class ExecCommandTool(AgentTool):
         # refused rather than silently downgraded.
         self.processes = processes
         confined = sandbox is not None and sandbox.enabled
+        readonly = confined and not sandbox.settings.writable_workspace
         super().__init__(
             name="exec_command", label="Run command",
             description=(
@@ -30,7 +31,7 @@ class ExecCommandTool(AgentTool):
                 "configured credential paths are unreadable. In isolated mode, reads are restricted to "
                 "the workspace and declared runtime, HOME/tmp are private and the environment is cleared. Output is bounded and exit status is "
                 "reported. Pass yield_time_ms to keep a longer command alive: the call then returns a "
-                "process_id and the output so far, and process() reads, feeds or stops it."
+                "process_id and the output so far, and process() manages it within host policy."
                 if confined else
                 "Run one /bin/sh command on the host. This is not sandboxed. Output is bounded and exit "
                 "status is reported. Pass yield_time_ms to keep a longer command alive: the call then "
@@ -48,6 +49,14 @@ class ExecCommandTool(AgentTool):
                 }, "required": ["cmd"], "additionalProperties": False,
             }, requires_workspace=True, requires_host_execution=True,
         )
+        if readonly:
+            self.description = (
+                "Run a command with a read-only workspace under the platform sandbox. "
+                "Private scratch may be written. Commands cannot modify workspace files. "
+                "In isolated mode, reads are allowlisted and command network is off. "
+                "Use yield_time_ms for a long command; process() only reads output or stops it. "
+                "Interactive stdin/EOF is disabled. Configure tool caches explicitly in scratch."
+            )
 
     def execution_timeout(self, params: JsonObject) -> float:
         return params.get("yield_time_ms", params.get("timeout_ms", 10_000)) / 1000 + 10
@@ -60,7 +69,7 @@ class ExecCommandTool(AgentTool):
             raise PermissionError("A session workspace is required")
         if signal is not None and signal.is_set():
             raise asyncio.CancelledError()
-        filesystem = WorkspaceFS(context.workspace)
+        filesystem = WorkspaceFS(context.workspace, expected_identity=context.workspace_identity)
         parts = filesystem.parts(params.get("workdir", "."))
         # Validate directory components without following symlinks.
         with filesystem.directory(parts):
@@ -71,8 +80,8 @@ class ExecCommandTool(AgentTool):
         # otherwise produce a profile that denies even its own directory.
         argv, sandbox_record = ["/bin/sh", "-c", params["cmd"]], {}
         if self.sandbox is not None:
-            argv, sandbox_record = await self.sandbox.wrap(argv, filesystem.root)
-        child_env = self.sandbox.environment(filesystem.root) if self.sandbox is not None else None
+            argv, sandbox_record = await self.sandbox.wrap(argv, filesystem.root, owner=context.run_id)
+        child_env = self.sandbox.environment(filesystem.root, owner=context.run_id) if self.sandbox is not None else None
         started = monotonic()
         if "yield_time_ms" in params:
             return await self._session(params, context, cwd, argv, sandbox_record, started, child_env)
@@ -189,10 +198,12 @@ class ExecCommandTool(AgentTool):
         }
         gap = f"[Output before cursor {missed} was dropped]\n" if missed is not None else ""
         if record.running:
+            readonly = self.sandbox is not None and not self.sandbox.settings.writable_workspace
             head = (f"Running in background: process_id={record.id}\n"
                     f"Yielded after {params['yield_time_ms']}ms; the process keeps running.\n"
                     f"Next: process(action='read', process_id='{record.id}', since={next_cursor}, "
-                    "wait_ms=30000) to collect more output, or action='write' to send stdin.\n")
+                    "wait_ms=30000) to collect more output.\n"
+                    + ("Interactive stdin is disabled.\n" if readonly else "Use action='write' to send stdin.\n"))
             return AgentToolResult(content=[TextContent(head + gap + shown)],
                                    details=details)
         if not truncated:

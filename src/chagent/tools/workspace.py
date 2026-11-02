@@ -11,15 +11,21 @@ import stat
 from uuid import uuid4
 
 
+from chagent.boundaries import validate_workspace, validate_file_identity
+
+
 MAX_FILE_BYTES = 1_048_576
 
 
 class WorkspaceFS:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, expected_identity: tuple[int, int] | None = None):
         if os.name != "posix":
             raise RuntimeError("Workspace file tools currently require POSIX directory descriptors")
         self.logical_root = root.expanduser().absolute()
-        self.root = self.logical_root.resolve(strict=True)
+        self.root = validate_workspace(self.logical_root)
+        self.identity = (self.root.stat().st_dev, self.root.stat().st_ino)
+        if expected_identity is not None and self.identity != expected_identity:
+            raise PermissionError("Workspace directory was replaced")
         if not self.root.is_dir():
             raise NotADirectoryError("Workspace must be a directory")
 
@@ -40,8 +46,13 @@ class WorkspaceFS:
     @contextmanager
     def directory(self, parts: tuple[str, ...]):
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        if validate_workspace(self.logical_root) != self.root:
+            raise PermissionError("Workspace path changed")
         descriptor = os.open(self.root, flags)
         try:
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) != self.identity:
+                raise PermissionError("Workspace directory was replaced")
             for part in parts:
                 next_descriptor = os.open(part, flags, dir_fd=descriptor)
                 os.close(descriptor)
@@ -62,8 +73,7 @@ class WorkspaceFS:
         descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         with os.fdopen(descriptor, "rb") as stream:
             info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                raise ValueError("Only regular files are supported")
+            validate_file_identity(info)
             data = stream.read(limit + 1)
             if len(data) > limit:
                 raise ValueError(f"File exceeds the {limit} byte file-tool limit")
@@ -127,3 +137,26 @@ class WorkspaceFS:
                 raise ValueError("File changed since it was read")
             os.unlink(name, dir_fd=parent)
             os.fsync(parent)
+
+    def walk(self, parts=(), *, skipped=frozenset(), max_paths=50_000, max_depth=None):
+        pending = [parts]
+        visited = 0
+        while pending:
+            current = pending.pop()
+            with self.directory(current) as descriptor:
+                with os.scandir(descriptor) as entries:
+                    for entry in sorted(entries, key=lambda e: e.name):
+                        visited += 1
+                        if visited > max_paths:
+                            raise ValueError("Workspace search path limit exceeded; narrow the base")
+                        info = entry.stat(follow_symlinks=False)
+                        path = (*current, entry.name)
+                        if stat.S_ISLNK(info.st_mode):
+                            continue
+                        if stat.S_ISDIR(info.st_mode):
+                            if entry.name not in skipped and (max_depth is None or len(path) < max_depth):
+                                pending.append(path)
+                            yield path, True
+                        elif stat.S_ISREG(info.st_mode):
+                            if info.st_nlink == 1:
+                                yield path, False

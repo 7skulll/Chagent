@@ -28,11 +28,13 @@ MAX_MESSAGE_CHARS = 600
 
 def detect_suite(workspace: Path) -> str:
     """Pick a runner from the files present; never guesses beyond a clear signal."""
+    from chagent.tools.workspace import WorkspaceFS
+    filesystem = WorkspaceFS(workspace)
     for marker in ("pyproject.toml", "pytest.ini", "tox.ini", "setup.cfg"):
         candidate = workspace / marker
         if candidate.is_file():
             try:
-                if "pytest" in candidate.read_text(encoding="utf-8", errors="replace"):
+                if "pytest" in filesystem.read(marker).decode("utf-8", errors="replace"):
                     return "pytest"
             except OSError:
                 pass
@@ -45,7 +47,7 @@ def detect_suite(workspace: Path) -> str:
         try:
             import json
 
-            scripts = json.loads(package.read_text(encoding="utf-8")).get("scripts") or {}
+            scripts = json.loads(filesystem.read("package.json").decode("utf-8")).get("scripts") or {}
         except (OSError, ValueError):
             scripts = {}
         if "test" in scripts:
@@ -153,17 +155,18 @@ class RunTestsTool(AgentTool):
             raise PermissionError("A session workspace is required")
         if signal is not None and signal.is_set():
             raise asyncio.CancelledError()
-        workspace = context.workspace.resolve()
+        from chagent.tools.workspace import WorkspaceFS
+        workspace = WorkspaceFS(context.workspace, expected_identity=context.workspace_identity).root
         suite = params.get("suite", "auto")
         suite = detect_suite(workspace) if suite == "auto" else suite
         command = build_command(suite, workspace, params.get("selection"))
         if self.sandbox is not None and self.sandbox.settings.mode == "isolated" and command[0] == sys.executable:
             command[0] = str(Path(sys.executable).resolve())
-        child_env = self.sandbox.environment(workspace) if self.sandbox is not None else None
+        child_env = self.sandbox.environment(workspace, owner=context.run_id) if self.sandbox is not None else None
         timeout = params.get("timeout_ms", 120_000) / 1000
         argv, sandbox_record = ["/bin/sh", "-c", " ".join(_quote(part) for part in command)], {}
         if self.sandbox is not None:
-            argv, sandbox_record = await self.sandbox.wrap(argv, workspace)
+            argv, sandbox_record = await self.sandbox.wrap(argv, workspace, owner=context.run_id)
         started = monotonic()
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
             *argv, cwd=workspace, env=child_env,

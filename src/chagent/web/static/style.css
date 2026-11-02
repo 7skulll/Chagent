@@ -1,19 +1,3 @@
-/* Hallmark · checked: 2026-10-30 · genre: app screen (local agent console)
- * floor: 0 FAIL · fixed: 11 · structural: 3 printed (states, URL state, signature)
- * continued 2026-10-30 (pass 2): the 60px rail is gone (one button that duplicated the
- *   sidebar's workspace control, plus an avatar for a user this app does not have); the
- *   empty state now carries three openers the base tools can finish; assistant and tool
- *   rows lose their repeated name labels and boxes for one hairline each; context facts
- *   are label/value pairs; every disclosure shares one chevron; meta strings lose their
- *   middle dots (63); api-docs groups 26 rows by resource
- * continued 2026-10-30: api-docs rows get method badges (middle-dot summary removed),
- *   links gain :active, the empty state gains its dotted signature; field borders move to
- *   --line-strong (3:1 edge, gate 40); the collapsed mobile drawer leaves the geometry
- *   entirely (display none + allow-discrete, gate 34)
- * built: the project · redesign: polish · v2.0.0 */
-/* Hallmark · dismissed 25 · the empty-state lede is one sentence of 26 characters, and the gate allows a caption from 28ch; the measure is the sentence's own length */
-/* Hallmark · waive 26b · inline blocks in index.html and api-docs.html · the eight control states and :disabled are declared in this shared sheet, and the inline blocks are critical-path fallback only */
-
 /* Every colour and every face comes from here. Nothing past this block names one. */
 :root{
   color-scheme: light;
@@ -26,7 +10,7 @@
   --text-label: 12.5px;
   --text-body: 14px;
   /* Reading size for message prose. A step above UI body: chat is read, chrome is scanned. */
-  --text-read: 15px;
+  --text-read: 16px;
   --text-strong: 16px;
   --text-title: 19px;
   --text-display: 22px;
@@ -69,10 +53,10 @@
   /* Two control sizes, 6px apart: 34 for tools, 40 for the one primary. */
   --control: 34px;
   --control-lg: 40px;
-  --sidebar-w: 260px;
+  --sidebar-w: 240px;
   --tools-w: 300px;
-  --tabbar-h: 48px;
-  --measure: 46rem;
+  --tabbar-h: 56px;
+  --measure: 48rem;
 
   --sp-1: 4px;
   --sp-2: 8px;
@@ -133,15 +117,16 @@ summary::-webkit-details-marker{display:none}
 
 /* ---------- 会话侧栏 ---------- */
 .sidebar{width:var(--sidebar-w);flex:0 0 var(--sidebar-w);display:flex;flex-direction:column;min-height:0;
-  padding:var(--sp-2);background:var(--surface);border-right:1px solid var(--line-soft)}
+  padding:var(--sp-3);background:var(--surface);border-right:1px solid var(--line-soft)}
 body.sidebar-collapsed .sidebar{display:none}
-.sidebar-head{padding:0 var(--sp-1) var(--sp-2)}
+.sidebar-head{padding:var(--sp-2) var(--sp-1) var(--sp-4)}
+.brand::before{content:"C";display:grid;place-items:center;width:27px;height:27px;margin-right:var(--sp-2);border-radius:var(--r-2);background:var(--ink);color:var(--bg);font-size:var(--text-body);font-weight:650}
 .brand{display:flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);
   font-size:var(--text-strong);font-weight:650;letter-spacing:-.01em}
 .session-search{width:100%;height:var(--control);margin:0 0 var(--sp-2);padding:0 var(--sp-3);
-  border:1px solid var(--line-strong);border-radius:var(--r-2);background:var(--bg);font-size:var(--text-label);color:var(--ink)}
+  border:1px solid var(--line);border-radius:var(--r-2);background:var(--bg);font-size:var(--text-label);color:var(--ink)}
 .session-search::placeholder{color:var(--ink-4)}
-.new-chat{display:flex;align-items:center;gap:var(--sp-2);width:100%;height:var(--control);
+.new-chat{border:1px solid var(--line);background:var(--bg);box-shadow:var(--shadow-1);display:flex;align-items:center;gap:var(--sp-2);width:100%;height:var(--control);
   padding:0 var(--sp-2);border-radius:var(--r-2);font-size:var(--text-body);font-weight:550;text-align:left;color:var(--ink)}
 .new-chat svg{width:16px;height:16px;color:var(--ink-3)}
 .new-chat:hover{background:var(--surface-2)}
@@ -150,7 +135,7 @@ body.sidebar-collapsed .sidebar{display:none}
 #sessions{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:1px;padding-bottom:var(--sp-2);scrollbar-width:thin}
 .session-row{position:relative;display:flex;align-items:center;border-radius:var(--r-2)}
 .session-row:hover{background:var(--surface-2)}
-.session-row.active{background:var(--surface-3)}
+.session-row.active{background:var(--accent-soft)}
 .session-open{flex:1;min-width:0;min-height:var(--control);display:flex;align-items:center;gap:var(--sp-2);
   padding:0 2px 0 var(--sp-2);border-radius:var(--r-2) 0 0 var(--r-2);font-size:var(--text-body);
   color:var(--ink-2);text-align:left}
@@ -192,7 +177,7 @@ body.sidebar-collapsed .sidebar{display:none}
 .tabbar{height:var(--tabbar-h);flex:none;display:flex;align-items:center;gap:var(--sp-2);
   padding:0 var(--sp-3);border-bottom:1px solid var(--line-soft)}
 .tabbar-left,.tabbar-right{display:flex;align-items:center;gap:var(--sp-1);flex:none}
-.tabbar-title{flex:1;min-width:0;font-size:var(--text-label);font-weight:600;color:var(--ink);text-align:center;
+.tabbar-title{flex:1;min-width:0;font-size:var(--text-label);font-weight:600;color:var(--ink);text-align:left;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ghost-icon{width:var(--control);height:var(--control);display:grid;place-items:center;border-radius:var(--r-2);color:var(--ink-3)}
 .ghost-icon svg{width:17px;height:17px}
@@ -221,8 +206,8 @@ body.sidebar-collapsed .sidebar{display:none}
 /* 空状态：标记、一句边界说明、三个起手式。空会话是这个工具的第一屏，
    所以它要能直接开工，而不是一块灰色像章加一句话。 */
 #empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-5);
-  padding:var(--sp-6) var(--sp-4);text-align:center}
-.empty-mark{width:52px;height:52px;color:var(--ink-4)}
+  padding:var(--sp-6) 0;text-align:center}
+.empty-mark{width:48px;height:48px;color:var(--accent)}
 .empty-mark .eye{fill:var(--bg)}
 .empty-mark .mouth{stroke:var(--bg)}
 .empty-intro{display:flex;flex-direction:column;align-items:center;gap:var(--sp-2)}
@@ -230,18 +215,17 @@ body.sidebar-collapsed .sidebar{display:none}
   letter-spacing:-.02em;font-weight:650;color:var(--ink);text-wrap:balance;overflow-wrap:break-word;min-width:0}
 .empty-intro p{margin:0;max-width:44ch;font-size:var(--text-label);line-height:var(--leading-ui);color:var(--ink-3);
   text-wrap:pretty}
-.starters{width:min(36rem, 100%);display:flex;flex-direction:column;text-align:left;
-  border-top:1px solid var(--line-soft)}
-.starters-label{margin:0;padding:var(--sp-3) var(--sp-2) var(--sp-1);font-size:var(--text-meta);color:var(--ink-3)}
-.starter{display:block;width:100%;min-height:var(--control);padding:var(--sp-2) var(--sp-2);
-  border-bottom:1px solid var(--line-soft);font-size:var(--text-body);line-height:var(--leading-ui);
-  color:var(--ink-2);text-align:left}
-.starter:last-child{border-bottom:0}
-.starter:hover{background:var(--surface-2);color:var(--ink)}
+.starters{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-3);text-align:left;max-width:48rem}
+.starters-label{grid-column:1/-1;margin:0 0 var(--sp-1);font-size:var(--text-meta);color:var(--ink-3);text-align:center}
+.starter{display:flex;flex-direction:column;gap:var(--sp-2);width:100%;min-height:106px;padding:var(--sp-4);
+  border:1px solid var(--line);border-radius:var(--r-3);background:var(--bg);text-align:left;box-shadow:var(--shadow-1)}
+.starter-title{font-size:var(--text-body);font-weight:600;color:var(--ink)}
+.starter-caption{font-size:var(--text-label);line-height:1.65;color:var(--ink-3)}
+.starter:hover{border-color:var(--accent);background:var(--accent-soft)}
 .starter:active{background:var(--surface-2)}
 
 /* 消息 */
-.message{margin:0 0 var(--sp-5);font-size:var(--text-read);line-height:var(--leading-prose)}
+.message{margin:0 0 var(--sp-6);font-size:var(--text-read);line-height:var(--leading-prose)}
 /* Authorship is carried by alignment and the bubble, not a repeated name above
    every message; the name stays in the DOM for screen readers. */
 .message .content{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
@@ -377,17 +361,17 @@ body.sidebar-collapsed .sidebar{display:none}
   padding:0 var(--sp-2);font-size:var(--text-meta);color:var(--ink-3)}
 .stop-btn{min-height:26px;padding:0 var(--sp-2);border-radius:var(--r-1);font-size:var(--text-meta);color:var(--danger)}
 .stop-btn:hover{background:var(--danger-soft)}
-.composer{display:flex;flex-direction:column;padding:var(--sp-2);border:1px solid var(--line-strong);
-  border-radius:var(--r-4);background:var(--bg);box-shadow:var(--shadow-1);
+.composer{display:flex;flex-direction:column;padding:var(--sp-2);border:1px solid var(--line);
+  border-radius:var(--r-4);background:var(--bg);box-shadow:var(--shadow-2);
   transition:border-color var(--dur-short) var(--ease), box-shadow var(--dur-short) var(--ease)}
 .composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-textarea#input{width:100%;min-height:52px;max-height:220px;padding:var(--sp-2);border:0;background:transparent;
+textarea#input{width:100%;min-height:56px;max-height:220px;padding:var(--sp-2);border:0;background:transparent;
   font-size:var(--text-body);line-height:1.6;color:var(--ink);resize:none}
 textarea#input::placeholder{color:var(--ink-4)}
 textarea#input:focus-visible{outline:0}
 .composer-bottom{display:flex;align-items:center;gap:var(--sp-1);padding:0 2px}
-.round-btn{width:var(--control);height:var(--control);display:grid;place-items:center;border:1px solid var(--line);
-  border-radius:var(--r-full);background:var(--bg);color:var(--ink-2)}
+.round-btn{width:var(--control);height:var(--control);display:grid;place-items:center;border:1px solid transparent;
+  border-radius:var(--r-2);background:var(--surface);color:var(--ink-2)}
 .round-btn svg{width:15px;height:15px}
 .round-btn:hover{background:var(--surface);color:var(--ink)}
 .round-btn:active{background:var(--surface-2)}
@@ -399,6 +383,7 @@ textarea#input:focus-visible{outline:0}
   color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .send-btn{width:var(--control-lg);height:var(--control-lg);display:grid;place-items:center;margin-left:var(--sp-1);
   border-radius:var(--r-full);background:var(--accent);color:var(--on-accent)}
+.dock-hint{margin:var(--sp-2) 0 0;text-align:center;font-size:var(--text-meta);color:var(--ink-3)}
 .send-btn svg{width:17px;height:17px}
 .send-btn:hover{background:var(--accent-hover)}
 .send-btn:active{background:var(--accent-hover)}
@@ -578,10 +563,12 @@ dialog textarea{height:auto;padding:var(--sp-2);line-height:1.6;resize:vertical}
 /* The toggle reads as pressed only where it hides a column; on a phone the
    drawer is closed by default, so a permanent highlight would be noise. */
 @media (min-width:961px){
-  body.sidebar-collapsed #toggle-sidebar,body.tools-collapsed #toggle-tools{background:var(--surface-2);color:var(--ink)}
+  body:not(.sidebar-collapsed) #toggle-sidebar,body:not(.tools-collapsed) #toggle-tools{background:var(--surface-2);color:var(--ink)}
 }
 @media (max-width:1180px){
-  .tools-panel{position:fixed;z-index:35;right:0;top:60px;bottom:0;width:min(320px, 90vw);
+  .scrim{display:block;position:fixed;inset:0;z-index:30;background:var(--scrim);opacity:0;pointer-events:none;transition:opacity var(--dur-short) var(--ease)}
+  body.drawer-open .scrim{opacity:1;pointer-events:auto}
+  .tools-panel{position:fixed;z-index:35;right:0;top:0;bottom:0;width:min(340px, calc(100vw - 48px));
     box-shadow:var(--shadow-3);border-left:1px solid var(--line-soft)}
 }
 
@@ -595,7 +582,7 @@ dialog textarea{height:auto;padding:var(--sp-2);line-height:1.6;resize:vertical}
   @starting-style{body:not(.sidebar-collapsed) .sidebar{translate:-100% 0}}
   .scrim{display:block;position:fixed;inset:0;z-index:30;background:var(--scrim);opacity:0;
     pointer-events:none;transition:opacity var(--dur-short) var(--ease)}
-  body:not(.sidebar-collapsed) .scrim{opacity:1;pointer-events:auto}
+  body.drawer-open .scrim{opacity:1;pointer-events:auto}
   .tabbar{padding:0 var(--sp-2)}
   #conversation{padding:var(--sp-4) var(--sp-3)}
   .dock{padding:var(--sp-2) var(--sp-3) var(--sp-3)}
@@ -609,7 +596,11 @@ dialog textarea{height:auto;padding:var(--sp-2);line-height:1.6;resize:vertical}
   .dock-hint,.model-pill{display:none}
   .message.user .content{max-width:92%}
   #empty h2{font-size:var(--text-title)}
-  .starters{width:100%}
+  .starters{width:100%;grid-template-columns:1fr;gap:var(--sp-2)}
+  .starter{min-height:72px;padding:var(--sp-3);gap:var(--sp-1)}
+  #empty{gap:var(--sp-4);padding:var(--sp-4) 0}
+  .usage-pill{max-width:120px;overflow:hidden;text-overflow:ellipsis}
+  .dock{padding-bottom:max(var(--sp-3),env(safe-area-inset-bottom))}
 }
 
 /* 触摸设备：菜单跟着选中行出现，控件放大到 44px 命中区 */
@@ -634,11 +625,20 @@ dialog textarea{height:auto;padding:var(--sp-2);line-height:1.6;resize:vertical}
 .artifacts-heading span{min-width:22px;padding:2px 6px;border-radius:var(--r-full);background:var(--surface-2);color:var(--ink-3);font-size:var(--text-meta);text-align:center}
 .artifacts-intro,.artifacts-empty{margin:var(--sp-2) 0;color:var(--ink-3);font-size:var(--text-meta);line-height:1.6}
 .artifacts-list{display:flex;flex-direction:column;gap:var(--sp-2);margin-top:var(--sp-3)}
-.generated-file{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line-soft)}
-.generated-file-icon{display:grid;place-items:center;width:34px;height:40px;flex:none;border:1px solid #bbcbff;border-radius:8px;color:#426bea;background:#f4f7ff;font-size:10px;font-weight:700}
+.generated-file{display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3);border:1px solid var(--line);border-radius:var(--r-3);background:var(--bg)}
+.generated-file-icon{display:grid;place-items:center;width:34px;height:40px;flex:none;border:1px solid var(--line);border-radius:var(--r-2);color:var(--accent);background:var(--accent-soft);font-size:10px;font-weight:700}
 .generated-file-info{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
 .generated-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink);font-size:var(--text-label);font-weight:600}
 .generated-file-size{color:var(--ink-3);font-size:var(--text-meta)}
-.generated-file-download{color:var(--ink-3);font-size:var(--text-meta);text-decoration:none;padding:6px}
-.generated-file-download:hover{color:var(--accent)}
+.generated-file-download{color:var(--ink-3);font-size:var(--text-label);text-decoration:none;padding:var(--sp-2);border-radius:var(--r-2)}
+.generated-file-download:hover{color:var(--accent);background:var(--accent-soft)}
 .message-file{max-width:480px;padding:16px;border:1px solid var(--line);border-radius:var(--r-2);margin:8px 0;background:var(--surface)}
+
+.tools-heading{display:flex;align-items:center;justify-content:space-between;min-height:var(--tabbar-h);padding:0 var(--sp-4);border-bottom:1px solid var(--line-soft);font-size:var(--text-label);font-weight:600}
+.tools-heading button{min-height:var(--control);padding:0 var(--sp-2);font-size:var(--text-label);color:var(--ink-3)}
+.tools-body{min-height:0;overflow-y:auto}
+
+.mode-picker { padding: 0 18px 12px; display: grid; gap: 7px; font-size: 12px; color: var(--muted, #777); }
+.mode-picker[hidden], .mode-note[hidden] { display: none; }
+.mode-picker select { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 8px; background: transparent; color: inherit; }
+.mode-note { margin: 0 0 6px; color: #675e48; font-size: 12px; line-height: 1.5; }

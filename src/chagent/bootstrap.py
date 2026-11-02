@@ -32,12 +32,17 @@ def _tool_faces(
     database: Database, *, code_mode: bool, allow_host_commands: bool,
     sandbox: Sandbox | None, processes: ProcessManager, web: WebAccess | None,
     include_echo: bool, single_face: bool = False,
+    allow_workspace_writes: bool = True,
 ) -> dict[str, ToolExecutor]:
     """One executor per enabled mode, built once per runner.
 
     Two layers, as the design requires: the registry omits the tools a mode may
     not use, and the executor is bound to that registry so a call naming an
     absent tool is an unknown tool rather than a permission decision.
+
+    Reads and workspace writes are in both faces; ``allow_workspace_writes=False``
+    is how an entry point that cannot supervise a file mutation (the local web)
+    keeps the model away from the user's files without inventing a new mode.
 
     ``single_face`` is for the deterministic harness only: it names a tool, so it
     keeps the code face and the runner never resolves by session mode.
@@ -54,6 +59,7 @@ def _tool_faces(
     for mode in modes:
         registry = create_builtin_registry(
             mode=mode, allow_host_commands=allow_host_commands,
+            allow_workspace_writes=allow_workspace_writes,
             artifacts=ArtifactRepository(database), sandbox=sandbox,
             processes=processes, web=web, include_echo=include_echo,
         )
@@ -80,6 +86,7 @@ def create_demo_runner(
     max_processes: int = 4,
     web: WebAccess | None = None,
     work_only: bool = False,
+    allow_workspace_writes: bool = True,
 ) -> AgentRunner:
     return create_runner(
         database, Model(id="fake-echo", provider="local-test", api="fake", context_window=8192, max_tokens=512),
@@ -100,6 +107,7 @@ def create_demo_runner(
         # a model drives; it is asserted on ``create_runner`` and on
         # ``create_builtin_registry``, not here.
         code_mode=not work_only, single_face=not work_only,
+        allow_workspace_writes=allow_workspace_writes,
         # ``echo`` is the neutral tool that needs no filesystem: this is the only
         # path that gets it.
         include_echo=True,
@@ -126,14 +134,17 @@ def create_runner(
     web: WebAccess | None = None,
     include_echo: bool = False,
     code_mode: bool = False,
+    allow_workspace_writes: bool = True,
     single_face: bool = False,
 ) -> AgentRunner:
+    if single_face and not isinstance(client, FakeModelClient):
+        raise ValueError("single_face is reserved for the deterministic diagnostic client")
     # One manager per runner: process ownership is per run, and the runner is
     # the only object that knows when a run ends.
     processes = ProcessManager(wall_timeout=process_wall_timeout, max_per_run=max_processes)
     faces = _tool_faces(database, code_mode=code_mode, allow_host_commands=allow_host_commands,
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
-                        single_face=single_face)
+                        single_face=single_face, allow_workspace_writes=allow_workspace_writes)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))

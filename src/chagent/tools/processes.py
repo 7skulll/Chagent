@@ -298,7 +298,10 @@ def _status(record: ManagedProcess) -> str:
 class ProcessTool(AgentTool):
     """Read, feed and stop the processes a run started with ``yield_time_ms``."""
 
-    def __init__(self, manager: ProcessManager):
+    def __init__(self, manager: ProcessManager, *, allowed_actions=None):
+        self.allowed_actions = tuple(allowed_actions) if allowed_actions is not None else ("list", "read", "write", "stop")
+        if not self.allowed_actions or set(self.allowed_actions) - {"list", "read", "write", "stop"}:
+            raise ValueError("Invalid process actions")
         super().__init__(
             name="process", label="Manage a running command",
             description=(
@@ -310,7 +313,7 @@ class ProcessTool(AgentTool):
             ),
             parameters={
                 "type": "object", "properties": {
-                    "action": {"type": "string", "enum": ["list", "read", "write", "stop"]},
+                    "action": {"type": "string", "enum": list(self.allowed_actions)},
                     "process_id": {"type": "string", "minLength": 1},
                     "since": {"type": "integer", "minimum": 0},
                     "wait_ms": {"type": "integer", "minimum": 0, "maximum": 30_000},
@@ -327,6 +330,10 @@ class ProcessTool(AgentTool):
             requires_workspace=True, requires_host_execution=True,
         )
         self.manager = manager
+        if "write" not in self.allowed_actions:
+            self.description = "Read output or stop this run's commands. Interactive stdin and EOF are disabled."
+            self.parameters["properties"].pop("chars")
+            self.parameters["properties"].pop("close_stdin")
 
     async def execute(
         self, tool_call_id: str, params: JsonObject, signal: asyncio.Event | None = None,
@@ -337,6 +344,8 @@ class ProcessTool(AgentTool):
         if signal is not None and signal.is_set():
             raise asyncio.CancelledError()
         action = params["action"]
+        if action not in self.allowed_actions or ("write" not in self.allowed_actions and ("chars" in params or "close_stdin" in params)):
+            raise PermissionError("Process stdin/write/EOF is disabled by host policy")
         if action == "list":
             return self._list(context.run_id)
         record = self.manager.get(params["process_id"], context.run_id)

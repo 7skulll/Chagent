@@ -9,6 +9,7 @@ from uuid import UUID
 from psycopg import Error as DatabaseError
 from psycopg_pool import PoolTimeout
 
+from chagent.boundaries import validate_workspace
 from chagent.agent.budget import RunBudget
 from chagent.agent.types import FinishDecision, RunState
 from chagent.agent.stream_writer import TextStreamWriter
@@ -87,6 +88,7 @@ class AgentRunner:
         self.sandbox = None
         # Session processes outlive their invocation, never their run.
         self.processes = None
+        self._workspace_identities = {}
 
     def cancel(self, run_id: UUID) -> bool:
         task = self._tasks.get(run_id)
@@ -181,6 +183,7 @@ class AgentRunner:
             budget.stop()
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
+            processes_reaped = self.processes is None
             if self.processes is not None:
                 try:
                     # A session process deliberately outlives its tool call, so
@@ -188,8 +191,15 @@ class AgentRunner:
                     # promise the child gets. A cancelled run must still do this
                     # before its terminal state is written.
                     await self.processes.terminate_run(run_id)
+                    processes_reaped = True
                 except BaseException:
                     pass
+            if self.sandbox is not None and processes_reaped:
+                try:
+                    self.sandbox.release(run_id)
+                except OSError:
+                    import logging
+                    logging.getLogger(__name__).exception("Could not remove run scratch")
             try:
                 # Stops the flush task and commits or drops the tail. A cancelled
                 # run may raise here; it must never mask the run's own outcome.
@@ -230,18 +240,24 @@ class AgentRunner:
     def executor_for(self, mode: str | None) -> ToolExecutor:
         """The tool face one run may use, chosen once and never switched.
 
-        A session whose mode is not enabled in this build is refused at the HTTP
-        layer before any run exists; reaching the fallback here means the row was
-        written by a build that had the mode on, and the safe face is the right
-        answer rather than a crash in the middle of a run.
+        Disabled modes are refused here as well as by the HTTP layer, so
+        restoring an old session through Python cannot silently change its tools.
         """
         faces = self.tool_faces
         if faces is None:
             return self.tools
-        return faces.get(mode or "work") or faces["work"]
+        if (mode or "work") not in faces:
+            raise ValueError("Session mode is disabled")
+        return faces[mode or "work"]
 
     async def _load_state(self, run_id: UUID, session_id: UUID) -> RunState:
         session = await self.conversations.get_session(session_id)
+        root = validate_workspace(session.workspace)
+        info = root.stat()
+        identity = (info.st_dev, info.st_ino)
+        previous = self._workspace_identities.setdefault(session_id, identity)
+        if previous != identity:
+            raise PermissionError("Session workspace directory was replaced")
         history = await self.conversations.messages(session_id, current_run=run_id, project_artifacts=True)
         task_state = await self.conversations.task_state(session_id)
         summary = await self.context_manager.summaries.latest(session_id, current_run=run_id) if self.context_manager else None
@@ -253,7 +269,7 @@ class AgentRunner:
             await self.runs.event(run_id, "recovery_projected", {
                 "fact_count": note.fact_count, "source_runs": list(note.run_ids),
             })
-        state = RunState(run_id, session, history, task_state, summary, recovery=note)
+        state = RunState(run_id, session, history, task_state, summary, recovery=note, workspace_identity=identity)
         if self.memory_service is not None and self.memory_service.explicit_command(state) is not None:
             # The command is answered without a model, so nothing reads the
             # workspace: skipping the scan keeps it out of large trees' way.
@@ -261,7 +277,7 @@ class AgentRunner:
         if self.sandbox is not None:
             # Run-static, like the environment snapshot: the probe is cached per
             # policy, so this costs one subprocess sweep per process, not per run.
-            await self.runs.event(run_id, "sandbox_applied", await self.sandbox.audit(session.workspace))
+            await self.runs.event(run_id, "sandbox_applied", await self.sandbox.audit(session.workspace, owner=run_id))
         return state
 
     async def _explicit_memory(self, state: RunState, proposal: MemoryProposal) -> RunResult:
@@ -293,8 +309,11 @@ class AgentRunner:
         executor = self.executor_for(state.session.mode)
         tool_context = ToolContext(
             workspace=state.session.workspace, session_id=session_id, run_id=run_id,
+            workspace_identity=state.workspace_identity,
         )
         for iteration in range(self.max_turns):
+            from chagent.tools.workspace import WorkspaceFS
+            WorkspaceFS(state.session.workspace, expected_identity=state.workspace_identity)
             state.iteration = iteration
             if state.tool_revision != executor.registry.revision:
                 state.tools = executor.registry.definitions()

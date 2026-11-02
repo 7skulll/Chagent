@@ -40,7 +40,16 @@ async def probe_isolated(sandbox, policy):
         checks["workspace_read"] = code == 0 and text == "workspace-ok"
         target = workspace / "written"
         code, _ = await run(["/bin/sh", "-c", f"printf ok > {shlex.quote(str(target))}"])
-        checks["workspace_write"] = code == 0 and target.read_text() == "ok"
+        if probe.writable_workspace:
+            checks["workspace_write"] = code == 0 and target.is_file() and target.read_text() == "ok"
+        else:
+            checks["workspace_write_denied"] = code != 0 and not target.exists()
+            code, text = await run([python, "-I", "-c",
+                "import errno,os; print('started', flush=True); "
+                "\ntry: os.open('written', os.O_WRONLY|os.O_CREAT, 0o600)"
+                "\nexcept OSError as e: print(e.errno); raise SystemExit(0 if e.errno == errno.EPERM else 2)"
+                "\nraise SystemExit(3)"])
+            checks["workspace_write_errno"] = code == 0 and text.strip() == "started\n1" and not target.exists()
         for name, path in (("other_project_read_denied", secret), ("symlink_read_denied", workspace / "outside-link")):
             code, text = await run(["/bin/cat", str(path)])
             checks[name] = code != 0 and "synthetic-secret" not in text

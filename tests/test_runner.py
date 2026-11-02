@@ -46,7 +46,28 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         await self.database.connect()
         await migrate(self.database)
         self.runner = create_demo_runner(self.database)
-        self.session = await self.runner.conversations.create_session(Path("/test-project"))
+        self.workspace_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.workspace_directory.cleanup)
+        self.session = await self.runner.conversations.create_session(Path(self.workspace_directory.name))
+
+    async def test_invalid_old_workspace_never_reaches_model(self):
+        from chagent.boundaries import protected_source
+        invalid = await self.runner.conversations.create_session(protected_source())
+        with self.assertRaises(RunFailedError):
+            await self.runner.run(invalid, "must not call model")
+        async with self.database.connection() as connection:
+            cursor = await connection.execute("SELECT count(*) AS n FROM model_calls")
+            self.assertEqual((await cursor.fetchone())["n"], 0)
+
+    async def test_workspace_replaced_between_runs_is_refused(self):
+        workspace = Path(self.workspace_directory.name)
+        await self.runner.run(self.session, "first")
+        moved = workspace.with_name(workspace.name + "-old")
+        workspace.rename(moved)
+        workspace.mkdir()
+        self.addCleanup(lambda: __import__("shutil").rmtree(moved))
+        with self.assertRaisesRegex(RunFailedError, "replaced"):
+            await self.runner.run(self.session, "second")
 
     async def drop_schema(self):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))

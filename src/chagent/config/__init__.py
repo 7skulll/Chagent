@@ -40,6 +40,7 @@ class Settings:
     sandbox_network: bool = False
     sandbox_deny_read: str = ""
     sandbox_writable_tmp: bool = True
+    sandbox_writable: bool = True
     # Human approval for host commands. ``never`` keeps the pre-approval
     # behaviour exactly; ``on-failure`` is intentionally unsupported.
     approval: str = "never"
@@ -96,6 +97,8 @@ class Settings:
         if isinstance(self.memory_worker_concurrency, bool) or not isinstance(self.memory_worker_concurrency, int) \
                 or not 1 <= self.memory_worker_concurrency <= 4:
             raise ValueError("CHAGENT_MEMORY_WORKER_CONCURRENCY must be an integer between 1 and 4")
+        if not isinstance(self.sandbox_writable, bool):
+            raise ValueError("CHAGENT_SANDBOX_WRITABLE must be true or false")
         if self.sandbox not in {"off", "workspace-write", "isolated"}:
             raise ValueError("CHAGENT_SANDBOX must be off, workspace-write or isolated")
         if self.approval == "on-failure":
@@ -146,6 +149,12 @@ class Settings:
         """Modes this process can actually serve, default first."""
         return ("work", "code") if self.code_mode else ("work",)
 
+    @property
+    def readonly_code_available(self) -> bool:
+        """Capability precondition; the web release gate remains closed until R3."""
+        return (self.code_mode and self.allow_host_commands and self.sandbox == "isolated"
+                and not self.sandbox_writable and not self.sandbox_network)
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
         values = os.environ if env is None else env
@@ -161,7 +170,11 @@ class Settings:
         sandbox_tmp = values.get("CHAGENT_SANDBOX_WRITABLE_TMP", "true").lower()
         if sandbox_tmp not in {"true", "false"}:
             raise ValueError("CHAGENT_SANDBOX_WRITABLE_TMP must be true or false")
+        sandbox_writable = values.get("CHAGENT_SANDBOX_WRITABLE", "true").lower()
+        if sandbox_writable not in {"true", "false"}:
+            raise ValueError("CHAGENT_SANDBOX_WRITABLE must be true or false")
         return cls(
+            sandbox_writable=sandbox_writable == "true",
             database_url=values.get("CHAGENT_DATABASE_URL", "postgresql:///chagent"),
             db_pool_min_size=int(values.get("CHAGENT_DB_POOL_MIN_SIZE", "1")),
             db_pool_max_size=int(values.get("CHAGENT_DB_POOL_MAX_SIZE", "4")),

@@ -1,0 +1,248 @@
+{
+  "recorded_at_utc": "2026-11-02T12:29:04.521179+00:00",
+  "provider": "deepseek",
+  "model": "deepseek-v4-flash",
+  "service": "http://127.0.0.1:8893",
+  "schema": "chagent_readonly_acceptance_20261102",
+  "provenance": {
+    "codex_package_source": "/Users/macbook/Desktop/智能体/codeagent/codex-main/scripts/codex_package",
+    "codex_package_scope": "existing Python package and original archive tests, not the complete Codex project",
+    "rag_source": "local langchain-rag Git clone",
+    "rag_head": "212a34229fa8f09db67b09f2161ef6364cf8ba64",
+    "rag_copy_diff": "README.md acceptance comment only"
+  },
+  "sessions": [
+    {
+      "id": "0bc4626f-a3ba-49df-9e89-c453ee6206da",
+      "mode": "code",
+      "root_path": "/private/tmp/chagent-r5-20261102/codex-package"
+    },
+    {
+      "id": "d3ed6cf4-4b54-4bc9-b844-5d6a9de55ab6",
+      "mode": "code",
+      "root_path": "/private/tmp/chagent-r5-20261102/langchain-rag"
+    },
+    {
+      "id": "1ec5caa3-6740-4d1d-83d3-1e16599d64d9",
+      "mode": "work",
+      "root_path": "/private/tmp/chagent-r5-20261102/documents"
+    }
+  ],
+  "runs": [
+    {
+      "id": "fcc8c019-d276-4d79-940f-89a4666f1d09",
+      "session_id": "0bc4626f-a3ba-49df-9e89-c453ee6206da",
+      "status": "completed",
+      "end_reason": "model_stop"
+    },
+    {
+      "id": "eafb996f-9b15-4c1f-bba7-c37d78243520",
+      "session_id": "0bc4626f-a3ba-49df-9e89-c453ee6206da",
+      "status": "completed",
+      "end_reason": "model_stop"
+    },
+    {
+      "id": "f7d62bf0-a97f-4c14-91b4-95135b9095b4",
+      "session_id": "d3ed6cf4-4b54-4bc9-b844-5d6a9de55ab6",
+      "status": "completed",
+      "end_reason": "model_stop"
+    },
+    {
+      "id": "f3405d60-b71f-4cef-8a8d-c72af28cbeeb",
+      "session_id": "d3ed6cf4-4b54-4bc9-b844-5d6a9de55ab6",
+      "status": "cancelled",
+      "end_reason": "user_cancelled"
+    },
+    {
+      "id": "fc2fac44-bb5f-4c86-abe5-e19d1b94fed1",
+      "session_id": "1ec5caa3-6740-4d1d-83d3-1e16599d64d9",
+      "status": "completed",
+      "end_reason": "model_stop"
+    }
+  ],
+  "model_calls": 15,
+  "tool_calls": [
+    {
+      "run_id": "fcc8c019-d276-4d79-940f-89a4666f1d09",
+      "name": "read_file",
+      "status": "completed",
+      "command": null,
+      "action": null,
+      "exit_code": null,
+      "error": false,
+      "output_tail": null
+    },
+    {
+      "run_id": "fcc8c019-d276-4d79-940f-89a4666f1d09",
+      "name": "read_file",
+      "status": "completed",
+      "command": null,
+      "action": null,
+      "exit_code": null,
+      "error": false,
+      "output_tail": null
+    },
+    {
+      "run_id": "fcc8c019-d276-4d79-940f-89a4666f1d09",
+      "name": "exec_command",
+      "status": "failed",
+      "command": "CODEX_REPO_ROOT=. python3 -m unittest discover -s scripts/codex_package -p test_archive.py; echo \"EXIT=$?\"",
+      "action": null,
+      "exit_code": null,
+      "error": true,
+      "output_tail": ""
+    },
+    {
+      "run_id": "fcc8c019-d276-4d79-940f-89a4666f1d09",
+      "name": "exec_command",
+      "status": "completed",
+      "command": "CODEX_REPO_ROOT=. python3 -m unittest discover -s scripts/codex_package -p test_archive.py; echo \"EXIT=$?\"",
+      "action": null,
+      "exit_code": 0,
+      "error": false,
+      "output_tail": "...\n----------------------------------------------------------------------\nRan 3 tests in 0.001s\n\nOK\nEXIT=0\n",
+      "inner_test_exit": 0
+    },
+    {
+      "run_id": "f7d62bf0-a97f-4c14-91b4-95135b9095b4",
+      "name": "exec_command",
+      "status": "completed",
+      "command": "pwd; ls -la; git log --oneline -3; echo \"---STATUS---\"; git status --short; echo \"---DIFF---\"; git diff -- README.md",
+      "action": null,
+      "exit_code": 0,
+      "error": false,
+      "output_tail": "13 README.md\n-rw-r--r--@  1 macbook  wheel    4174 Nov  2 12:13 RETRIEVAL.md\ndrwxr-xr-x@ 25 macbook  wheel     800 Nov  2 12:13 scripts\ndrwxr-xr-x@ 38 macbook  wheel    1216 Nov  2 12:13 tests\ndrwxr-xr-x@  3 macbook  wheel      96 Nov  2 12:13 tools\n-rw-r--r--@  1 macbook  wheel  283010 Nov  2 12:13 uv.lock\n212a342 docs: 补齐回归门禁章节并清理过期的评测报告\nb9cee77 feat: 审核溯源与 RAGAS 判分状态化，评测工作台默认完整 RAG\n9b3ea09 fix: 统一评测汇总展示并更新测评文档\n---STATUS---\nwarning: unable to access '/etc/gitattributes': Operation not permitted\n M README.md\n---DIFF---\nwarning: unable to access '/etc/gitattributes': Operation not permitted\nwarning: unable to access '/etc/gitattributes': Operation not permitted\nwarning: unable to access '/etc/gitattributes': Operation not permitted\ndiff --git a/README.md b/README.md\nindex 0b3110f..83a48f5 100644\n--- a/README.md\n+++ b/README.md\n@@ -138,3 +138,5 @@ npm run build\n 自助注册固定创建普通用户，不能自行选择员工或管理员角色；如需关闭注册，设置 `RAG_REGISTRATION_ENABLED=false`。\n \n 会话与问答历史目前仍是工作空间共享，不按用户隔离；区分权限的范围是知识库写入、模型配置和用户管理。脚本场景可设置 `RAG_API_TOKEN` 作为管理员服务令牌。\n+\n+<!-- Readonly acceptance copy: intentional diff for review. -->\n"
+    },
+    {
+      "run_id": "f7d62bf0-a97f-4c14-91b4-95135b9095b4",
+      "name": "glob",
+      "status": "completed",
+      "command": null,
+      "action": null,
+      "exit_code": null,
+      "error": false,
+      "output_tail": null
+    },
+    {
+      "run_id": "f7d62bf0-a97f-4c14-91b4-95135b9095b4",
+      "name": "read_file",
+      "status": "completed",
+      "command": null,
+      "action": null,
+      "exit_code": null,
+      "error": false,
+      "output_tail": null
+    },
+    {
+      "run_id": "f7d62bf0-a97f-4c14-91b4-95135b9095b4",
+      "name": "read_file",
+      "status": "completed",
+      "command": null,
+      "action": null,
+      "exit_code": null,
+      "error": false,
+      "output_tail": null
+    },
+    {
+      "run_id": "f7d62bf0-a97f-4c14-91b4-95135b9095b4",
+      "name": "exec_command",
+      "status": "failed",
+      "command": "python3 -m pytest -q -p no:cacheprovider --confcutdir=tests/unit tests/unit/test_passwords.py; echo \"EXIT=$?\"",
+      "action": null,
+      "exit_code": null,
+      "error": true,
+      "output_tail": ""
+    },
+    {
+      "run_id": "f7d62bf0-a97f-4c14-91b4-95135b9095b4",
+      "name": "read_file",
+      "status": "completed",
+      "command": null,
+      "action": null,
+      "exit_code": null,
+      "error": false,
+      "output_tail": null
+    },
+    {
+      "run_id": "f7d62bf0-a97f-4c14-91b4-95135b9095b4",
+      "name": "exec_command",
+      "status": "completed",
+      "command": "python3 -m pytest -q -p no:cacheprovider --confcutdir=tests/unit tests/unit/test_passwords.py; echo \"EXIT=$?\"",
+      "action": null,
+      "exit_code": 0,
+      "error": false,
+      "output_tail": "\n==================================== ERRORS ====================================\n________________ ERROR collecting tests/unit/test_passwords.py _________________\nImportError while importing test module '/private/tmp/chagent-r5-20261102/langchain-rag/tests/unit/test_passwords.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/opt/anaconda3/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/unit/test_passwords.py:6: in <module>\n    from app.users import (\napp/users.py:21: in <module>\n    import psycopg\nE   ModuleNotFoundError: No module named 'psycopg'\n=========================== short test summary info ============================\nERROR tests/unit/test_passwords.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n1 error in 0.80s\nEXIT=2\n",
+      "inner_test_exit": 2
+    },
+    {
+      "run_id": "f3405d60-b71f-4cef-8a8d-c72af28cbeeb",
+      "name": "exec_command",
+      "status": "completed",
+      "command": "sleep 60",
+      "action": null,
+      "exit_code": null,
+      "error": false,
+      "output_tail": ""
+    },
+    {
+      "run_id": "f3405d60-b71f-4cef-8a8d-c72af28cbeeb",
+      "name": "process",
+      "status": "unknown",
+      "command": null,
+      "action": "read",
+      "exit_code": null,
+      "error": null,
+      "output_tail": null
+    },
+    {
+      "run_id": "fc2fac44-bb5f-4c86-abe5-e19d1b94fed1",
+      "name": "read_file",
+      "status": "completed",
+      "command": null,
+      "action": null,
+      "exit_code": null,
+      "error": false,
+      "output_tail": null
+    },
+    {
+      "run_id": "fc2fac44-bb5f-4c86-abe5-e19d1b94fed1",
+      "name": "create_file",
+      "status": "completed",
+      "command": null,
+      "action": null,
+      "exit_code": null,
+      "error": false,
+      "output_tail": null
+    }
+  ],
+  "generated_files": 1,
+  "checks": {
+    "rag_workspace_unchanged": true,
+    "codex_files_match_original": true,
+    "cancelled_run_present": true,
+    "no_sleep60_descendants": true,
+    "work_download_verified": true,
+    "uploaded_original_unchanged": true
+  },
+  "changed_paths": [],
+  "limitations": [
+    "RAG password tests fail collection: isolated runtime lacks psycopg",
+    "Python validation covers original Codex archive module tests, not full Codex suite",
+    "Independent synthetic work upload/download changes only documents workspace"
+  ],
+  "browser_checks": {
+    "readonly_session_creation": true,
+    "readonly_capability_display": true,
+    "completed_answer_refresh": true,
+    "running_process_refresh_then_stop": true,
+    "work_upload_read_generate_download": true,
+    "browser_console_errors_observed": 0
+  },
+  "regression": {
+    "tests": 547,
+    "passed": 547,
+    "skipped": 0,
+    "seconds": 59.162
+  },
+  "acceptance_scope_passed": true
+}

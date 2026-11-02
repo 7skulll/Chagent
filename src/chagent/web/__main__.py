@@ -18,11 +18,13 @@ import httpx
 import uvicorn
 
 from chagent.config import Settings
+from chagent.config.dotenv import load_missing
+from chagent.web.policy import validate_web_settings
 from chagent.diagnostics.behavior import describe as describe_behavior, describe_warnings
 from chagent.domain.summaries import CompactionPolicy
 from chagent.models.settings import ModelSettings
 from chagent.web.app import create_app
-from chagent.web.workspaces import default_workspace
+from chagent.boundaries import default_workspace
 
 
 HOST = "127.0.0.1"
@@ -95,7 +97,9 @@ def main():
     parser.add_argument("--provider", choices=("openai", "deepseek", "anthropic", "qwen", "custom"))
     parser.add_argument("--model")
     parser.add_argument("--no-open", action="store_true", help="不要自动打开浏览器")
+    parser.add_argument("--env-file", type=Path, default=Path(__file__).resolve().parents[3] / ".env")
     args = parser.parse_args()
+    load_missing(args.env_file)
     if not 1 <= args.port <= 65535:
         parser.error("Port must be between 1 and 65535")
     if args.demo and (args.provider or args.model):
@@ -104,7 +108,12 @@ def main():
     port, already = resolve_port(args.port)
     url = base_url(port)
     if already:
-        print(f"Chagent 已在运行：{url}", flush=True)
+        print(f"Chagent 已在运行：{url}（使用现有服务配置，新的环境设置不会生效；变更需要重启）", flush=True)
+        try:
+            current = httpx.get(f"{url}/api/config", timeout=PROBE_TIMEOUT, trust_env=False).json()
+            print(f"Running behavior: {current.get('behavior', '请在网页查看实际配置')}", flush=True)
+        except (httpx.HTTPError, ValueError):
+            print("请在网页配置中核对现有服务的实际模式。", flush=True)
         if not args.no_open:
             webbrowser.open(url)
         return
@@ -120,8 +129,7 @@ def main():
         environment["CHAGENT_MODEL"] = args.model
     try:
         settings = Settings.from_env()
-        if settings.code_mode:
-            raise ValueError("网页暂不支持 code 模式；请设置 CHAGENT_CODE_MODE=off")
+        validate_web_settings(settings)
         compaction = CompactionPolicy.from_env()
         selected = None if args.demo else ModelSettings.from_env(environment)
         app = create_app(workspace=args.workspace, settings=settings, model_settings=selected,
@@ -131,7 +139,10 @@ def main():
     # Ambient variables win over --env-file, so name the resolved pair once.
     if selected is not None:
         print(f"Resolved: {selected.describe()}", flush=True)
-    print(f"Behavior: {describe_behavior(settings, compaction)}", flush=True)
+    # ``writes=off`` is what this entry point assembles (see create_app), not a
+    # setting: printing the bare settings line here would advertise a capability
+    # the browser never gets.
+    print(f"Behavior: {describe_behavior(settings, compaction, workspace_writes=False)}", flush=True)
     for warning in describe_warnings(settings):
         print(f"Warning: {warning}", flush=True)
     print(f"Chagent 网页：{url}（工作区 {Path(args.workspace).expanduser().resolve()}）", flush=True)

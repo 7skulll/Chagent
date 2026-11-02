@@ -4,10 +4,15 @@ Two faces, one rule: **a tool the mode does not allow is not registered.** The
 model cannot call what is not in the registry, so the boundary is a property of
 construction rather than of the prompt, the UI or the executor's mood.
 
-``work`` reads the workspace and web, and can create session-owned downloadable
-text artifacts in the database; it cannot modify the workspace. ``code`` adds the
-write and host-execution tools, and only exists when the build-level switch
-``CHAGENT_CODE_MODE`` is on.
+Reading and writing the workspace are shared by both modes, because a mode is a
+statement about *execution*, not about whether the agent may edit the user's
+files at all. ``code`` adds the host-execution tools, and only exists when the
+build-level switch ``CHAGENT_CODE_MODE`` is on.
+
+A caller that must not let the model change the workspace says so with
+``allow_workspace_writes=False``: the local web app does, because no approval
+gate exists yet for file mutations performed on its behalf. The switch trims the
+face at construction; it is not a runtime permission the model can argue with.
 """
 
 from chagent.domain.sessions import validate_mode
@@ -26,8 +31,8 @@ from chagent.tools.sandbox import Sandbox
 from chagent.tools.web import WebAccess, create_web_tools
 
 
-#: Tools that only make sense when a run may change the workspace. Kept next to
-#: the registry so the assertion in tests and the construction share one list.
+#: Tools that change files in the workspace. Shared by both modes; what a
+#: caller can withhold is the whole set, never a subset of it.
 WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
 #: Tools that run something the model chose on the host. Not the same set as
 #: ``tools.policy.HOST_TOOLS``: that one is about which calls need a human, this
@@ -36,6 +41,7 @@ EXECUTION_TOOLS = frozenset({"exec_command", "run_tests", "process"})
 
 
 def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
+                            allow_workspace_writes: bool = True,
                             artifacts: ArtifactRepository | None = None,
                             sandbox: Sandbox | None = None,
                             processes: ProcessManager | None = None,
@@ -44,14 +50,16 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
     """One tool face. ``mode`` is required so no call site gets a face by accident.
 
     The second layer (``ToolExecutor``) is the registry itself: an executor built
-    for ``work`` has no ``write_file`` entry, so a call naming it fails as an
+    without ``write_file`` has no such entry, so a call naming it fails as an
     unknown tool even if it arrived through some other route.
     """
     mode = validate_mode(mode)
     registry = ToolRegistry()
-    # Reads exist in both modes: they are what ``work`` is for.
+    # Reads exist in both modes: they are what every session is for.
     tools = [ListDirTool(), ReadFileTool(), GlobTool(), GrepTool()]
-    if mode == "code":
+    # Writes do too, unless this caller is one that cannot supervise them.
+    readonly_code = mode == "code" and sandbox is not None and not sandbox.settings.writable_workspace
+    if allow_workspace_writes and not readonly_code:
         tools += [WriteFileTool(), EditFileTool(), ApplyPatchTool()]
     # ``echo`` exists to verify the execution chain (demo runs, ``--tool``
     # probes, tests), not to do work. Registered by default it was a 201-byte
@@ -68,7 +76,7 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
         if processes is not None:
             # Useless without a command to attach to, so it follows the same
             # switch instead of appearing in every session.
-            registry.register(ProcessTool(processes))
+            registry.register(ProcessTool(processes, allowed_actions=("read", "stop") if readonly_code else None))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
         if mode == "work":

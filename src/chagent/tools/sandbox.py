@@ -25,6 +25,9 @@ import tempfile
 from typing import Protocol, Sequence
 
 
+from chagent.boundaries import runtime_roots, validate_workspace, protected_source
+
+
 MODES = ("off", "workspace-write", "isolated")
 DEFAULT_DENY_READ = (
     "~/.ssh", "~/.aws", "~/.kube", "~/.docker",
@@ -43,8 +46,11 @@ class SandboxSettings:
     # ``None`` means the built-in credential paths; ``()`` means protect nothing.
     deny_read: tuple[Path, ...] | None = None
     writable_tmp: bool = True
+    writable_workspace: bool = True
 
     def __post_init__(self) -> None:
+        if not isinstance(self.writable_workspace, bool):
+            raise ValueError("writable_workspace must be boolean")
         if self.mode not in MODES:
             raise ValueError(f"Sandbox mode must be one of {MODES}")
         if self.mode == "isolated" and self.network:
@@ -64,6 +70,7 @@ class SandboxPolicy:
     writable_tmp: bool = True
     isolated: bool = False
     scratch: Path | None = None
+    writable_workspace: bool = True
 
     def __post_init__(self) -> None:
         # A denied path that contains the workspace, or sits inside it, would
@@ -144,10 +151,13 @@ def profile(policy: SandboxPolicy) -> str:
     if not policy.network:
         lines.append("(deny network-outbound)")
     lines += ["(deny file-write*)", "(allow file-write*",
-              f"  (subpath {_sbpl(policy.workspace)})",
               '  (literal "/dev/null")',
               '  (literal "/dev/stdout")',
               '  (literal "/dev/stderr")']
+    if policy.writable_workspace:
+        lines.append(f"  (subpath {_sbpl(policy.workspace)})")
+    if policy.writable_tmp and not policy.writable_workspace and (policy.workspace.is_relative_to(_tmp_root()) or _tmp_root().is_relative_to(policy.workspace)):
+        raise PermissionError("Read-only workspace overlaps writable temporary directory")
     if policy.writable_tmp:
         # TMPDIR is per-user; the shared /private/tmp is not granted because
         # leftovers there are reachable by other processes.
@@ -187,7 +197,7 @@ class Sandbox:
         self.enabled = not isinstance(self.backend, DisabledBackend)
         self._support: dict[SandboxPolicy, SandboxSupport] = {}
         self._lock = asyncio.Lock()
-        self._scratch: dict[Path, tempfile.TemporaryDirectory] = {}
+        self._scratch: dict[tuple[Path, object], tempfile.TemporaryDirectory] = {}
 
     def close(self) -> None:
         for temporary in self._scratch.values():
@@ -213,15 +223,14 @@ class Sandbox:
             network=settings.sandbox_network,
             deny_read=configured or None,
             writable_tmp=settings.sandbox_writable_tmp,
+            writable_workspace=settings.sandbox_writable,
         ))
 
-    def policy(self, workspace: Path) -> SandboxPolicy:
-        root = Path(workspace).expanduser().resolve(strict=True)
+    def policy(self, workspace: Path, *, owner=None) -> SandboxPolicy:
+        root = validate_workspace(Path(workspace))
         if self.settings.mode != "isolated":
-            return SandboxPolicy(root, self.settings.network, self.settings.deny_read, self.settings.writable_tmp)
-        from chagent.web.workspaces import validate_workspace
-        validate_workspace(root)
-        from chagent.web.workspaces import protected_source
+            return SandboxPolicy(workspace=root, network=self.settings.network, deny_read=self.settings.deny_read,
+                                 writable_tmp=self.settings.writable_tmp, writable_workspace=self.settings.writable_workspace)
         if any(protected_source().is_relative_to(item) for item in runtime_roots()):
             raise PermissionError("Runtime allowlist overlaps protected application source")
         # Commands cannot create an outside hardlink under this policy. Reject
@@ -234,17 +243,31 @@ class Sandbox:
                     raise PermissionError("Isolated workspaces cannot contain hard-linked files")
         if any(root == item or root.is_relative_to(item) or item.is_relative_to(root) for item in runtime_roots()):
             raise PermissionError("An isolated workspace cannot overlap the runtime allowlist")
-        if root not in self._scratch:
+        key = (root, owner)
+        if key not in self._scratch:
             temporary = tempfile.TemporaryDirectory(prefix="chagent-isolated-")
-            self._scratch[root] = temporary
+            self._scratch[key] = temporary
             scratch = Path(temporary.name).resolve()
             for name in ("home", "tmp"):
                 (scratch / name).mkdir(mode=0o700)
-        return SandboxPolicy(root, False, self.settings.deny_read, False, True,
-                             Path(self._scratch[root].name).resolve())
+        return SandboxPolicy(workspace=root, network=False, deny_read=self.settings.deny_read,
+                             writable_tmp=False, isolated=True, scratch=Path(self._scratch[key].name).resolve(),
+                             writable_workspace=self.settings.writable_workspace)
 
-    def environment(self, workspace: Path) -> dict[str, str] | None:
-        return isolated_environment(self.policy(workspace)) if self.settings.mode == "isolated" else None
+    def release(self, owner) -> None:
+        keys = [key for key in self._scratch if key[1] == owner]
+        for key in keys:
+            temporary = self._scratch.pop(key)
+            scratch = Path(temporary.name).resolve()
+            temporary.cleanup()
+            self._support = {p: result for p, result in self._support.items() if p.scratch != scratch}
+
+    def environment(self, workspace: Path, *, owner=None) -> dict[str, str] | None:
+        if self.settings.mode == "isolated":
+            return isolated_environment(self.policy(workspace, owner=owner))
+        if not self.settings.writable_workspace and self.enabled:
+            return {**os.environ, "GIT_OPTIONAL_LOCKS": "0", "PYTHONDONTWRITEBYTECODE": "1"}
+        return None
 
     def record(self, policy: SandboxPolicy) -> dict:
         """What was actually enforced, not what was asked for.
@@ -258,6 +281,7 @@ class Sandbox:
             "network_allowed": policy.network if enforced else True,
             "denied_reads": [str(item) for item in policy.deny_read] if enforced else [],
             "unsandboxed": not enforced,
+            "workspace_writable": policy.writable_workspace if enforced else True,
         }
 
         if policy.isolated:
@@ -265,9 +289,9 @@ class Sandbox:
                           environment="allowlist", home="synthetic", isolated=True)
         return record
 
-    async def wrap(self, argv: Sequence[str], workspace: Path) -> tuple[list[str], dict]:
+    async def wrap(self, argv: Sequence[str], workspace: Path, *, owner=None) -> tuple[list[str], dict]:
         """Return the argv to spawn and its audit record, or refuse to run."""
-        policy = self.policy(workspace)
+        policy = self.policy(workspace, owner=owner)
         support = await self.support(policy)
         if not support.available:
             raise PermissionError(
@@ -292,8 +316,8 @@ class Sandbox:
                 self._support[policy] = cached
             return cached
 
-    async def audit(self, workspace: Path) -> dict:
-        policy = self.policy(workspace)
+    async def audit(self, workspace: Path, *, owner=None) -> dict:
+        policy = self.policy(workspace, owner=owner)
         support = await self.support(policy)
         return {**self.record(policy), "available": support.available,
                 "checks": support.checks, "detail": support.detail}
@@ -321,17 +345,18 @@ class Sandbox:
             workspace.mkdir()
             secret.write_text("probe\n", encoding="utf-8")
             probe = SandboxPolicy(workspace=workspace, network=policy.network,
-                                  deny_read=(secret,), writable_tmp=False)
+                                  deny_read=(secret,), writable_tmp=False, writable_workspace=policy.writable_workspace)
             checks = {
                 "starts": await self._expect(backend.wrap(["/bin/sh", "-c", "echo alive"], probe), 0, "alive"),
                 "workspace_writable": await self._expect(
-                    backend.wrap(["/bin/sh", "-c", f"printf ok > {workspace}/written"], probe), 0),
+                    backend.wrap(["/bin/sh", "-c", f"printf ok > {workspace}/written"], probe),
+                    0 if probe.writable_workspace else None),
                 "outside_denied": await self._expect(
                     backend.wrap(["/bin/sh", "-c", f"printf no > {outside}"], probe), None),
                 "read_denied": await self._expect(backend.wrap(["/bin/cat", str(secret)], probe), None),
                 # A denied write that still leaves a file is worse than a hard
                 # failure: it looks contained while the file exists.
-                "no_residue": not outside.exists(),
+                "no_residue": not outside.exists() and (probe.writable_workspace or not (workspace / "written").exists()),
             }
             if probe.network:
                 checks["network_denied"] = True
@@ -369,29 +394,25 @@ class Sandbox:
             listener.close()
 
 
-def runtime_roots() -> tuple[Path, ...]:
-    """Explicit read-only runtime grants, never the user's home or all /opt."""
-    roots = [Path(p) for p in ("/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/share",
-                               "/System/Library", "/System/iOSSupport", "/Library/Apple", "/Library/Developer/CommandLineTools", "/private/var/select")]
-    prefix = Path(sys.base_prefix).resolve()
-    roots += [prefix / name for name in ("bin", "lib", "include", "share")]
-    return tuple(dict.fromkeys(p.resolve() for p in roots if p.exists()))
-
-
 def isolated_environment(policy: SandboxPolicy) -> dict[str, str]:
     if policy.scratch is None:
         raise PermissionError("Isolated execution has no scratch directory")
-    return {"PATH": f"{Path(sys.base_prefix).resolve()}/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    env = {"PATH": f"{Path(sys.base_prefix).resolve()}/bin:/usr/bin:/bin:/usr/sbin:/sbin",
             "HOME": str(policy.scratch / "home"), "TMPDIR": str(policy.scratch / "tmp") + "/",
             "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8", "PYTHONNOUSERSITE": "1",
             "PYTHONSAFEPATH": "1", "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0"}
+    if not policy.writable_workspace:
+        env.update(GIT_OPTIONAL_LOCKS="0", PYTHONDONTWRITEBYTECODE="1")
+    return env
 
 
 def isolated_profile(policy: SandboxPolicy) -> str:
     if policy.scratch is None or policy.network:
         raise PermissionError("Isolated policy requires private scratch and no network")
+    if policy.workspace == policy.scratch or policy.workspace.is_relative_to(policy.scratch) or policy.scratch.is_relative_to(policy.workspace):
+        raise PermissionError("Private scratch cannot overlap workspace")
     readable = (*runtime_roots(), policy.workspace, policy.scratch)
     lines = ["(version 1)", "(deny default)", "(allow process-exec)", "(allow process-fork)",
              "(allow signal (target same-sandbox))", "(allow process-info* (target same-sandbox))",
@@ -407,7 +428,7 @@ def isolated_profile(policy: SandboxPolicy) -> str:
     ancestors = {parent for p in readable for parent in p.parents}
     lines += [f"  (literal {_sbpl(p)})" for p in sorted(ancestors)]
     lines += [")", "(allow file-write*"]
-    lines += [f"  (subpath {_sbpl(p)})" for p in (policy.workspace, policy.scratch)]
+    lines += [f"  (subpath {_sbpl(p)})" for p in ((policy.workspace, policy.scratch) if policy.writable_workspace else (policy.scratch,))]
     lines += ['  (literal "/dev/null")', ")"]
     if policy.deny_read:
         lines += ["(deny file-read*"]

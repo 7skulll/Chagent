@@ -40,6 +40,9 @@ class ToolExecutor:
             Draft202012Validator(tool.parameters).validate(arguments)
             if tool.requires_workspace and context is None:
                 raise PermissionError("This tool requires a session workspace")
+            if tool.requires_workspace and context is not None:
+                from chagent.tools.workspace import WorkspaceFS
+                WorkspaceFS(context.workspace, expected_identity=context.workspace_identity)
             if tool.requires_host_execution and not self.allow_host_commands:
                 raise PermissionError("Host command execution is disabled")
             if signal is not None and signal.is_set():

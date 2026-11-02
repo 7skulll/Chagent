@@ -65,7 +65,7 @@ async def _run(
 ) -> None:
     # The CLI must enforce the same source-directory boundary as the web UI,
     # including when resuming an older session.
-    from chagent.web.workspaces import validate_workspace
+    from chagent.boundaries import validate_workspace
     if session_id is None:
         workspace = validate_workspace(workspace)
     async with Database(settings) as database:

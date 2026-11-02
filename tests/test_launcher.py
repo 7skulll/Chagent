@@ -79,3 +79,32 @@ class LauncherTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LauncherConfigTests(unittest.TestCase):
+    def test_main_loads_dotenv_without_logging_key(self):
+        import contextlib,io,os,tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from chagent.web.__main__ import main
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'.env'
+            path.write_text('DEEPSEEK_API_KEY=synthetic-secret\nCHAGENT_DATABASE_URL=postgresql:///custom\n')
+            captured=io.StringIO()
+            with patch.dict(os.environ,{},clear=True),patch('sys.argv',['chagent','--env-file',str(path),'--workspace',tmp,'--no-open']),patch('chagent.web.__main__.resolve_port',return_value=(8765,False)),patch('chagent.web.__main__.create_app') as create,patch('chagent.web.__main__.uvicorn.run'),contextlib.redirect_stdout(captured):
+                main()
+            self.assertEqual(create.call_args.kwargs['settings'].database_url,'postgresql:///custom')
+            self.assertEqual(create.call_args.kwargs['model_settings'].provider,'deepseek')
+            self.assertNotIn('synthetic-secret',captured.getvalue())
+
+    def test_relaunch_reports_actual_service_without_claiming_new_settings(self):
+        import contextlib,io,tempfile
+        from pathlib import Path
+        from unittest.mock import patch,MagicMock
+        from chagent.web.__main__ import main
+        captured=io.StringIO();response=MagicMock();response.json.return_value={'behavior':'actual-work-only'}
+        with tempfile.TemporaryDirectory() as tmp,patch('sys.argv',['chagent','--env-file',str(Path(tmp)/'missing'),'--no-open']),patch('chagent.web.__main__.resolve_port',return_value=(8765,True)),patch('chagent.web.__main__.httpx.get',return_value=response),patch('chagent.web.__main__.uvicorn.run') as serve,contextlib.redirect_stdout(captured):
+            main()
+        serve.assert_not_called()
+        self.assertIn('actual-work-only',captured.getvalue())
+        self.assertIn('新的环境设置不会生效',captured.getvalue())

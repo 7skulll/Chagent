@@ -69,3 +69,12 @@ def describe(entries: list[dict]) -> list[str]:
             lines.append(f"{entry['key']} is set in the environment but not in .env"
                          + ("" if entry["redacted"] else f" (value {entry['environment']!r})"))
     return lines
+
+
+def load_missing(path: Path, environ=None) -> None:
+    """Load local configuration, preserving all explicit process overrides."""
+    import os
+    target = os.environ if environ is None else environ
+    if path.is_file():
+        for key, value in read(path).items():
+            target.setdefault(key, value)

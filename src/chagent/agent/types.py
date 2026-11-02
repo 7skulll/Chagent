@@ -36,6 +36,7 @@ class RunState:
     # Workspace snapshot (cwd, tree, branch, AGENTS.md) rendered once at run
     # start. It is part of the prompt prefix, so it must not change mid-run.
     environment: str | None = None
+    workspace_identity: tuple[int, int] | None = None
 
     @property
     def current_input(self) -> StoredMessage:

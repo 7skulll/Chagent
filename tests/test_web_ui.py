@@ -88,7 +88,8 @@ class WebSurfaceTests(unittest.TestCase):
         # and usage pill, and the usage dialog's close button; Z6 removed the
         # rail's workspace button; WK1 added the "回到最新" scroll button, which
         # only exists so a reader who scrolled up can rejoin the stream.
-        self.assertEqual(len(self.page.buttons), 23)
+        # A visible close control also dismisses the narrow tools drawer.
+        self.assertEqual(len(self.page.buttons), 24)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)
