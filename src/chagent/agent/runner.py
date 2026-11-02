@@ -13,7 +13,6 @@ from chagent.agent.budget import RunBudget
 from chagent.agent.types import FinishDecision, RunState
 from chagent.agent.stream_writer import TextStreamWriter
 from chagent.context.builder import ContextBudgetError, ContextBuilder
-from chagent.context.environment import build as build_environment
 from chagent.context.manager import ContextManager
 from chagent.memory.service import MemoryService
 from chagent.domain.memories import MemoryProposal
@@ -263,13 +262,7 @@ class AgentRunner:
             # Run-static, like the environment snapshot: the probe is cached per
             # policy, so this costs one subprocess sweep per process, not per run.
             await self.runs.event(run_id, "sandbox_applied", await self.sandbox.audit(session.workspace))
-        facts = await build_environment(session.workspace, context_window=self.model.context_window)
-        await self.runs.event(run_id, "environment_projected", {
-            "chars": len(facts.text), "tree_entries": facts.tree_entries,
-            "tree_truncated": facts.tree_truncated, "git_repo": facts.git_repo,
-            "agents_files": facts.agents_files, "context_window": self.model.context_window,
-        })
-        return RunState(run_id, session, history, task_state, summary, recovery=note, environment=facts.text)
+        return state
 
     async def _explicit_memory(self, state: RunState, proposal: MemoryProposal) -> RunResult:
         """Answer a deterministic memory command without a provider call.

@@ -96,8 +96,8 @@ class Settings:
         if isinstance(self.memory_worker_concurrency, bool) or not isinstance(self.memory_worker_concurrency, int) \
                 or not 1 <= self.memory_worker_concurrency <= 4:
             raise ValueError("CHAGENT_MEMORY_WORKER_CONCURRENCY must be an integer between 1 and 4")
-        if self.sandbox not in {"off", "workspace-write"}:
-            raise ValueError("CHAGENT_SANDBOX must be off or workspace-write")
+        if self.sandbox not in {"off", "workspace-write", "isolated"}:
+            raise ValueError("CHAGENT_SANDBOX must be off, workspace-write or isolated")
         if self.approval == "on-failure":
             raise ValueError("CHAGENT_APPROVAL=on-failure is not supported yet")
         if self.approval not in {"never", "on-request", "untrusted"}:

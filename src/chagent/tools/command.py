@@ -27,7 +27,8 @@ class ExecCommandTool(AgentTool):
             description=(
                 "Run one /bin/sh command on the host inside the platform sandbox: writes stay in the "
                 "workspace and the user's temp directory, network is off unless the host allowed it, and "
-                "configured credential paths are unreadable. Output is bounded and exit status is "
+                "configured credential paths are unreadable. In isolated mode, reads are restricted to "
+                "the workspace and declared runtime, HOME/tmp are private and the environment is cleared. Output is bounded and exit status is "
                 "reported. Pass yield_time_ms to keep a longer command alive: the call then returns a "
                 "process_id and the output so far, and process() reads, feeds or stops it."
                 if confined else
@@ -71,13 +72,14 @@ class ExecCommandTool(AgentTool):
         argv, sandbox_record = ["/bin/sh", "-c", params["cmd"]], {}
         if self.sandbox is not None:
             argv, sandbox_record = await self.sandbox.wrap(argv, filesystem.root)
+        child_env = self.sandbox.environment(filesystem.root) if self.sandbox is not None else None
         started = monotonic()
         if "yield_time_ms" in params:
-            return await self._session(params, context, cwd, argv, sandbox_record, started)
+            return await self._session(params, context, cwd, argv, sandbox_record, started, child_env)
 
         # Shield spawn so cancellation cannot lose a successfully started child.
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
-            *argv, cwd=cwd, stdin=asyncio.subprocess.DEVNULL,
+            *argv, cwd=cwd, env=child_env, stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
         ))
@@ -156,7 +158,7 @@ class ExecCommandTool(AgentTool):
             is_error=timed_out or process.returncode != 0, outcome_unknown=timed_out,
         )
 
-    async def _session(self, params, context, cwd, argv, sandbox_record, started) -> AgentToolResult:
+    async def _session(self, params, context, cwd, argv, sandbox_record, started, child_env) -> AgentToolResult:
         """Start the command and return once ``yield_time_ms`` has passed.
 
         The child is owned by the run, not by this invocation: leaving it alive
@@ -169,7 +171,7 @@ class ExecCommandTool(AgentTool):
             raise PermissionError("Session processes belong to a run")
         record = await self.processes.start(
             run_id=context.run_id, command=params["cmd"], cwd=cwd, argv=argv,
-            sandbox=sandbox_record, window_chars=params.get("max_output_chars"),
+            sandbox=sandbox_record, env=child_env, window_chars=params.get("max_output_chars"),
         )
         with suppress(TimeoutError):
             await asyncio.wait_for(record.finished.wait(), params["yield_time_ms"] / 1000)

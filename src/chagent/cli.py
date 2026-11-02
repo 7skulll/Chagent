@@ -16,6 +16,7 @@ import sys
 from uuid import UUID
 
 from chagent.bootstrap import create_demo_runner, create_runner
+from chagent.storage.repositories import ConversationRepository
 from chagent.config import Settings
 from chagent.diagnostics.behavior import describe as describe_behavior, describe_warnings
 from chagent.domain.summaries import CompactionPolicy
@@ -62,8 +63,16 @@ async def _run(
     arguments: JsonObject | None, allow_commands: bool, settings: Settings,
     model_settings: ModelSettings | None, client: HTTPModelClient | None,
 ) -> None:
+    # The CLI must enforce the same source-directory boundary as the web UI,
+    # including when resuming an older session.
+    from chagent.web.workspaces import validate_workspace
+    if session_id is None:
+        workspace = validate_workspace(workspace)
     async with Database(settings) as database:
         await migrate(database)
+        if session_id is not None:
+            session = await SessionManager(ConversationRepository(database)).get(session_id)
+            validate_workspace(session.workspace)
         host_commands = allow_commands or settings.allow_host_commands
         sandbox = Sandbox.from_settings(settings)
         approval = ApprovalPolicy.from_settings(settings)

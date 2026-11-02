@@ -319,3 +319,26 @@ class UploadBoundaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class UploadFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_storage_failures_are_distinct_localized_and_do_not_expose_paths(self):
+        import errno
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+        from starlette.exceptions import HTTPException
+        from chagent.web.app import upload
+
+        current = SimpleNamespace(root=lambda workspace: Path('/private/tmp/upload-test'))
+        request = SimpleNamespace(stream=lambda: None)
+        for error, status, message in [
+            (PermissionError('secret/path'), 403, '权限'),
+            (OSError(errno.ENOSPC, 'secret/path'), 507, '空间不足'),
+            (OSError(errno.EIO, 'secret/path'), 500, '存储'),
+        ]:
+            with self.subTest(status=status):
+                with patch('chagent.web.app.save_upload', new=AsyncMock(side_effect=error)):
+                    with self.assertRaises(HTTPException) as caught:
+                        await upload(request, current, name='test.txt', workspace=None)
+                self.assertEqual(caught.exception.status_code, status)
+                self.assertIn(message, caught.exception.detail)
+                self.assertNotIn('secret/path', caught.exception.detail)

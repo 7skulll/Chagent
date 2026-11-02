@@ -74,6 +74,7 @@ function makeEl(tag) {
     focus() {}, select() {}, setSelectionRange() {}, closest() { return null; },
     requestSubmit() {}, showModal() {}, close() {},
     click() { if (this.tagName === "A") globalThis.lastDownload = {href: this.href, name: this.download}; },
+    getBoundingClientRect() { return {top: 0, bottom: 100}; },
     scrollTop: 0, scrollHeight: 0, clientHeight: 0,
     value: "", hidden: true, disabled: false, open: false, maxLength: 0, title: "", placeholder: "", type: "",
   };
@@ -166,7 +167,7 @@ globalThis.fetch = async (path, options) => {
 require(process.cwd() + "/markdown.js");
 globalThis.window.ChagentMarkdown = globalThis.ChagentMarkdown;
 localStorage.setItem("chagent.session", SESSION);
-require(process.cwd() + "/app.js");
+eval(require("fs").readFileSync(process.cwd() + "/app.js", "utf8") + "\nglobalThis.testOpenSession = openSession; globalThis.testSetFollow = value => {follow = value;};");
 
 const problems = [];
 setTimeout(() => {
@@ -219,13 +220,25 @@ setTimeout(() => {
       check(queued.includes("超过 20 MiB"), "an oversized file was not refused with a reason");
       check(queued.includes("报告.pdf"), "a readable file did not get a row");
       check(queued.includes("upload-bar"), "an uploading file has no progress element");
-      setTimeout(() => {
+      setTimeout(async () => {
         check(CALLS.some(call => call.body && call.body.regenerate_from), "regenerate did not reach the API");
         check(CALLS.some(call => call.body && call.body.edit_message_id), "edit did not reach the API");
         const composer = document.getElementById("input").value;
         check(composer.startsWith("请阅读 uploads/报告.pdf"), "the composer lost its upload prompt: " + composer);
         check(JSON.stringify(document.getElementById("uploads").children).includes("已上传"),
               "the upload never completed");
+        const view = document.getElementById("conversation");
+        view.scrollHeight = 5000; view.clientHeight = 500; view.scrollTop = 250;
+        testSetFollow(false);
+        await testOpenSession(SESSION, {preserveScroll: true});
+        check(view.scrollTop === 250, "completion refresh yanked an upward reader to the bottom");
+        check(!document.getElementById("jump-latest").hidden, "upward reader lost return-to-latest button");
+        testSetFollow(true);
+        await testOpenSession(SESSION, {preserveScroll: true});
+        check(view.scrollTop === 5000, "completion refresh stopped following the bottom");
+        view.scrollTop = 250; testSetFollow(false);
+        await testOpenSession(SESSION);
+        check(view.scrollTop === 5000, "explicit session open did not show latest messages");
         process.stdout.write(JSON.stringify(problems));
       }, 80);
     }, 60);

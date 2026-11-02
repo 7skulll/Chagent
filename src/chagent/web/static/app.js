@@ -94,9 +94,9 @@ function setBusy(busy) {
 // command the current configuration may refuse. They fill the composer rather
 // than sending: the first message should be yours to edit.
 const STARTERS = [
-  "读一遍 README，用三句话说明这个项目做什么",
-  "在 src 下找出所有 TODO 和 FIXME，整理成一份清单",
-  "解释 src/chagent 的目录结构，指出最该先看的三个文件",
+  "列出工作区里的文件，帮我了解有哪些资料",
+  "阅读我上传的文档，概括重点并标明出处",
+  "根据已有资料整理一份可下载的 Markdown 摘要",
 ];
 function renderStarters() {
   const target = $("starters");
@@ -540,7 +540,14 @@ async function setArchived(session, archived) {
 document.addEventListener("click", event => {
   if (!event.target.closest(".session-menu-pop") && !event.target.closest(".session-menu")) closeSessionMenus();
 });
-async function openSession(id) {
+async function openSession(id, {preserveScroll = false} = {}) {
+  const view = $("conversation");
+  const keepPosition = preserveScroll && id === state.session && !follow;
+  const oldTop = view.scrollTop;
+  const anchor = keepPosition ? Array.from($("messages").children).find(node =>
+    node.dataset.messageId && node.getBoundingClientRect().bottom > view.getBoundingClientRect().top) : null;
+  const anchorId = anchor && anchor.dataset.messageId;
+  const anchorTop = anchor && anchor.getBoundingClientRect().top;
   const version = ++state.version;
   resetStream(); clearError(); state.session = id; state.readonly = false; state.loading = true; setBusy(false);
   $("messages").replaceChildren(); $("empty").hidden = true;
@@ -580,7 +587,12 @@ async function openSession(id) {
     loadUsagePill();
     loadGeneratedFiles().catch(showError);
     if ($("context-panel").open) loadContext().catch(showError);
-    scrollBottom();
+    if (keepPosition) {
+      const restored = Array.from($("messages").children).find(node => node.dataset.messageId === anchorId);
+      view.scrollTop = restored ? oldTop + restored.getBoundingClientRect().top - anchorTop : oldTop;
+      follow = nearBottom();
+      $("jump-latest").hidden = follow;
+    } else scrollBottom();
   } finally {
     if (version === state.version) { state.loading = false; updateComposer(); }
   }
@@ -775,7 +787,7 @@ function connectRun(runId, version) {
   });
   source.addEventListener("end", () => {
     source.close();
-    if (version === state.version) openSession(state.session).catch(showError);
+    if (version === state.version) openSession(state.session, {preserveScroll: true}).catch(showError);
     refreshActive();
   });
   source.onerror = async () => {
@@ -958,7 +970,7 @@ function uploadOne(item) {
         item.status = "failed"; item.retryable = request.status !== 413;
         item.error = request.status === 413
           ? "文件超过服务端上限，未上传"
-          : value.error || `上传失败 (${request.status})`;
+          : value.error || `上传失败（HTTP ${request.status}），请稍后重试`;
       }
       resolve();
     });

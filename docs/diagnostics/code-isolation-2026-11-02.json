@@ -1,0 +1,46 @@
+{
+  "recorded_at_utc": "2026-11-02T07:33:30.718837+00:00",
+  "support": {
+    "available": true,
+    "backend": "seatbelt",
+    "checks": {
+      "shell_starts": true,
+      "python_starts": true,
+      "workspace_read": true,
+      "workspace_write": true,
+      "other_project_read_denied": true,
+      "symlink_read_denied": true,
+      "source_read_denied": true,
+      "data_volume_alias_denied": true,
+      "outside_write_denied": true,
+      "private_home_tmp": true,
+      "environment_clean": true,
+      "outside_hardlink_denied": true,
+      "foreign_signal_denied": true,
+      "network_denied": true
+    },
+    "detail": ""
+  },
+  "tools": {
+    "shell": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "git": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "environment": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "run_tests": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "session_process": {
+      "passed": true
+    }
+  },
+  "passed": true
+}

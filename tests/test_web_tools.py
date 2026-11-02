@@ -227,6 +227,32 @@ class WebFetchTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(result.content[0].text), 1000 + 200)
         self.assertIn("cut at max_chars=1000", result.content[0].text)
 
+    async def test_late_target_and_continuation_use_one_cached_full_page(self):
+        content = "a" * 25000 + "TARGET-METHOD: verified body" + "z" * 2500
+        calls = []
+        tool = WebFetchTool("ds-secret", transport=transport(
+            lambda request: answer({"title": "Long page", "content": content}), calls))
+        first = await tool.execute("c1", {"url": "https://example.com/a#intro", "max_chars": 1000})
+        self.assertNotIn("verified body", first.content[0].text)
+        found = await tool.execute("c2", {"url": "https://example.com/a#target", "find": "target-method", "max_chars": 1000})
+        self.assertIn("TARGET-METHOD: verified body", found.content[0].text)
+        self.assertEqual(found.details["match_offset"], 25000)
+        self.assertEqual(found.details["offset"], 24500)
+        self.assertTrue(found.details["cached"])
+        next_page = await tool.execute("c3", {"url": "https://example.com/a", "offset": found.details["next_offset"], "max_chars": 1000})
+        self.assertEqual(next_page.details["offset"], 25500)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("content", found.details)
+
+    async def test_missing_phrase_and_end_of_page_are_explicit(self):
+        tool = WebFetchTool("ds-secret", transport=transport(lambda request: answer(fetch_payload())))
+        missing = await tool.execute("c1", {"url": "https://example.com/a", "find": "absent"})
+        self.assertIsNone(missing.details["match_offset"])
+        self.assertIn("not found", missing.content[0].text)
+        end = await tool.execute("c2", {"url": "https://example.com/a", "offset": 999999})
+        self.assertIsNone(end.details["next_offset"])
+        self.assertEqual(end.details["offset"], end.details["chars"])
+
     async def test_an_empty_extraction_is_a_failure_not_an_empty_answer(self):
         """A 200 with no text would be read as "the page says nothing"."""
         with self.assertRaises(WebAccessError) as caught:

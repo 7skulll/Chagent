@@ -111,8 +111,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             result = await self.runner.run(session, "hello")
         self.assertEqual(result.end_reason, "model_stop")
 
-    async def test_environment_snapshot_is_frozen_across_turns(self):
-        """The snapshot is part of the prompt prefix, so it must not move mid-run."""
+    async def test_environment_is_not_injected_into_prompt(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)
             (workspace / "app").mkdir()
@@ -121,8 +120,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             result = await self.runner.run(session, "第一轮")
         events = await self.runner.runs.events(result.run_id)
         projected = [event for event in events if event["type"] == "environment_projected"]
-        self.assertEqual(len(projected), 1)
-        self.assertIn("chars", projected[0]["payload"])
+        self.assertEqual(projected, [])
         async with self.database.connection() as connection:
             cursor = await connection.execute(
                 "SELECT iteration, request FROM model_calls WHERE run_id = %s ORDER BY iteration", (result.run_id,))
@@ -130,10 +128,9 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["iteration"] for row in rows], [0, 1])
         system = [message_from_dict(row["request"]["messages"][0]).text() for row in rows]
         self.assertEqual(system[0], system[1])
-        self.assertIn(f"Working directory: {workspace.resolve()}", system[0])
-        self.assertIn("app/ (1 file: pricing.py)", system[0])
-        self.assertIn("authoritative for the working directory", system[0])
-        self.assertEqual(system[0].count("Working directory:"), 1)
+        self.assertNotIn(str(workspace.resolve()), system[0])
+        self.assertNotIn("pricing.py", system[0])
+        self.assertNotIn("Working directory:", system[0])
 
     async def test_invalid_arguments_return_to_model_without_execution(self):
         class InvalidArgsClient(FakeModelClient):

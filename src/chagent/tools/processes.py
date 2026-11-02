@@ -157,7 +157,7 @@ class ProcessManager:
     # -- lifetime -------------------------------------------------------
 
     async def start(self, *, run_id: UUID, command: str, cwd: Path, argv: list[str],
-                    sandbox: dict | None = None, window_chars: int | None = None) -> ManagedProcess:
+                    sandbox: dict | None = None, env: dict[str, str] | None = None, window_chars: int | None = None) -> ManagedProcess:
         live = [record for record in self.owned(run_id) if record.running]
         if len(live) >= self.max_per_run:
             ids = ", ".join(record.id for record in live)
@@ -165,7 +165,7 @@ class ProcessManager:
                 f"This run already has {len(live)} live processes ({ids}); "
                 "stop one with process(action='stop') before starting another")
         self._prune(run_id)
-        process = await self._spawn(argv, cwd)
+        process = await self._spawn(argv, cwd, env)
         record = ManagedProcess(
             id=uuid4().hex[:8], run_id=run_id, command=command, cwd=cwd, argv=list(argv),
             sandbox=sandbox or {}, started=monotonic(), process=process,
@@ -178,11 +178,11 @@ class ProcessManager:
         return record
 
     @staticmethod
-    async def _spawn(argv: list[str], cwd: Path) -> asyncio.subprocess.Process:
+    async def _spawn(argv: list[str], cwd: Path, env: dict[str, str] | None = None) -> asyncio.subprocess.Process:
         # Shield the spawn: cancellation must not lose a child that already
         # started, or the run would own a process it cannot reap.
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
-            *argv, cwd=cwd, stdin=asyncio.subprocess.PIPE,
+            *argv, cwd=cwd, env=env, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
         ))

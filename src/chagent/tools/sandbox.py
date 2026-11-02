@@ -5,11 +5,11 @@ no-follow operations (``workspace.py``). The surface they cannot cover is a host
 command: once ``/bin/sh`` starts, every path check that lived in Python is gone.
 This module adds the one boundary that survives ``exec`` — a kernel profile.
 
-What it is not: a container, and not a read allowlist. The tested read allowlist candidate aborts before ``main``; its cause remains
-unresolved. Reads are protected by naming credential paths, not by narrowing
-to the workspace. The
-capability table in ``docs/执行边界设计.md`` §10.4 is the honest description and
-should stay in sync with this file.
+The legacy workspace-write mode uses targeted denials and is not read isolation.
+The isolated mode is deny-default with explicit runtime/workspace reads, private
+scratch and a synthetic HOME/environment. It must pass positive and negative
+controls before execution; it never falls back to the host. This is a macOS
+kernel profile, not a VM or protection from the host account itself.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import tempfile
 from typing import Protocol, Sequence
 
 
-MODES = ("off", "workspace-write")
+MODES = ("off", "workspace-write", "isolated")
 DEFAULT_DENY_READ = (
     "~/.ssh", "~/.aws", "~/.kube", "~/.docker",
     "~/.config/gh", "~/.config/gcloud", "~/.npmrc", "~/.pypirc", "~/.git-credentials",
@@ -47,6 +47,8 @@ class SandboxSettings:
     def __post_init__(self) -> None:
         if self.mode not in MODES:
             raise ValueError(f"Sandbox mode must be one of {MODES}")
+        if self.mode == "isolated" and self.network:
+            raise ValueError("isolated execution requires network=false; network authorization is not implemented")
         source = DEFAULT_DENY_READ if self.deny_read is None else self.deny_read
         resolved = tuple(dict.fromkeys(Path(item).expanduser().resolve() for item in source))
         object.__setattr__(self, "deny_read", resolved)
@@ -60,6 +62,8 @@ class SandboxPolicy:
     network: bool = False
     deny_read: tuple[Path, ...] = ()
     writable_tmp: bool = True
+    isolated: bool = False
+    scratch: Path | None = None
 
     def __post_init__(self) -> None:
         # A denied path that contains the workspace, or sits inside it, would
@@ -134,6 +138,8 @@ def profile(policy: SandboxPolicy) -> str:
     Allow-everything then deny is deliberate: the current implementation uses targeted write and read denials. One tested
     read allowlist candidate aborted before the shell started; see C0 diagnostics.
     """
+    if policy.isolated:
+        return isolated_profile(policy)
     lines = ["(version 1)", "(allow default)"]
     if not policy.network:
         lines.append("(deny network-outbound)")
@@ -154,9 +160,9 @@ def profile(policy: SandboxPolicy) -> str:
     return "\n".join(lines) + "\n"
 
 
-async def _run(argv: Sequence[str], timeout: float = PROBE_TIMEOUT) -> tuple[int, str]:
+async def _run(argv: Sequence[str], timeout: float = PROBE_TIMEOUT, *, env: dict[str, str] | None = None, cwd: Path | None = None) -> tuple[int, str]:
     process = await asyncio.create_subprocess_exec(
-        *argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+        *argv, env=env, cwd=cwd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, start_new_session=True,
     )
     try:
@@ -176,9 +182,23 @@ class Sandbox:
     def __init__(self, settings: SandboxSettings, backend: SandboxBackend | None = None):
         self.settings = settings
         self.backend = backend or (SeatbeltBackend() if settings.mode != "off" else DisabledBackend())
+        if settings.mode == "isolated" and not isinstance(self.backend, SeatbeltBackend):
+            raise ValueError("Isolated execution requires the seatbelt backend; no fallback is allowed")
         self.enabled = not isinstance(self.backend, DisabledBackend)
         self._support: dict[SandboxPolicy, SandboxSupport] = {}
         self._lock = asyncio.Lock()
+        self._scratch: dict[Path, tempfile.TemporaryDirectory] = {}
+
+    def close(self) -> None:
+        for temporary in self._scratch.values():
+            temporary.cleanup()
+        self._scratch.clear()
+        self._support.clear()
+
+    def __del__(self):
+        if hasattr(self, "_scratch"):
+            with suppress(Exception):
+                self.close()
 
     @classmethod
     def from_settings(cls, settings) -> "Sandbox":
@@ -196,8 +216,35 @@ class Sandbox:
         ))
 
     def policy(self, workspace: Path) -> SandboxPolicy:
-        return SandboxPolicy(Path(workspace).expanduser().resolve(strict=True),
-                             self.settings.network, self.settings.deny_read, self.settings.writable_tmp)
+        root = Path(workspace).expanduser().resolve(strict=True)
+        if self.settings.mode != "isolated":
+            return SandboxPolicy(root, self.settings.network, self.settings.deny_read, self.settings.writable_tmp)
+        from chagent.web.workspaces import validate_workspace
+        validate_workspace(root)
+        from chagent.web.workspaces import protected_source
+        if any(protected_source().is_relative_to(item) for item in runtime_roots()):
+            raise PermissionError("Runtime allowlist overlaps protected application source")
+        # Commands cannot create an outside hardlink under this policy. Reject
+        # pre-existing multi-link files so a host-created alias is not readable.
+        import stat
+        for directory, _, names in os.walk(root, followlinks=False, onerror=_raise_walk_error):
+            for name in names:
+                info = (Path(directory) / name).lstat()
+                if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
+                    raise PermissionError("Isolated workspaces cannot contain hard-linked files")
+        if any(root == item or root.is_relative_to(item) or item.is_relative_to(root) for item in runtime_roots()):
+            raise PermissionError("An isolated workspace cannot overlap the runtime allowlist")
+        if root not in self._scratch:
+            temporary = tempfile.TemporaryDirectory(prefix="chagent-isolated-")
+            self._scratch[root] = temporary
+            scratch = Path(temporary.name).resolve()
+            for name in ("home", "tmp"):
+                (scratch / name).mkdir(mode=0o700)
+        return SandboxPolicy(root, False, self.settings.deny_read, False, True,
+                             Path(self._scratch[root].name).resolve())
+
+    def environment(self, workspace: Path) -> dict[str, str] | None:
+        return isolated_environment(self.policy(workspace)) if self.settings.mode == "isolated" else None
 
     def record(self, policy: SandboxPolicy) -> dict:
         """What was actually enforced, not what was asked for.
@@ -206,12 +253,17 @@ class Sandbox:
         paths here would describe a boundary that does not exist.
         """
         enforced = self.enabled
-        return {
+        record = {
             "backend": self.backend.name,
             "network_allowed": policy.network if enforced else True,
             "denied_reads": [str(item) for item in policy.deny_read] if enforced else [],
             "unsandboxed": not enforced,
         }
+
+        if policy.isolated:
+            record.update(read_allowlist=[str(p) for p in runtime_roots()] + [str(policy.workspace), str(policy.scratch)],
+                          environment="allowlist", home="synthetic", isolated=True)
+        return record
 
     async def wrap(self, argv: Sequence[str], workspace: Path) -> tuple[list[str], dict]:
         """Return the argv to spawn and its audit record, or refuse to run."""
@@ -220,9 +272,15 @@ class Sandbox:
         if not support.available:
             raise PermissionError(
                 f"Sandbox backend {support.backend} is unavailable ({support.detail or 'probe failed'}); "
-                "refusing to run this command unsandboxed. Set CHAGENT_SANDBOX=off to allow that explicitly."
+                "refusing to run this command; isolation will not be downgraded."
             )
-        return self.backend.wrap(argv, policy), self.record(policy)
+        wrapped = self.backend.wrap(argv, policy)
+        if policy.isolated:
+            # env -i runs only after seatbelt applies, so no shell or user startup
+            # code can observe the parent's environment. All spawn paths use wrap.
+            assignments = [f"{key}={value}" for key, value in isolated_environment(policy).items()]
+            wrapped = self.backend.wrap(["/usr/bin/env", "-i", *assignments, *argv], policy)
+        return wrapped, self.record(policy)
 
     async def support(self, policy: SandboxPolicy) -> SandboxSupport:
         if not self.enabled:
@@ -249,6 +307,11 @@ class Sandbox:
         repository is a normal target, and failing the probe there would disable
         the sandbox for exactly the sessions that need it least.
         """
+        if policy.isolated:
+            if not isinstance(self.backend, SeatbeltBackend) or not self.backend.available:
+                return SandboxSupport(False, self.backend.name, {}, "isolated seatbelt backend is missing")
+            from chagent.tools.isolation_probe import probe_isolated
+            return await probe_isolated(self, policy)
         backend = self.backend
         if isinstance(backend, SeatbeltBackend) and not backend.available:
             return SandboxSupport(False, backend.name, {}, f"{backend.binary} is missing")
@@ -304,3 +367,55 @@ class Sandbox:
             return False
         finally:
             listener.close()
+
+
+def runtime_roots() -> tuple[Path, ...]:
+    """Explicit read-only runtime grants, never the user's home or all /opt."""
+    roots = [Path(p) for p in ("/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/share",
+                               "/System/Library", "/System/iOSSupport", "/Library/Apple", "/Library/Developer/CommandLineTools", "/private/var/select")]
+    prefix = Path(sys.base_prefix).resolve()
+    roots += [prefix / name for name in ("bin", "lib", "include", "share")]
+    return tuple(dict.fromkeys(p.resolve() for p in roots if p.exists()))
+
+
+def isolated_environment(policy: SandboxPolicy) -> dict[str, str]:
+    if policy.scratch is None:
+        raise PermissionError("Isolated execution has no scratch directory")
+    return {"PATH": f"{Path(sys.base_prefix).resolve()}/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": str(policy.scratch / "home"), "TMPDIR": str(policy.scratch / "tmp") + "/",
+            "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8", "PYTHONNOUSERSITE": "1",
+            "PYTHONSAFEPATH": "1", "DEVELOPER_DIR": "/Library/Developer/CommandLineTools",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0"}
+
+
+def isolated_profile(policy: SandboxPolicy) -> str:
+    if policy.scratch is None or policy.network:
+        raise PermissionError("Isolated policy requires private scratch and no network")
+    readable = (*runtime_roots(), policy.workspace, policy.scratch)
+    lines = ["(version 1)", "(deny default)", "(allow process-exec)", "(allow process-fork)",
+             "(allow signal (target same-sandbox))", "(allow process-info* (target same-sandbox))",
+             "(allow sysctl-read)",
+             '(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))',
+             # dyld needs a read of the root vnode to start /bin/sh. This is a
+             # literal grant, not subpath: it does not make child files readable.
+             '(allow file-read* (literal "/") (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random"))',
+             "(allow file-read* file-map-executable"]
+    lines += [f"  (subpath {_sbpl(p)})" for p in readable]
+    lines += [")", "(allow file-read-metadata"]
+    # Allow traversing ancestors without granting their contents or enumeration.
+    ancestors = {parent for p in readable for parent in p.parents}
+    lines += [f"  (literal {_sbpl(p)})" for p in sorted(ancestors)]
+    lines += [")", "(allow file-write*"]
+    lines += [f"  (subpath {_sbpl(p)})" for p in (policy.workspace, policy.scratch)]
+    lines += ['  (literal "/dev/null")', ")"]
+    if policy.deny_read:
+        lines += ["(deny file-read*"]
+        lines += [f"  (subpath {_sbpl(p)})" for p in policy.deny_read]
+        lines += [")"]
+    # No blanket mach, network, IPC, other-process or user-temp permissions.
+    return "\n".join(lines) + "\n"
+
+
+def _raise_walk_error(error: OSError) -> None:
+    raise PermissionError("Cannot inspect the isolated workspace") from error

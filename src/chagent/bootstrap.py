@@ -42,6 +42,10 @@ def _tool_faces(
     ``single_face`` is for the deterministic harness only: it names a tool, so it
     keeps the code face and the runner never resolves by session mode.
     """
+    if code_mode and allow_host_commands and not single_face and (
+        sandbox is None or sandbox.settings.mode != "isolated"
+    ):
+        raise ValueError("Model-driven code execution requires CHAGENT_SANDBOX=isolated")
     if single_face:
         modes = ("code",)
     else:

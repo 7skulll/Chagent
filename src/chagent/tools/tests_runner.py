@@ -157,13 +157,16 @@ class RunTestsTool(AgentTool):
         suite = params.get("suite", "auto")
         suite = detect_suite(workspace) if suite == "auto" else suite
         command = build_command(suite, workspace, params.get("selection"))
+        if self.sandbox is not None and self.sandbox.settings.mode == "isolated" and command[0] == sys.executable:
+            command[0] = str(Path(sys.executable).resolve())
+        child_env = self.sandbox.environment(workspace) if self.sandbox is not None else None
         timeout = params.get("timeout_ms", 120_000) / 1000
         argv, sandbox_record = ["/bin/sh", "-c", " ".join(_quote(part) for part in command)], {}
         if self.sandbox is not None:
             argv, sandbox_record = await self.sandbox.wrap(argv, workspace)
         started = monotonic()
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
-            *argv, cwd=workspace,
+            *argv, cwd=workspace, env=child_env,
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT, start_new_session=True,
         ))

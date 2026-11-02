@@ -409,7 +409,16 @@ async def upload(request: Request, current: Current,
                  name: Annotated[str, Query(min_length=1, max_length=300)] = "upload",
                  workspace: WorkspacePath = None):
     """Store one file under the workspace, where read_file can parse it."""
-    return await save_upload(current.root(workspace), name, request.stream())
+    root = current.root(workspace)
+    try:
+        return await save_upload(root, name, request.stream())
+    except PermissionError:
+        raise HTTPException(403, "上传目录不可写，请检查工作区权限后重试") from None
+    except OSError as error:
+        import errno
+        if error.errno == errno.ENOSPC:
+            raise HTTPException(507, "磁盘空间不足，请释放空间后重试上传") from None
+        raise HTTPException(500, "无法保存上传文件，请检查工作区存储后重试") from None
 
 
 @api.get("/sessions/{session_id}", response_model=SessionDetail, tags=["会话"])
