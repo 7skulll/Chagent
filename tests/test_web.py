@@ -68,6 +68,43 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
                     return run
                 await asyncio.sleep(.01)
 
+    async def test_work_agent_creates_a_downloadable_file(self):
+        runner = create_demo_runner(self.database, tool_name="create_file", work_only=True,
+                                    tool_arguments={"filename": "最后一行代码.md", "content": "# 故事\n正文"})
+        session = await runner.conversations.create_session(self.workspace)
+        result = await runner.run(session, "写故事并生成文件")
+        listing = (await self.client.get(f"/api/sessions/{session}/files")).json()["items"]
+        self.assertEqual(len(listing), 1)
+        self.assertEqual(listing[0]["name"], "最后一行代码.md")
+        download = await self.client.get(f"/api/sessions/{session}/files/{listing[0]['id']}")
+        self.assertEqual(download.text, "# 故事\n正文")
+        self.assertTrue(result.run_id)
+        messages = (await self.client.get(f"/api/sessions/{session}/messages")).json()["items"]
+        created = [item for item in messages if item["message"].get("tool_name") == "create_file"]
+        self.assertEqual(created[0]["message"]["details"]["generated_file"]["name"], "最后一行代码.md")
+
+    async def test_generated_file_is_downloadable_only_in_its_session(self):
+        from chagent.tools.generated_files import CreateFileTool
+        from chagent.tools.context import ToolContext
+        first, other = await self.create_session(), await self.create_session()
+        response = await self.client.post(f"/api/sessions/{first}/runs", json={"text": "生成测试"})
+        run_id = response.json()["run_id"]
+        await self.wait_run(run_id)
+        tool = CreateFileTool(self.database)
+        context = ToolContext(self.workspace, UUID(first), UUID(run_id))
+        result = await tool.execute("call-1", {"filename": "故事.md", "content": "# 故事\n你好"}, context=context)
+        file = result.details["generated_file"]
+        repeated = await tool.execute("call-1", {"filename": "故事.md", "content": "# 故事\n你好"}, context=context)
+        self.assertEqual(file["id"], repeated.details["generated_file"]["id"])
+        with self.assertRaises(ValueError):
+            await tool.execute("call-2", {"filename": "../evil.md", "content": "x"}, context=context)
+        listing = (await self.client.get(f"/api/sessions/{first}/files")).json()["items"]
+        self.assertEqual([item["name"] for item in listing], ["故事.md"])
+        response = await self.client.get(f"/api/sessions/{first}/files/{file['id']}")
+        self.assertEqual(response.text, "# 故事\n你好")
+        self.assertIn("attachment", response.headers["content-disposition"])
+        self.assertEqual((await self.client.get(f"/api/sessions/{other}/files/{file['id']}")).status_code, 404)
+
     async def test_chat_history_pagination_and_sse_replay(self):
         identity = await self.create_session("网页对话")
         for text in ("第一轮", "第二轮"):
@@ -386,6 +423,24 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         result = await self.client.post(f"/api/sessions/{identity}/runs", headers={"Content-Type": "application/json"}, content=chunks())
         self.assertEqual(result.status_code, 413)
         self.assertEqual((await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"], [])
+
+    async def test_code_mode_cannot_be_enabled_for_web(self):
+        from dataclasses import replace
+        with self.assertRaisesRegex(ValueError, "code"):
+            WebRuntime(self.runner, self.workspace, replace(self.runtime.settings, code_mode=True))
+
+    async def test_source_workspace_and_ancestor_are_rejected(self):
+        from chagent.web.workspaces import protected_source
+        source = protected_source()
+        for path in (source, source / "src", source.parent):
+            response = await self.client.post("/api/workspaces", json={"path": str(path)})
+            self.assertEqual(response.status_code, 400, response.text)
+        self.assertNotIn(source, self.runtime.roots)
+        identity = await self.runner.conversations.create_session(source, title="old source session")
+        listed = await self.client.get("/api/workspaces")
+        self.assertNotIn(str(source), [item["path"] for item in listed.json()["items"]])
+        response = await self.client.get(f"/api/sessions/{identity}")
+        self.assertEqual(response.status_code, 404)
 
     async def test_workspace_is_opened_before_it_can_be_addressed(self):
         other = tempfile.TemporaryDirectory()

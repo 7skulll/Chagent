@@ -46,11 +46,8 @@ class ModelSettings:
     # the pre-retry behaviour exactly.
     retry_attempts: int = 2
     retry_delay: float = 0.5
-    # Which variable supplied the key, and a named key that lost to
-    # ``CHAGENT_API_KEY``. Kept so a 401 can name the real cause instead of
-    # sending the reader to re-check a file that was already correct.
+    # Name only; never include the credential in diagnostics.
     key_source: str = ""
-    shadowed_key_env: str = ""
 
     def __post_init__(self):
         if self.provider not in {*PRESETS, "custom"} or self.api not in {"openai-chat", "anthropic-messages"}:
@@ -86,8 +83,6 @@ class ModelSettings:
         way to stop that from becoming a mystery.
         """
         source = self.key_source or "environment"
-        if self.shadowed_key_env:
-            source += f", overriding {self.shadowed_key_env}"
         retries = f"retry {self.retry_attempts}" if self.retry_attempts else "no retry"
         return (f"{self.provider}/{self.model_id} ({self.api}) -> {self.base_url} "
                 f"| key {source} | {retries}")
@@ -115,8 +110,8 @@ class ModelSettings:
             raise ModelConfigurationError("CHAGENT_PROVIDER must be openai, deepseek, anthropic, qwen or custom")
         preset = PRESETS.get(provider)
         named_key = values.get(preset.key_env, "").strip() if preset else ""
-        key = named_key if auto_selected else generic or named_key
-        key_source = (preset.key_env if auto_selected else ("CHAGENT_API_KEY" if generic else (preset.key_env if preset else "")))
+        key = named_key if preset else generic
+        key_source = preset.key_env if preset else "CHAGENT_API_KEY"
         base_url = values.get("CHAGENT_BASE_URL", "").strip()
         if not base_url and provider == "openai":
             base_url = values.get("OPENAI_BASE_URL", "").strip()
@@ -125,13 +120,12 @@ class ModelSettings:
         if provider == "custom" and (not base_url or not model):
             raise ModelConfigurationError("Custom providers require CHAGENT_BASE_URL and CHAGENT_MODEL")
         if not key:
-            raise ModelConfigurationError("No API key configured for the selected provider")
+            raise ModelConfigurationError(f"No API key configured: set {key_source} for {provider}")
         try:
             return cls(
                 provider=provider, model_id=model, base_url=base_url, api_key=key,
                 api=preset.api if preset else "openai-chat",
                 key_source=key_source,
-                shadowed_key_env=(preset.key_env if (generic and named_key and preset) else ""),
                 context_window=int(values.get("CHAGENT_CONTEXT_WINDOW", "65536")),
                 max_tokens=int(values.get("CHAGENT_MAX_TOKENS", "8192")),
                 request_timeout=float(values.get("CHAGENT_MODEL_TIMEOUT", "60")),

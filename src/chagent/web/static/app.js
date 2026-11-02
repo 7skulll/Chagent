@@ -21,6 +21,7 @@ const CLAMP_CHARS = 2000;
 const ARCHIVED_HINT = "已归档，恢复后才能继续对话";
 // Under 960px the sidebar is a drawer over the chat, not a column beside it.
 const narrow = window.matchMedia("(max-width: 960px)");
+const narrowTools = window.matchMedia("(max-width: 1180px)");
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -151,6 +152,22 @@ async function copyText(text, button) {
   } catch {
     showError(new Error("浏览器拒绝了剪贴板访问，请手动选中后复制"));
   }
+}
+
+// Download the original answer, including Markdown, rather than rendered HTML.
+function downloadAnswer(message, meta) {
+  const text = plainText(message);
+  if (!text.trim()) return;
+  const url = URL.createObjectURL(new Blob([text], {type: "text/markdown;charset=utf-8"}));
+  const link = document.createElement("a");
+  const id = String(meta.id || "answer").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64) || "answer";
+  link.href = url;
+  link.download = `chagent-${id}.md`;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ---------- 依据（WK3） ----------
@@ -284,6 +301,13 @@ function messageActions(message, meta, node) {
   copy.type = "button";
   copy.addEventListener("click", () => copyText(plainText(message), copy));
   row.append(copy);
+  if (message.role === "assistant" && plainText(message).trim()) {
+    const download = textNode("button", "下载");
+    download.type = "button";
+    download.title = "下载 Markdown 文件";
+    download.addEventListener("click", () => downloadAnswer(message, meta));
+    row.append(download);
+  }
   // A replaced record is history: offering to replace it again would fork the
   // transcript without a tree to hold the branches.
   const actionable = meta.id && meta.run_id && !meta.superseded_by && !state.readonly && !state.busy;
@@ -300,6 +324,32 @@ function messageActions(message, meta, node) {
     row.append(edit);
   }
   return row;
+}
+
+// Only files actually created by the model belong in the artifact panel.
+function fileUrl(session, file) {
+  return `/api/sessions/${encodeURIComponent(session)}/files/${encodeURIComponent(file.id)}`;
+}
+function fileRow(file, session, inMessage = false) {
+  const row = document.createElement("div"); row.className = inMessage ? "generated-file message-file" : "generated-file";
+  const icon = textNode("span", (file.name.split(".").pop() || "文件").toUpperCase().slice(0, 4), "generated-file-icon");
+  const info = document.createElement("div"); info.className = "generated-file-info";
+  info.append(textNode("span", file.name, "generated-file-name"), textNode("span", `${file.size} 字节`, "generated-file-size"));
+  const download = textNode("a", "下载", "generated-file-download");
+  download.href = fileUrl(session, file); download.download = file.name;
+  download.setAttribute("aria-label", `下载 ${file.name}`);
+  row.append(icon, info, download);
+  return row;
+}
+async function loadGeneratedFiles() {
+  const id = state.session, version = state.version, list = $("artifacts-list");
+  if (!id) { $("artifacts-count").textContent = "0"; list.replaceChildren(textNode("p", "选择会话后查看文件。", "artifacts-empty")); return; }
+  const result = await api(`/api/sessions/${id}/files`);
+  if (version !== state.version || id !== state.session) return;
+  const items = result.items || [];
+  $("artifacts-count").textContent = String(items.length);
+  list.replaceChildren(...items.map(file => fileRow(file, id)));
+  if (!items.length) list.append(textNode("p", "生成文件后会显示在这里。", "artifacts-empty"));
 }
 
 function displayMessage(message, target = $("messages"), meta = {}, live = false) {
@@ -333,6 +383,9 @@ function displayMessage(message, target = $("messages"), meta = {}, live = false
       node.append(details);
     }
   }
+  if (message.role === "toolResult" && message.tool_name === "create_file" && message.details && message.details.generated_file && !message.is_error) {
+    node.append(fileRow(message.details.generated_file, state.session, true));
+  }
   if (message.role === "toolResult") {
     const details = document.createElement("details");
     const summary = document.createElement("summary");
@@ -340,7 +393,7 @@ function displayMessage(message, target = $("messages"), meta = {}, live = false
       textNode("span", message.is_error ? "失败" : "完成", message.is_error ? "tool-state failed" : "tool-state"));
     if (message.artifact) summary.append(textNode("span", `产物 ${message.artifact.char_count} 字符`, "tool-note"));
     details.append(summary);
-    for (const child of Array.from(node.children).slice(1)) details.append(child);
+    for (const child of Array.from(node.children).slice(1)) { if (!child.classList.contains("message-file")) details.append(child); }
     if (message.artifact) {
       let offset = 0;
       const button = textNode("button", "读取产物全文（分页）", "quiet");
@@ -491,6 +544,7 @@ async function openSession(id) {
   const version = ++state.version;
   resetStream(); clearError(); state.session = id; state.readonly = false; state.loading = true; setBusy(false);
   $("messages").replaceChildren(); $("empty").hidden = true;
+  $("artifacts-list").replaceChildren(textNode("p", "正在加载…", "artifacts-empty")); $("artifacts-count").textContent = "0";
   state.sources = new Map(); state.runMemories = new Map();
   localStorage.setItem("chagent.session", id);
   for (const row of $("sessions").children) row.classList.toggle("active", row.dataset.id === id);
@@ -524,6 +578,7 @@ async function openSession(id) {
       watchMemoryJob(session.latest_run.id, version);
     }
     loadUsagePill();
+    loadGeneratedFiles().catch(showError);
     if ($("context-panel").open) loadContext().catch(showError);
     scrollBottom();
   } finally {
@@ -1138,7 +1193,7 @@ async function init() {
   const previous = localStorage.getItem("chagent.session");
   if (previous) {
     try { await openSession(previous); }
-    catch (error) { localStorage.removeItem("chagent.session"); state.session = null; showError(error); }
+    catch (error) { localStorage.removeItem("chagent.session"); state.session = null; loadGeneratedFiles(); showError(error); }
   }
 }
 init().catch(showError);
@@ -1151,18 +1206,20 @@ init().catch(showError);
 // phone cannot reload into a chat hidden behind the panel.
 function applyCollapsed(name, collapsed) {
   document.body.classList.toggle(`${name}-collapsed`, collapsed);
-  if (name === "sidebar") $("toggle-sidebar").setAttribute("aria-expanded", String(!collapsed));
-  if (name === "sidebar" && narrow.matches) return;
+  $(name === "sidebar" ? "toggle-sidebar" : "toggle-tools").setAttribute("aria-expanded", String(!collapsed));
+  if ((name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches)) return;
   localStorage.setItem(`chagent.${name}.collapsed`, collapsed ? "1" : "0");
 }
 for (const name of ["sidebar", "tools"]) {
-  const collapsed = name === "sidebar" && narrow.matches
+  const collapsed = ((name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches))
     ? true : localStorage.getItem(`chagent.${name}.collapsed`) === "1";
   document.body.classList.toggle(`${name}-collapsed`, collapsed);
 }
 $("toggle-sidebar").setAttribute("aria-expanded", String(!document.body.classList.contains("sidebar-collapsed")));
+$("toggle-tools").setAttribute("aria-expanded", String(!document.body.classList.contains("tools-collapsed")));
 $("scrim").addEventListener("click", () => applyCollapsed("sidebar", true));
 document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && narrowTools.matches && !document.body.classList.contains("tools-collapsed")) applyCollapsed("tools", true);
   if (event.key === "Escape" && narrow.matches && !document.body.classList.contains("sidebar-collapsed")) {
     applyCollapsed("sidebar", true);
   }
@@ -1279,7 +1336,7 @@ function workspaceNotice(message, failed = false) {
 }
 async function switchWorkspace(path) {
   await ensureWorkspace(path);
-  state.session = null; localStorage.removeItem("chagent.session");
+  state.session = null; loadGeneratedFiles(); localStorage.removeItem("chagent.session");
   showArchived(false); state.query = ""; $("session-search").value = "";
   resetStream(); state.loading = false; state.readonly = false; setBusy(false);
   // An upload belongs to the workspace it landed in; carrying the queue across

@@ -579,8 +579,7 @@ async def main_async(args):
     report = {"recorded_at_utc": datetime.now(timezone.utc).isoformat(),
               "configuration": {"provider": selected.provider, "model": selected.model_id, "api": selected.api,
                                 "output_limit": selected.max_tokens, "max_provider_requests": args.max_calls,
-                                "key_source": "CHAGENT_API_KEY" if os.environ.get("CHAGENT_API_KEY", "").strip()
-                                else "named provider key", "case_selection": args.case},
+                                "key_source": selected.key_source, "case_selection": args.case},
               "environment": {"python": platform.python_version(), "platform": platform.system()},
               "limits": "single sample per scenario; synthetic data; no browser TTFT or comparative Pi/Codex benchmark",
               "results": [], "schema_cleaned": False, "schema_kept": None}

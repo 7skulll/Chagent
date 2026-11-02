@@ -2,8 +2,7 @@
 
 ``uv run --env-file`` does not replace variables that already exist, so a stale
 shell export wins without any message. The consequence has already shown up
-twice: a leftover ``CHAGENT_API_KEY`` produced a 401 while the file's named key
-was valid, and a shell ``CHAGENT_MODEL`` made reports disagree with the file.
+for example, a shell ``CHAGENT_MODEL`` can make reports disagree with the file.
 Comparing the file with the process environment turns both into one visible
 line. This module only reads and compares; it never writes or exports anything.
 """

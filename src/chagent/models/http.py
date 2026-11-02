@@ -139,12 +139,6 @@ class HTTPModelClient:
                  429: "Rate limit or quota exceeded"}
         status = response.status_code
         reason = f"HTTP {status}: {hints.get(status, 'Provider request failed')}"
-        # A generic key silently wins over the provider's own variable. Say so,
-        # because the usual first move is to re-check a file that was never the
-        # problem.
-        if status == 401 and self.settings.shadowed_key_env:
-            reason += (f" (CHAGENT_API_KEY is set and overrides {self.settings.shadowed_key_env}; "
-                       "unset it to fall back to the named key)")
         if retries:
             reason += f" (after {retries} {'retry' if retries == 1 else 'retries'})"
         # The body is never read into the reason: provider error payloads can

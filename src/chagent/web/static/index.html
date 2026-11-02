@@ -104,8 +104,13 @@
   </main>
 
   <!-- 右侧工具面板 -->
-  <aside class="tools-panel" aria-label="上下文面板">
+  <aside class="tools-panel" aria-label="对话产物与上下文">
     <div class="tools-body">
+      <section class="artifacts-panel" aria-labelledby="artifacts-heading">
+        <div class="artifacts-heading"><h2 id="artifacts-heading">对话产物</h2><span id="artifacts-count">0</span></div>
+        <p class="artifacts-intro">本会话中生成的文件</p>
+        <div id="artifacts-list" class="artifacts-list" aria-live="polite"><p class="artifacts-empty">选择会话后查看文件。</p></div>
+      </section>
       <details id="context-panel" open>
         <summary>上下文与会话摘要</summary>
         <div id="context-info">选择会话后可查看。</div>

@@ -333,7 +333,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_provider_adapters_complete_tool_loop_without_persisting_credentials(self):
         for provider in ("openai", "deepseek", "qwen", "anthropic"):
-            settings = ModelSettings.from_env({"CHAGENT_PROVIDER": provider, "CHAGENT_API_KEY": "mock-only-private-key"})
+            settings = ModelSettings.from_env({"CHAGENT_PROVIDER": provider, {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY", "qwen": "DASHSCOPE_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}[provider]: "mock-only-private-key"})
             calls = []
 
             async def handler(request):

@@ -4,8 +4,8 @@ Two faces, one rule: **a tool the mode does not allow is not registered.** The
 model cannot call what is not in the registry, so the boundary is a property of
 construction rather than of the prompt, the UI or the executor's mood.
 
-``work`` is the default and is read-only: it looks at the workspace and (when
-configured) the web, and has no tool that changes either. ``code`` adds the
+``work`` reads the workspace and web, and can create session-owned downloadable
+text artifacts in the database; it cannot modify the workspace. ``code`` adds the
 write and host-execution tools, and only exists when the build-level switch
 ``CHAGENT_CODE_MODE`` is on.
 """
@@ -21,6 +21,7 @@ from chagent.tools.registry import ToolRegistry
 from chagent.tools.search import GlobTool, GrepTool
 from chagent.tools.tests_runner import RunTestsTool
 from chagent.tools.artifacts import ReadArtifactTool
+from chagent.tools.generated_files import CreateFileTool
 from chagent.tools.sandbox import Sandbox
 from chagent.tools.web import WebAccess, create_web_tools
 
@@ -70,6 +71,8 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
             registry.register(ProcessTool(processes))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
+        if mode == "work":
+            registry.register(CreateFileTool(artifacts.database))
     if web is not None:
         # Outbound access is independent of host commands and of the mode: it
         # reads pages, changes nothing, and needs no shell. The keyless case

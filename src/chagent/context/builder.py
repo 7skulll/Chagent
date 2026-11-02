@@ -42,15 +42,15 @@ class ContextBuilder(Protocol):
     ) -> BuiltContext: ...
 
 
-DEFAULT_INSTRUCTIONS = "Complete the user's task with the available tools."
+DEFAULT_INSTRUCTIONS = ("Complete the user's task with the available tools. When the user asks for a "
+                        "downloadable text file, use create_file with the complete file content and a "
+                        "meaningful filename. Do not claim a file exists until the tool succeeds.")
 
-# The strategy that used to be one long instruction, kept verbatim as its own
-# section. It is load-bearing: it once cost two turns per edit when a revert
-# silently removed it (G batch), so it stays byte-identical.
+# Tool guidance has its own section so prompt changes remain auditable.
 TOOLS_SECTION = (
-    "Locate code with grep or glob, apply all changes to a file in one edit_file call, and verify "
-    "with run_tests once after editing. If the request already says which tests fail, do not re-run "
-    "them first."
+    "Use only available tools. For code tasks, locate code with grep or glob; when editing tools "
+    "are available, apply changes together and verify once. If the user asks for a downloadable "
+    "text file, use create_file with complete content and a descriptive filename."
 )
 
 # The system prompt is assembled from named sections in a fixed order. The order

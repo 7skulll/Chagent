@@ -13,7 +13,7 @@ from chagent.domain.tools import Tool, ToolReference
 from chagent.models.base import ModelRequest
 from chagent.models.events import DoneEvent, ErrorEvent, StartEvent
 from chagent.models.factory import create_model_client
-from chagent.models.settings import ModelSettings
+from chagent.models.settings import ModelSettings, PRESETS
 from chagent.models.transcript import anthropic_payload, openai_payload
 
 
@@ -55,7 +55,7 @@ class FragmentedBody(httpx.AsyncByteStream):
 
 class AdapterTests(unittest.IsolatedAsyncioTestCase):
     def settings(self, provider="openai", **overrides):
-        base = ModelSettings.from_env({"CHAGENT_PROVIDER": provider, "CHAGENT_API_KEY": "test-provider-secret"})
+        base = ModelSettings.from_env({"CHAGENT_PROVIDER": provider, PRESETS[provider].key_env: "test-provider-secret"})
         return replace(base, **overrides) if overrides else base
 
     def request(self, settings):
@@ -176,18 +176,15 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await task
 
-    async def test_rejected_key_names_the_variable_that_overrode_the_file(self):
+    async def test_rejected_key_never_exposes_credentials(self):
         settings = ModelSettings.from_env({"CHAGENT_PROVIDER": "deepseek", "CHAGENT_API_KEY": "stale",
                                            "DEEPSEEK_API_KEY": "from-file"})
         events, _ = await self.collect(settings, '{"error":"invalid"}', status=401)
         message = events[-1].error.error_message
-        self.assertIn("CHAGENT_API_KEY", message)
-        self.assertIn("DEEPSEEK_API_KEY", message)
+        self.assertIn("401", message)
         self.assertNotIn("stale", message)
         self.assertNotIn("from-file", message)
-        # Without a shadowed variable the hint would be noise.
-        events, _ = await self.collect(self.settings(), '{"error":"invalid"}', status=401)
-        self.assertNotIn("overrides", events[-1].error.error_message)
+        self.assertNotIn("overrides", message)
 
     async def test_native_anthropic_tool_input_and_usage(self):
         settings = self.settings("anthropic")

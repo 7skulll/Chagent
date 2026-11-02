@@ -22,6 +22,7 @@ from chagent.diagnostics.behavior import describe as describe_behavior, describe
 from chagent.domain.summaries import CompactionPolicy
 from chagent.models.settings import ModelSettings
 from chagent.web.app import create_app
+from chagent.web.workspaces import default_workspace
 
 
 HOST = "127.0.0.1"
@@ -88,7 +89,7 @@ def open_later(url: str, delay: float = 0.8) -> None:
 
 def main():
     parser = argparse.ArgumentParser(prog="chagent", description="Chagent 本地网页（默认入口）")
-    parser.add_argument("--workspace", type=Path, default=Path.cwd(), help="起始工作区，之后可在网页内切换")
+    parser.add_argument("--workspace", type=Path, default=None, help="起始工作区，默认 ~/Chagent Workspace")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--demo", action="store_true", help="Use the deterministic offline model")
     parser.add_argument("--provider", choices=("openai", "deepseek", "anthropic", "qwen", "custom"))
@@ -108,6 +109,10 @@ def main():
             webbrowser.open(url)
         return
 
+    if args.workspace is None:
+        args.workspace = default_workspace()
+        args.workspace.mkdir(parents=True, exist_ok=True)
+
     environment = dict(os.environ)
     if args.provider:
         environment["CHAGENT_PROVIDER"] = args.provider
@@ -115,6 +120,8 @@ def main():
         environment["CHAGENT_MODEL"] = args.model
     try:
         settings = Settings.from_env()
+        if settings.code_mode:
+            raise ValueError("网页暂不支持 code 模式；请设置 CHAGENT_CODE_MODE=off")
         compaction = CompactionPolicy.from_env()
         selected = None if args.demo else ModelSettings.from_env(environment)
         app = create_app(workspace=args.workspace, settings=settings, model_settings=selected,

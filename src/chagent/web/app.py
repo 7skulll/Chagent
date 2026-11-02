@@ -10,6 +10,7 @@ from pathlib import Path
 from time import monotonic
 from uuid import UUID, uuid4
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -51,6 +52,7 @@ from chagent.web.schemas import (ActiveRunPage, AppInfo, ApprovalDecision, Artif
     SessionDetail, SessionEdit, SessionPage, SessionSources, UploadView, UsageView, WorkspaceCreate, WorkspacePage,
     WorkspaceView)
 from chagent.web.uploads import save as save_upload
+from chagent.web.workspaces import validate_workspace
 from chagent.domain.sessions import Session
 from chagent.domain.memories import Memory
 
@@ -73,12 +75,12 @@ class WebRuntime:
     def __init__(self, runner: AgentRunner, workspace: Path, settings: Settings | None = None,
                  compaction: CompactionPolicy | None = None):
         self.runner = runner
-        self.workspace = workspace.resolve(strict=True)
-        if not self.workspace.is_dir():
-            raise NotADirectoryError("Workspace must be a directory")
+        self.workspace = validate_workspace(workspace)
         # Resolved once: the mode gate below is a policy decision, and reading it
         # per request could let the environment change under a running server.
         self.settings = settings or Settings.from_env()
+        if self.settings.code_mode:
+            raise ValueError("网页暂不支持 code 模式；请设置 CHAGENT_CODE_MODE=off")
         self.compaction = compaction
         self.sessions = SessionManager(runner.conversations)
         self.approvals = ApprovalRepository(runner.runs.database, runner.runs)
@@ -116,11 +118,9 @@ class WebRuntime:
     def open_workspace(self, raw: str) -> Path:
         """Resolve one directory and add it to the open set."""
         try:
-            target = Path(raw).expanduser().resolve(strict=True)
+            target = validate_workspace(Path(raw))
         except (OSError, RuntimeError):
             raise ValueError("工作区目录不存在") from None
-        if not target.is_dir():
-            raise ValueError("工作区必须是目录")
         self.roots.add(target)
         return target
 
@@ -252,7 +252,14 @@ async def workspaces(current: Current):
     opened is worse than no entry, and tests leave temporary roots behind.
     """
     rows = await ConversationRepository(current.runner.conversations.database).workspaces()
-    return {"items": [row for row in rows if Path(row["path"]).is_dir()]}
+    items = []
+    for row in rows:
+        try:
+            validate_workspace(Path(row["path"]))
+        except (ValueError, OSError, RuntimeError):
+            continue
+        items.append(row)
+    return {"items": items}
 
 
 @api.post("/workspaces", response_model=WorkspaceView, status_code=201, tags=["本地 Agent"])
@@ -426,6 +433,29 @@ async def history(session_id: UUID, current: Current, limit: MessageLimit = 100,
     return {"items": [{"id": item.id, "sequence": item.sequence, "run_id": item.run_id,
                         "superseded_by": item.superseded_by,
                         "message": visible(item.message)} for item in page.items], "next_before": page.next_before}
+
+
+@api.get("/sessions/{session_id}/files", tags=["上下文与产物"])
+async def generated_files(session_id: UUID, current: Current):
+    await current.session(session_id)
+    async with current.runner.conversations.database.connection() as connection:
+        cursor = await connection.execute(
+            "SELECT id, run_id, name, octet_length(content) AS size, created_at FROM generated_files "
+            "WHERE session_id = %s ORDER BY created_at DESC, id DESC", (session_id,))
+        return {"items": await cursor.fetchall()}
+
+
+@api.get("/sessions/{session_id}/files/{file_id}", tags=["上下文与产物"])
+async def generated_file_download(session_id: UUID, file_id: UUID, current: Current):
+    await current.session(session_id)
+    async with current.runner.conversations.database.connection() as connection:
+        cursor = await connection.execute("SELECT name, content FROM generated_files WHERE session_id = %s AND id = %s", (session_id, file_id))
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(404, "File does not exist in this session")
+    return Response(content=row["content"].encode("utf-8"), media_type="application/octet-stream",
+                    headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(row["name"], safe=""),
+                             "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
 
 @api.get("/sessions/{session_id}/artifacts/{artifact_id}", response_model=ArtifactPage, tags=["上下文与产物"])
@@ -717,7 +747,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                model_settings: ModelSettings | None = None, demo: bool = False,
                injected_runtime: WebRuntime | None = None) -> FastAPI:
     """Injected runtime is caller-owned; production resources belong to lifespan."""
-    workspace = workspace.expanduser().resolve(strict=True)
+    workspace = validate_workspace(workspace)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -730,6 +760,8 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                 await injected_runtime.close()
             return
         configured = settings or Settings.from_env()
+        if configured.code_mode:
+            raise ValueError("网页暂不支持 code 模式；请设置 CHAGENT_CODE_MODE=off")
         selected = None if demo else (model_settings or ModelSettings.from_env())
         approval = ApprovalPolicy.from_settings(configured)
         client = create_model_client(selected) if selected is not None else None
@@ -739,7 +771,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                 sandbox = Sandbox.from_settings(configured)
                 web = WebAccess(configured.search_api_key) if configured.web_access != "off" else None
                 if selected is None:
-                    runner = create_demo_runner(database, allow_host_commands=configured.allow_host_commands, max_turns=configured.max_turns,
+                    runner = create_demo_runner(database, work_only=True, allow_host_commands=False, max_turns=configured.max_turns,
                                                 max_tool_concurrency=configured.max_tool_concurrency,
                                                 memory_worker_concurrency=configured.memory_worker_concurrency,
                                                 sandbox=sandbox, approval_policy=approval,

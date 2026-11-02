@@ -27,21 +27,16 @@ class ModelSettingsTests(unittest.TestCase):
         selected = ModelSettings.from_env({"OPENAI_API_KEY": "named-key", "CHAGENT_API_KEY": "unclassified-key"})
         self.assertEqual(selected.api_key, "named-key")
 
-    def test_key_source_and_shadowing_are_reported(self):
-        # An ambient CHAGENT_API_KEY wins over the named key. Recording which one
-        # won is what makes a 401 diagnosable without printing the credential.
-        shadowed = ModelSettings.from_env({"CHAGENT_PROVIDER": "deepseek", "CHAGENT_API_KEY": "generic",
-                                           "DEEPSEEK_API_KEY": "named"})
-        self.assertEqual(shadowed.api_key, "generic")
-        self.assertEqual(shadowed.key_source, "CHAGENT_API_KEY")
-        self.assertEqual(shadowed.shadowed_key_env, "DEEPSEEK_API_KEY")
-        self.assertIn("DEEPSEEK_API_KEY", shadowed.describe())
-        self.assertNotIn("generic", shadowed.describe())
-        # Nothing is shadowed when only one source is configured.
-        named = ModelSettings.from_env({"CHAGENT_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": "named"})
-        self.assertEqual(named.key_source, "DEEPSEEK_API_KEY")
-        self.assertEqual(named.shadowed_key_env, "")
-        self.assertNotIn("overriding", named.describe())
+    def test_named_provider_ignores_generic_key(self):
+        for provider, preset in PRESETS.items():
+            with self.subTest(provider=provider):
+                settings = ModelSettings.from_env({"CHAGENT_PROVIDER": provider,
+                    "CHAGENT_API_KEY": "stale", preset.key_env: "named"})
+                self.assertEqual(settings.api_key, "named")
+                self.assertEqual(settings.key_source, preset.key_env)
+                self.assertNotIn("stale", settings.describe())
+                with self.assertRaises(ModelConfigurationError):
+                    ModelSettings.from_env({"CHAGENT_PROVIDER": provider, "CHAGENT_API_KEY": "stale"})
 
     def test_custom_model_and_base_url_overrides(self):
         settings = ModelSettings.from_env({

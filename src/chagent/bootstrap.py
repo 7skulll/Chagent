@@ -75,6 +75,7 @@ def create_demo_runner(
     process_wall_timeout: float = 600.0,
     max_processes: int = 4,
     web: WebAccess | None = None,
+    work_only: bool = False,
 ) -> AgentRunner:
     return create_runner(
         database, Model(id="fake-echo", provider="local-test", api="fake", context_window=8192, max_tokens=512),
@@ -94,7 +95,7 @@ def create_demo_runner(
         # this harness keeps the full face. Mode gating is a property of sessions
         # a model drives; it is asserted on ``create_runner`` and on
         # ``create_builtin_registry``, not here.
-        code_mode=True, single_face=True,
+        code_mode=not work_only, single_face=not work_only,
         # ``echo`` is the neutral tool that needs no filesystem: this is the only
         # path that gets it.
         include_echo=True,

@@ -56,7 +56,7 @@ class ToolFaceTests(unittest.TestCase):
 
     def test_work_keeps_the_read_only_extras(self):
         """Artifacts and the web are reads: they exist in both faces."""
-        registry = create_builtin_registry(mode="work", artifacts=object(), web=WebAccess("tvly-k"))
+        registry = create_builtin_registry(mode="work", artifacts=__import__("unittest.mock", fromlist=["MagicMock"]).MagicMock(), web=WebAccess("tvly-k"))
         self.assertLessEqual({"read_artifact", "web_search", "web_fetch"}, names(registry))
         self.assertFalse(names(registry) & WRITE_TOOLS)
 

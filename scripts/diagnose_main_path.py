@@ -275,7 +275,7 @@ async def builder_probe(repeats):
 async def fault_probes(database, workspace):
     budgets = {}
     for provider in ("openai", "deepseek", "qwen", "anthropic", "custom"):
-        settings = ModelSettings.from_env({"CHAGENT_PROVIDER": provider, "CHAGENT_API_KEY": "offline-fixture",
+        settings = ModelSettings.from_env({"CHAGENT_PROVIDER": provider, {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY", "qwen": "DASHSCOPE_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}.get(provider, "CHAGENT_API_KEY"): "offline-fixture",
                                            **({"CHAGENT_BASE_URL": "https://fixture.invalid/v1", "CHAGENT_MODEL": "fixture"}
                                               if provider == "custom" else {})})
         captured = []
