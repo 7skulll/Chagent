@@ -1,0 +1,38 @@
+[
+  {
+    "case": "120s_complete",
+    "seconds": 120.05,
+    "error": false,
+    "outcome_unknown": false,
+    "text": "Suite: unittest (/Users/macbook/Desktop/\u667a\u80fd\u4f53/Chagent/.venv/bin/python -m unittest discover -s tests)\nResult: passed (exit 0) in 120052ms\nCounts: 1 passed, 0 failed, 0 errors",
+    "details": {
+      "suite": "unittest",
+      "command": [
+        "/Users/macbook/Desktop/\u667a\u80fd\u4f53/Chagent/.venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests"
+      ],
+      "exit_code": 0,
+      "duration_ms": 120051.7,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "errors": 0
+      },
+      "failures": [],
+      "timed_out": false,
+      "output": ".\n----------------------------------------------------------------------\nRan 1 test in 120.004s\n\nOK\n"
+    }
+  },
+  {
+    "case": "200s_ceiling",
+    "seconds": 125.0,
+    "error": true,
+    "outcome_unknown": true,
+    "text": "Tool did not return within 125 seconds (execution timed out)",
+    "details": null
+  }
+]

@@ -1,0 +1,82 @@
+{
+  "recorded_at_utc": "2026-11-02T01:19:05.537068+00:00",
+  "sandbox_exec": "/usr/bin/sandbox-exec",
+  "home": "/Users/macbook",
+  "inherit_api_keys": 2,
+  "profiles": [
+    {
+      "name": "current",
+      "available": true,
+      "checks": {
+        "starts": true,
+        "workspace_read": true,
+        "workspace_write": true,
+        "outside_write_denied": true,
+        "secret_read_denied": false,
+        "home_listing_denied": true,
+        "network_denied": true,
+        "no_residue": true
+      },
+      "api_keys_visible": 2,
+      "exit_on_apply": 0
+    },
+    {
+      "name": "wide-read",
+      "available": true,
+      "checks": {
+        "starts": true,
+        "workspace_read": true,
+        "workspace_write": true,
+        "outside_write_denied": true,
+        "secret_read_denied": false,
+        "home_listing_denied": false,
+        "network_denied": true,
+        "no_residue": true
+      },
+      "api_keys_visible": 2,
+      "exit_on_apply": 0
+    },
+    {
+      "name": "narrow-read",
+      "available": true,
+      "checks_meaningful": false,
+      "starts": false,
+      "exit_on_apply": -6,
+      "startup_output": ""
+    }
+  ],
+  "narrow_diagnostics": [
+    {
+      "variant": "original",
+      "exit_code": -6,
+      "output": ""
+    },
+    {
+      "variant": "read_all_ops_for_allowed_paths",
+      "exit_code": -6,
+      "output": ""
+    },
+    {
+      "variant": "allow_var_db",
+      "exit_code": -6,
+      "output": ""
+    },
+    {
+      "variant": "allow_all_reads",
+      "exit_code": 0,
+      "output": "alive\n"
+    },
+    {
+      "variant": "allow_all_process_ops",
+      "exit_code": -6,
+      "output": ""
+    }
+  ],
+  "verdict": {
+    "deny_default_starts_a_shell": true,
+    "shell_started": [
+      "wide-read"
+    ],
+    "conclusion": "deny-default can start a shell; further checks are needed before concluding §14.4 gate 1 is reachable by narrowing reads"
+  }
+}

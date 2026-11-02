@@ -45,6 +45,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 import socket
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -62,8 +63,7 @@ def _sbpl(path: Path | str) -> str:
 def wide_read_profile(workspace: Path, tmp: Path) -> str:
     """Deny everything, then hand back the three capabilities a shell needs.
 
-    This is the smallest profile that can plausibly be called a boundary: no
-    read of another project, no write outside the workspace, no outbound socket.
+    Reads are unrestricted in this control; it cannot protect other projects.
     """
     return "\n".join([
         "(version 1)",
@@ -125,10 +125,10 @@ def current_profile(workspace: Path) -> tuple[str | None, str]:
     product actually runs.
     """
     try:
-        from chagent.tools.sandbox import SandboxPolicy, profile
+        from chagent.tools.sandbox import SandboxPolicy, SandboxSettings, profile
     except ImportError:
         return None, "chagent not importable (run with PYTHONPATH=src)"
-    return profile(SandboxPolicy(workspace=workspace)), "chagent.tools.sandbox.profile"
+    return profile(SandboxPolicy(workspace=workspace, deny_read=SandboxSettings().deny_read)), "chagent.tools.sandbox.profile"
 
 
 def run(profile: str, argv: list[str]) -> tuple[int, str]:
@@ -137,7 +137,7 @@ def run(profile: str, argv: list[str]) -> tuple[int, str]:
         finished = subprocess.run(command, capture_output=True, text=True, timeout=PROBE_TIMEOUT)
     except subprocess.TimeoutExpired:
         return -9, ""
-    return finished.returncode, (finished.stdout + finished.stderr)[:400]
+    return finished.returncode, (finished.stdout + finished.stderr)[-2000:]
 
 
 def api_key_count(profile: str | None) -> int:
@@ -152,15 +152,20 @@ def api_key_count(profile: str | None) -> int:
     return int(digits) if digits else 0
 
 
-def network_denied(profile: str) -> bool:
+def network_denied(profile: str) -> bool | None:
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         listener.bind(("127.0.0.1", 0))
         listener.listen(4)
         port = listener.getsockname()[1]
         script = f"import socket\nsocket.create_connection(('127.0.0.1', {port}), 1)"
-        code, _ = run(profile, [sys.executable, "-c", script])
-        return code != 0
+        control, _ = run(profile, [sys.executable, "-c", "print(123)"])
+        if control != 0:
+            return None
+        code, output = run(profile, [sys.executable, "-c", script])
+        if code == 0:
+            return False
+        return True if ("PermissionError" in output or "Operation not permitted" in output) else None
     except OSError:
         return False
     finally:
@@ -172,12 +177,16 @@ def probe(name: str, profile: str | None, tree: dict) -> dict:
         return {"name": name, "available": False, "detail": "profile not built"}
     workspace, secret, outside = tree["workspace"], tree["secret"], tree["outside"]
     starts_code, starts_out = run(profile, ["/bin/sh", "-c", "echo alive"])
+    started = starts_code == 0 and "alive" in starts_out
+    if not started:
+        return {"name": name, "available": starts_code != APPLY_DENIED, "checks_meaningful": False,
+                "starts": False, "exit_on_apply": starts_code, "startup_output": starts_out}
     checks = {
-        "starts": starts_code == 0 and "alive" in starts_out,
-        "workspace_read": run(profile, ["/bin/sh", "-c", f"cat {workspace}/marker >/dev/null"])[0] == 0,
-        "workspace_write": run(profile, ["/bin/sh", "-c", f"printf ok > {workspace}/written"])[0] == 0,
-        "outside_write_denied": run(profile, ["/bin/sh", "-c", f"printf no > {outside}/denied"])[0] != 0,
-        "secret_read_denied": run(profile, ["/bin/sh", "-c", f"cat {secret} >/dev/null 2>&1"])[0] != 0,
+        "starts": True,
+        "workspace_read": run(profile, ["/bin/sh", "-c", f"cat {shlex.quote(str(workspace / 'marker'))} >/dev/null"])[0] == 0,
+        "workspace_write": run(profile, ["/bin/sh", "-c", f"printf ok > {shlex.quote(str(workspace / 'written'))}"])[0] == 0,
+        "outside_write_denied": run(profile, ["/bin/sh", "-c", f"printf no > {shlex.quote(str(outside / 'denied'))}"])[0] != 0,
+        "secret_read_denied": run(profile, ["/bin/sh", "-c", f"cat {shlex.quote(str(secret))} >/dev/null 2>&1"])[0] != 0,
         "home_listing_denied": _home_listing_denied(profile),
         "network_denied": network_denied(profile),
     }
@@ -199,11 +208,11 @@ def probe(name: str, profile: str | None, tree: dict) -> dict:
     return report
 
 
-def _home_listing_denied(profile: str) -> bool:
+def _home_listing_denied(profile: str) -> bool | None:
     ssh = Path.home() / ".ssh"
     if not ssh.exists():
-        return True
-    return run(profile, ["/bin/sh", "-c", f"ls {ssh} >/dev/null 2>&1"])[0] != 0
+        return None
+    return run(profile, ["/bin/sh", "-c", f"ls {shlex.quote(str(ssh))} >/dev/null 2>&1"])[0] != 0
 
 
 def main() -> None:
@@ -222,7 +231,7 @@ def main() -> None:
         "profiles": [],
     }
 
-    with tempfile.TemporaryDirectory(prefix="chagent-profile-") as directory:
+    with tempfile.TemporaryDirectory(prefix=".chagent-profile-", dir=Path.cwd()) as directory:
         base = Path(directory).resolve()
         workspace, secret, outside, scratch = base / "ws", base / "secret", base / "outside", base / "scratch"
         for path in (workspace, outside, scratch):
@@ -236,13 +245,25 @@ def main() -> None:
             "wide-read": wide_read_profile(workspace, scratch),
             "narrow-read": narrow_read_profile(workspace, scratch),
         }
+        candidate = built["narrow-read"]
+        variants = {
+            "original": candidate,
+            "read_all_ops_for_allowed_paths": candidate.replace("(allow file-read-data\n", "(allow file-read*\n"),
+            "allow_var_db": candidate.replace("(allow file-read-metadata)", "(allow file-read-metadata)\n(allow file-read* (subpath \"/private/var/db\"))"),
+            "allow_all_reads": candidate.replace("(allow file-read-metadata)", "(allow file-read*)"),
+            "allow_all_process_ops": candidate.replace("(allow process-exec*)", "(allow process*)"),
+        }
+        record["narrow_diagnostics"] = []
+        for name, variant in variants.items():
+            code, output = run(variant, ["/bin/sh", "-c", "echo alive"])
+            record["narrow_diagnostics"].append({"variant": name, "exit_code": code, "output": output})
         for name, profile in built.items():
             (outside / "denied").unlink(missing_ok=True)
             record["profiles"].append(probe(name, profile, tree))
             # Each run may leave the workspace written; that is what we measure.
 
     deny_default = [item for item in record["profiles"]
-                    if item["name"] != "current" and item["available"] and item["checks"]["starts"]]
+                    if item["name"] != "current" and item["available"] and item.get("checks", {}).get("starts")]
     applied = [item for item in record["profiles"] if item["available"]]
     if not applied:
         conclusion = ("inconclusive: no profile could be applied in this process (exit 71), so "
@@ -255,7 +276,7 @@ def main() -> None:
                       "before changing the plan")
     record["verdict"] = {
         "deny_default_starts_a_shell": bool(deny_default),
-        "usable": [item["name"] for item in deny_default],
+        "shell_started": [item["name"] for item in deny_default],
         "conclusion": conclusion,
     }
 

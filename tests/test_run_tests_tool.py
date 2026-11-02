@@ -1,5 +1,6 @@
 """run_tests: suite detection, digest parsing and one bounded process per call."""
 
+import asyncio
 import os
 from pathlib import Path
 import tempfile
@@ -116,6 +117,28 @@ class RunTestsToolTests(unittest.IsolatedAsyncioTestCase):
         result = await executor.execute(ToolCall("test-call", "run_tests", {}), context=self.context)
         self.assertTrue(result.is_error)
         self.assertIn("disabled", result.content[0].text)
+
+    async def test_cancellation_kills_test_process(self):
+        marker = self.workspace / "child.pid"
+        (self.workspace / "tests" / "test_slow.py").write_text(
+            "import os, time, unittest\nclass Slow(unittest.TestCase):\n"
+            " def test_sleep(self):\n  open('child.pid', 'w').write(str(os.getpid()))\n  time.sleep(30)\n",
+            encoding="utf-8")
+        task = asyncio.create_task(self.call(timeout_ms=60000))
+        try:
+            async with asyncio.timeout(5):
+                while not marker.exists() or not marker.read_text():
+                    await asyncio.sleep(0.02)
+            pid = int(marker.read_text())
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     async def test_timeout_kills_the_process_group(self):
         (self.workspace / "tests" / "test_slow.py").write_text(

@@ -145,7 +145,7 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   uv run python -m unittest discover -s tests -q
 ```
 
-数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。当前全量 **501 项**，本机实测 501 通过、0 跳过（其中 7 项在 node 里执行：Markdown 渲染器 6 项，整份 `app.js` 在最小 DOM 桩里跑一遍 1 项；没有 node 时这 7 项跳过并给出原因，跳过不是通过）。`test_sandbox` 的 10 项是否执行取决于环境：在允许 seatbelt 的机器上（本机即如此）它们真正运行；在 `sandbox-exec` 拒绝应用 profile 的嵌套环境里（exit 71），模块级 canary 会把整类用例标为 `skipped` 并带上原因。跳过不是通过：沙箱能力以[执行边界设计](docs/执行边界设计.md) §10.4 的能力表为准，在允许 seatbelt 的机器上这 10 项会真正执行。
+数据库测试为每个用例建立独立临时 schema 并在结束时清理，不读写业务表；未指定测试数据库地址时数据库集成测试跳过。2026-10-30 历史全量实测 **501 项**通过、0 跳过（其中 7 项在 node 里执行：Markdown 渲染器 6 项，整份 `app.js` 在最小 DOM 桩里跑一遍 1 项；没有 node 时这 7 项跳过并给出原因，跳过不是通过）。`test_sandbox` 的 10 项是否执行取决于环境：在允许 seatbelt 的机器上（本机即如此）它们真正运行；在 `sandbox-exec` 拒绝应用 profile 的嵌套环境里（exit 71），模块级 canary 会把整类用例标为 `skipped` 并带上原因。跳过不是通过：沙箱能力以[执行边界设计](docs/执行边界设计.md) §10.4 的能力表为准，在允许 seatbelt 的机器上这 10 项会真正执行。
 
 真实供应商的付费链路、离线性能诊断与故障复现各自使用独立脚本：`scripts/test_live_chain.py`、`scripts/benchmark_event_path.py`、`scripts/bench_write_path.py`。链路报告为每个用例带上本地计算的 `cache{hit,reusable,breaks}`（不额外请求），失败时可用 `--keep-schema docs/diagnostics` 保留一次性 schema，再用 `report_prompt_cache.py --schema <名称>` 事后审计。`scripts/report_prompt_cache.py` 读取已落库的请求，报告每轮的前缀复用与供应商缓存命中，不发起任何请求；`scripts/report_token_estimates.py` 对同一批请求比较本地 token 估算与供应商实际用量。结论与实测数据见[实施记录](docs/实施记录.md)，原始样本归档在 [`docs/diagnostics/`](docs/diagnostics/)。
 
@@ -171,8 +171,8 @@ uv run --env-file .env python scripts/probe_task.py --case all --repeats 2 \
 | 数据库、连接池、迁移 | [数据库配置](docs/数据库配置.md) |
 | 供应商与模型预算 | [模型配置](docs/模型配置.md) |
 | 已交付批次的实现、实测、边界与回退 | [实施记录](docs/实施记录.md) |
-| 路线图、已交付结论表、work 模式批次、验收口径 | [下一阶段实施方案](docs/下一阶段实施方案.md) |
-| code 模式：六条门槛核对、C0–C5 批次、验收与回退 | [第五版方案](docs/第五版方案.md) |
+| 历史路线图、已交付结论表、work 模式批次 | [下一阶段实施方案](docs/下一阶段实施方案.md) |
+| 当前路线图：code 模式门槛、C0–C5 状态与验收 | [第五版方案](docs/第五版方案.md) |
 | 沙箱、审批、会话进程、出网与事件通道（S／K／J／W 均已实施） | [执行边界设计](docs/执行边界设计.md) |
 
 诊断与真实链路的原始结果归档在 [`docs/diagnostics/`](docs/diagnostics/)。

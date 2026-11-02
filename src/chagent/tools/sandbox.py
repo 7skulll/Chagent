@@ -5,9 +5,9 @@ no-follow operations (``workspace.py``). The surface they cannot cover is a host
 command: once ``/bin/sh`` starts, every path check that lived in Python is gone.
 This module adds the one boundary that survives ``exec`` — a kernel profile.
 
-What it is not: a container, and not a read allowlist. macOS refuses any profile
-that denies reads globally (the loader aborts before ``main``), so reads are
-protected by naming credential paths, never by narrowing to the workspace. The
+What it is not: a container, and not a read allowlist. The tested read allowlist candidate aborts before ``main``; its cause remains
+unresolved. Reads are protected by naming credential paths, not by narrowing
+to the workspace. The
 capability table in ``docs/执行边界设计.md`` §10.4 is the honest description and
 should stay in sync with this file.
 """
@@ -131,9 +131,8 @@ def _tmp_root() -> Path:
 def profile(policy: SandboxPolicy) -> str:
     """Render the seatbelt profile for one policy.
 
-    Allow-everything then deny is deliberate: the write and read denials below
-    are the only ones macOS accepts. A global ``deny file-read*`` with an allow
-    list aborts the process during dynamic linking.
+    Allow-everything then deny is deliberate: the current implementation uses targeted write and read denials. One tested
+    read allowlist candidate aborted before the shell started; see C0 diagnostics.
     """
     lines = ["(version 1)", "(allow default)"]
     if not policy.network:
