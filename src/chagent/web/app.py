@@ -790,11 +790,13 @@ class LocalBoundary:
                 if (scope["path"].startswith("/api/") or scope["path"] == "/openapi.json") and not any(
                         key.lower() == b"cache-control" for key, _ in message["headers"]):
                     message["headers"].append((b"cache-control", b"no-store"))
-                message["headers"] += [
+                defaults = [
                     (b"x-content-type-options", b"nosniff"),
                     (b"referrer-policy", b"no-referrer"),
                     (b"content-security-policy", b"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"),
                 ]
+                existing = {key.lower() for key, _ in message["headers"]}
+                message["headers"] += [(key,value) for key,value in defaults if key not in existing]
             await send(message)
 
         await self.app(scope, receive, secured)

@@ -127,6 +127,15 @@
       <label for="file-editor" class="sr-only">文件内容</label>
       <textarea id="file-editor" spellcheck="false" wrap="off" hidden></textarea>
       <div id="file-markdown-view" class="md" hidden></div>
+      <section id="file-preview" aria-label="文件预览" hidden>
+        <div class="preview-controls">
+          <button id="preview-prev">上一页</button><input id="preview-page" type="number" min="1" value="1" aria-label="PDF 页码"><span id="preview-pages"></span><button id="preview-next">下一页</button>
+          <button id="preview-out" aria-label="缩小预览">−</button><span id="preview-scale"></span><button id="preview-in" aria-label="放大预览">＋</button><button id="preview-fit">适应宽度</button>
+          <button id="preview-retry">重新加载</button><a id="preview-download">下载原文件</a>
+        </div>
+        <p id="preview-note"></p><p id="preview-error" role="status" hidden></p>
+        <div id="preview-viewport"><img id="preview-image" alt="文件预览" hidden></div>
+      </section>
       <div id="file-conflict" hidden>
         <p>磁盘文件已变化，草稿已保留。</p>
         <button id="file-view-disk">查看磁盘版本</button><button id="file-overwrite">确认覆盖…</button>

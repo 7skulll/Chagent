@@ -24,12 +24,17 @@ for(const name of ['file-choice-dialog','file-disk-dialog']) {
   const el=document.getElementById(name);el.showModal=()=>{el.open=true;};el.close=()=>{el.open=false;};
 }
 const FILES=new Map([['one/a.md',{content:'# original\r\n',version:'v1',identity:'i1',newline:'crlf'}],['two/a.md',{content:'# workspace two\n',version:'v2',identity:'i2',newline:'lf'}]]);
+const preview={kind:'pdf',pages:2,version:'pdf-v1',identity:'pdf-i1',size:123,download_available:true};
+let pendingRows=[];
 const writes=[], entryRequests=[];let releaseSave=null,holdSave=false,holdEntries=false,releaseEntries=null;
 function response(body,status=200){return {ok:status<400,status,json:async()=>body};}
 globalThis.fetch=async(url,options)=>{
   const parsed=new globalThis.NativeURL(url,'http://local');
   const parts=parsed.pathname.split('/'),id=parts[3],operation=parts[4];
-  if(operation==='outputs')return response({items:[]});
+  if(operation==='outputs'&&parts[6]==='decision')return response({error:'temporary failure'},503);
+  if(operation==='outputs')return response({items:pendingRows});
+  if(operation==='preview')return response({...preview,path:parsed.searchParams.get('path')});
+  if(operation==='file-state')return response({identity:preview.identity,size:preview.size});
   if(operation==='entries'){
     entryRequests.push(id);
     if(holdEntries&&id==='one')await new Promise(resolve=>{releaseEntries=resolve;});
@@ -90,6 +95,26 @@ eval(require('fs').readFileSync(process.cwd()+'/file-editor.js','utf8'));
   releaseEntries();await tick();
   const names=el('file-tree').querySelectorAll('button').map(button=>button.textContent);
   assert(names.some(name=>name.includes('two.txt'))&&!names.some(name=>name.includes('one.txt')),'old directory response leaked into new workspace');
+  await window.ChagentFiles.open('two','pages.pdf');
+  assert(el('file-editor').hidden&&!el('file-preview').hidden,'PDF opened as editable text');
+  assert(el('file-save').disabled&&el('file-save-as').disabled,'binary preview permits text saving');
+  assert(el('preview-image').src.includes('page=1'),'first PDF page was not selected');
+  el('preview-next').fire('click');assert(el('preview-image').src.includes('page=2'),'PDF next page failed');
+  assert(el('preview-next').disabled,'PDF last-page boundary missing');
+  el('preview-page').value='99';el('preview-page').fire('change');assert(el('preview-page').value===2,'page clamp failed');
+  el('preview-image').naturalWidth=400;el('preview-viewport').clientWidth=300;el('preview-image').onload();
+  assert(el('preview-image').width===276,'fit-width preview failed');
+  el('preview-in').fire('click');assert(el('preview-image').width===500,'image/PDF zoom failed');
+  el('preview-image').onerror();assert(!el('preview-error').hidden,'preview decode error missing');
+  el('preview-retry').fire('click');await tick();assert(el('preview-error').hidden,'retry did not reload preview');
+  preview.kind='unsupported';preview.reason='unsupported format';
+  await window.ChagentFiles.open('two','image.heic');assert(el('preview-image').hidden,'unsupported format rendered inline');
+  assert(el('preview-note').textContent==='unsupported format','missing format explanation');
+  pendingRows=[{id:'out',path:'a.md',size:3,status:'pending',token:'nonce'}];
+  await window.ChagentFiles.refresh();
+  el('file-confirmations').querySelectorAll('button').find(button=>button.textContent==='覆盖').fire('click');await tick();
+  const actions=el('file-confirmations').querySelectorAll('button');
+  assert(actions.length&&actions.every(button=>!button.disabled),'temporary confirmation failure left controls disabled');
   console.log('draft/save/conflict/workspace/unload/Markdown checks passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''

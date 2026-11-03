@@ -5,6 +5,7 @@ content. No production sessions/files are modified. Runs both work and writable
 code with bounded turns; code commands remain isolated and offline.
 """
 import asyncio
+import httpx
 from dataclasses import replace
 from datetime import datetime, timezone
 import json
@@ -30,6 +31,7 @@ async def main():
     import argparse
     parser=argparse.ArgumentParser()
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--http-lifecycle',action='store_true',help='Also validate upload/save/rename/trash/restore/runtime recovery via HTTP')
     args=parser.parse_args()
     load_missing(Path(__file__).resolve().parents[1]/'.env')
     settings=Settings.from_env()
@@ -48,10 +50,22 @@ async def main():
                     runner=create_runner(database,selected.model(),client,code_mode=True,allow_host_commands=True,
                         allow_workspace_writes=True,code_workspace_writes=True,versioned_files=True,process_stdin=False,
                         sandbox=sandbox,max_turns=12,timeout=180,memory_policy=MemoryPolicy(enabled=False))
+                    from chagent.web.app import WebRuntime,create_app
+                    web_settings=Settings(code_mode=True,allow_host_commands=True,sandbox='isolated',execution_profile='trusted-development')
+                    runtime=WebRuntime(runner,root,web_settings)
+                    app=create_app(workspace=root,injected_runtime=runtime);app.state.runtime=runtime
+                    http=httpx.AsyncClient(transport=httpx.ASGITransport(app),base_url='http://127.0.0.1',trust_env=False)
+                    async def api(method,url,**kwargs):
+                        response=await http.request(method,url,**kwargs);response.raise_for_status();return response.json()
+                    workspace=await api('POST','/api/workspaces',json={'path':str(root)})
+                    base='/api/workspaces/'+workspace['id']
                     try:
                         for mode in ['work','code']:
                             note=f'uploads/{mode}.txt';marker='UPDATED_'+mode.upper()
-                            (root/note).write_text('PLACEHOLDER\n')
+                            if args.http_lifecycle:
+                                await api('POST','/api/uploads?name='+mode+'.txt',content=b'PLACEHOLDER\n')
+                            else:
+                                (root/note).write_text('PLACEHOLDER\n')
                             sid=await runner.conversations.create_session(root,title='F34 synthetic '+mode,mode=mode)
                             session=await runner.conversations.get_session(sid)
                             prompt=(f'这是合成文件工具验收。请先用 read_file 读取 {note}，再用 edit_file 携带读取的 expected_sha256 '
@@ -63,6 +77,10 @@ async def main():
                             output_path=f'outputs_{mode}/result.md'
                             item={'mode':mode,'edit_run':str(result.run_id),'edited_upload':(root/note).read_text()==marker+'\n',
                                   'output_exists':(root/output_path).is_file()}
+                            if args.http_lifecycle:
+                                read=await api('GET',base+'/text',params={'path':note})
+                                await api('PUT',base+'/text',json={key:read[key] for key in ['path','version','identity']}|{'content':marker+'\nMANUAL\n'})
+                                item['manual_save']=(root/note).read_text()==marker+'\nMANUAL\n'
                             original=(root/output_path).read_bytes() if item['output_exists'] else b''
                             collision=await runner.run(sid,f'继续验收：只用 create_file 在 {output_path} 生成新内容 # PROPOSED_{mode}。这是同名输出，等待宿主确认，不得使用其他工具覆盖现有文件。')
                             rows=await OutputService(database).pending(session.workspace_id)
@@ -70,15 +88,29 @@ async def main():
                             item.update(collision_run=str(collision.run_id),pending_confirmation=pending is not None,
                                         original_preserved=(root/output_path).read_bytes()==original)
                             if pending:
-                                saved=await OutputService(database).decide(session.workspace_id,root,pending['id'],pending['token'],'keep-both')
+                                if args.http_lifecycle:
+                                    saved=await api('POST',base+'/outputs/'+str(pending['id'])+'/decision',json={'token':str(pending['token']),'choice':'keep-both'})
+                                else:
+                                    saved=await OutputService(database).decide(session.workspace_id,root,pending['id'],pending['token'],'keep-both')
                                 item['keep_both_saved']=(root/saved['output_path']).is_file()
                             else:
                                 item['keep_both_saved']=False
                             item['passed']=all(item[key] for key in ['edited_upload','output_exists','pending_confirmation','original_preserved','keep_both_saved'])
+                            if args.http_lifecycle:
+                                read=await api('GET',base+'/text',params={'path':note});target=note.replace('.txt','-renamed.txt')
+                                await api('POST',base+'/rename',json={'path':note,'target':target,'identity':read['identity']})
+                                moved=await api('GET',base+'/text',params={'path':target})
+                                deleted=await api('POST',base+'/trash',json={'path':target,'identity':moved['identity']})
+                                await api('POST',base+'/trash/'+deleted['id']+'/restore',json={})
+                                app.state.runtime=WebRuntime(runner,root,web_settings)
+                                opened=await api('POST','/api/workspaces',json={'path':str(root)})
+                                history=await api('GET','/api/sessions/'+str(sid))
+                                item['lifecycle_recovered']=opened['id']==workspace['id'] and history['id']==str(sid) and (root/target).read_text()==marker+'\nMANUAL\n'
+                                item['passed']=item['passed'] and item['manual_save'] and item['lifecycle_recovered']
                             report['modes'].append(item)
                             print(mode+': '+('passed' if item['passed'] else 'failed'),flush=True)
                     finally:
-                        await client.aclose();sandbox.close()
+                        await http.aclose();await client.aclose();sandbox.close()
         finally:
             await admin.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
             args.output.parent.mkdir(parents=True,exist_ok=True)

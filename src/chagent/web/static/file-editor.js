@@ -16,7 +16,7 @@
   const base = space => `/api/workspaces/${space.id}`;
   const notice = message => { $("file-notice").textContent = message; };
   const fail = error => notice(error.message || String(error));
-  const dirty = tab => tab.draft !== tab.original;
+  const dirty = tab => (!tab.kind || tab.kind === "text") && tab.draft !== tab.original;
   const normalized = text => text.replace(/\r\n?/g, "\n");
   const serialized = tab => tab.readonly ? tab.raw : tab.newline === "cr" ? tab.draft.replace(/\n/g,"\r") : tab.newline === "crlf" ? tab.draft.replace(/\r?\n/g, "\r\n") : tab.draft;
   const active = () => current && current.tabs.get(current.active);
@@ -55,8 +55,16 @@
     paint(); return true;
   }
   function takeRead(tab, data) {
-    Object.assign(tab, {raw:data.content, original:normalized(data.content), draft:normalized(data.content), version:data.version,
+    Object.assign(tab, {kind:"text",raw:data.content, original:normalized(data.content), draft:normalized(data.content), version:data.version,
       identity:data.identity, newline:data.newline, readonly:data.newline === "mixed", changed:false, unavailable:false});
+  }
+  function selectFile(space,path) {
+    space.selected=path;space.selection={type:"file",path};
+    if(current!==space) return;
+    for(const row of $("file-tree").querySelectorAll(".file-tree-row")) {
+      const item=row.querySelector("button"),selected=item?.dataset.path===path;
+      row.classList.toggle("selected",selected);item?.setAttribute("aria-selected",String(selected));
+    }
   }
   async function open(spaceId,path) {
     if (!current || current.id !== String(spaceId)) {
@@ -67,12 +75,21 @@
       if (!current || current.id !== String(spaceId)) return;
     }
     const space = current;
-    if (space.tabs.has(path)) { space.active = path; reveal(); paint(); return; }
+    if (space.tabs.has(path)) { selectFile(space,path);space.active = path; reveal(); paint(); return; }
     if (space.tabs.size >= 25) throw new Error("请先关闭部分文件标签（最多 25 个）");
-    const data = await request(base(space)+"/text?"+new URLSearchParams({path}));
-    const tab = {path, preview:false}; takeRead(tab,data); space.tabs.set(path,tab); space.active=path;
-    space.selected = path;
-    if (current === space) { reveal(); paint(); notice(tab.readonly ? "混合换行文件当前只读，避免破坏原换行。" : "输入仅修改草稿；点击保存或按 ⌘S 写入磁盘。"); }
+    const tab = {path, preview:false, page:1,zoom:null};
+    if(/\.(pdf|png|jpe?g|gif|webp|heic|avif|bmp)$/i.test(path)) {
+      await readPreview(space,tab);
+    } else {
+      try {
+        const data=await request(base(space)+"/text?"+new URLSearchParams({path}));takeRead(tab,data);
+      } catch(error) {
+        if(error.status!==400) throw error;
+        await readPreview(space,tab);tab.info.reason=error.message;
+      }
+    } space.tabs.set(path,tab); space.active=path;
+    selectFile(space,path);
+    if (current === space) { reveal(); paint(); notice(tab.kind!=="text"?"预览不会把文件内容自动发送给模型。":tab.readonly ? "混合换行文件当前只读，避免破坏原换行。" : "输入仅修改草稿；点击保存或按 ⌘S 写入磁盘。"); }
   }
   function reveal() { window.ChagentShowFiles?.(); selectPane("files"); }
   function paint() {
@@ -82,29 +99,79 @@
       tabSignature=signature;
       $("file-tabs").replaceChildren(...(space ? [...space.tabs.values()].map(item => {
       const wrapper = node("div",null,"file-tab"+(item===tab?" active":""));
-      const select = button((dirty(item)?"● ":"")+item.path, () => { space.active=item.path; paint(); });
+      const select = button((dirty(item)?"● ":"")+item.path, () => { selectFile(space,item.path);space.active=item.path; paint(); });
       select.setAttribute("role","tab"); select.setAttribute("aria-selected",String(item===tab));
       wrapper.append(select,button("×",async () => { if (!await guard(space,[item.path])) return; space.tabs.delete(item.path); if (space.active===item.path) space.active=space.tabs.keys().next().value; paint(); }));
       return wrapper;
     }) : []));
     }
+    const binary=tab && tab.kind!=="text";
+    $("file-preview").hidden=!binary;
+    $("workspace-files").classList.toggle("binary-preview",Boolean(binary));
     $("file-path").textContent = tab?.path || "未打开文件";
-    $("file-state").textContent = tab ? tab.saving ? "正在保存…" : tab.unavailable ? "位置失效 · 草稿已保留" : tab.readonly ? "只读：混合换行" : dirty(tab) ? "● 未保存" : "已保存" : "";
-    $("file-save").disabled = !tab || tab.readonly || tab.unavailable || !!tab.saving || !dirty(tab);
-    $("file-save-as").disabled = !tab;
-    $("file-markdown").disabled = !tab || !/\.md$/i.test(tab.path);
+    $("file-state").textContent = tab ? tab.saving ? "正在保存…" : tab.unavailable ? "位置失效 · 原内容保留" : binary ? "只读预览" : tab.readonly ? "只读：混合换行" : dirty(tab) ? "● 未保存" : "已保存" : "";
+    $("file-save").disabled = !tab || binary || tab.readonly || tab.unavailable || !!tab.saving || !dirty(tab);
+    $("file-save-as").disabled = !tab || binary;
+    $("file-markdown").disabled = !tab || binary || !/\.md$/i.test(tab.path);
     $("file-markdown").textContent = tab?.preview ? "返回编辑" : "Markdown 预览";
-    $("file-editor").hidden = !tab || !!tab.preview;
-    $("file-markdown-view").hidden = !tab?.preview;
+    $("file-editor").hidden = !tab || binary || !!tab.preview;
+    $("file-markdown-view").hidden = binary || !tab?.preview;
     $("file-conflict").hidden = !tab || !tab.changed;
     $("file-editor").readOnly = !!tab?.readonly;
-    if (tab) {
+    if (binary) { paintPreview(space,tab); }
+    else if (tab) {
       if ($("file-editor").value !== tab.draft) $("file-editor").value = tab.draft;
       if (tab.preview) $("file-markdown-view").innerHTML = window.ChagentMarkdown.renderMarkdown(tab.draft);
     }
   }
+  async function readPreview(space,tab) {
+    const info=await request(base(space)+"/preview?"+new URLSearchParams({path:tab.path}));
+    Object.assign(tab,{kind:info.kind,info,identity:info.identity,version:info.version,readonly:true,unavailable:false});
+    tab.page=Math.min(tab.page||1,info.pages||1);
+  }
+  function imageSize() {
+    const tab=active(),img=$("preview-image");if(!tab||!img.naturalWidth) return;
+    img.width=Math.round(tab.zoom===null?Math.min(img.naturalWidth,Math.max(100,$("preview-viewport").clientWidth-24)):img.naturalWidth*tab.zoom);
+    $("preview-scale").textContent=tab.zoom===null?"适应":Math.round(tab.zoom*100)+"%";
+  }
+  function paintPreview(space,tab) {
+    const pdf=tab.kind==="pdf",supported=pdf||tab.kind==="image";
+    for(const id of ["preview-prev","preview-page","preview-pages","preview-next"]) $(id).hidden=!pdf;
+    $("preview-page").value=tab.page;$("preview-page").max=tab.info.pages||1;
+    $("preview-pages").textContent="/ "+(tab.info.pages||1);
+    $("preview-prev").disabled=tab.page<=1;$("preview-next").disabled=tab.page>=(tab.info.pages||1);
+    for(const id of ["preview-out","preview-in","preview-fit"]) $(id).disabled=!supported;
+    const link=$("preview-download");link.href=downloadUrl(space.id,tab.path);link.download=tab.path.split("/").pop();link.hidden=tab.info.download_available===false;
+    $("preview-note").textContent=supported?(pdf?"PDF 分页预览":"图片静态预览 · "+tab.info.width+" × "+tab.info.height)+"；仅供本机查看，不代表模型已理解图片或具备 OCR。":tab.info.reason;
+    const image=$("preview-image");image.hidden=!supported||tab.unavailable||!!tab.previewError;
+    if(!supported) { image.removeAttribute("src");image.dataset.key="";return; }
+    const url=base(space)+"/preview/page?"+new URLSearchParams({path:tab.path,version:tab.version,page:tab.page});
+    if(image.dataset.key!==url || tab.imageKey===null) {
+      tab.imageKey=url;tab.previewError=false;image.hidden=false;image.dataset.key=url;$("preview-error").hidden=true;
+      image.onload=()=>{if(active()===tab){tab.previewError=false;$("preview-error").hidden=true;imageSize();}};
+      image.onerror=()=>{if(active()===tab){tab.previewError=true;$("preview-error").textContent="预览加载失败或文件已变化，请重新加载；也可下载原文件查看。";$("preview-error").hidden=false;image.hidden=true;}};
+      image.src=url;
+    }
+    imageSize();
+  }
+  async function retryPreview() {
+    const space=current,tab=active();if(!tab||tab.kind==="text") return;
+    await readPreview(space,tab);tab.imageKey=null;if(current===space) paint();
+  }
+  function changePage(delta,absolute=false) {
+    const tab=active();if(tab?.kind!=="pdf") return;
+    tab.page=Math.max(1,Math.min(tab.info.pages,absolute?Number(delta)||1:tab.page+delta));paint();
+  }
+  $("preview-prev").addEventListener("click",()=>changePage(-1));
+  $("preview-next").addEventListener("click",()=>changePage(1));
+  $("preview-page").addEventListener("change",()=>changePage($("preview-page").value,true));
+  $("preview-out").addEventListener("click",()=>{const tab=active();if(tab){tab.zoom=Math.max(.25,(tab.zoom||1)/1.25);imageSize();}});
+  $("preview-in").addEventListener("click",()=>{const tab=active();if(tab){tab.zoom=Math.min(4,(tab.zoom||1)*1.25);imageSize();}});
+  $("preview-fit").addEventListener("click",()=>{const tab=active();if(tab){tab.zoom=null;imageSize();}});
+  $("preview-retry").addEventListener("click",()=>retryPreview().catch(fail));
+  window.addEventListener("resize",imageSize);
   async function saveTab(space, tab, revision=null) {
-    if (tab.saving || tab.readonly) return false;
+    if (tab.saving || tab.readonly || tab.kind!=="text") return false;
     const submitted=tab.draft, content=serialized(tab);
     tab.saving=true; if(current===space) paint();
     try {
@@ -121,7 +188,7 @@
     } finally { tab.saving=false; if(current===space) paint(); }
   }
   async function saveAs() {
-    const space=current,tab=active(); if(!tab) return;
+    const space=current,tab=active(); if(!tab || tab.kind!=="text") return;
     const path=await askName("另存为（工作区相对路径；父目录需已存在）",tab.path); if(!path) return;
     const result=await request(base(space)+"/outputs","POST",{path,content:serialized(tab),request_id:crypto.randomUUID()});
     if(result.status==="committed") { await refresh(); await open(space.id,result.output_path); }
@@ -158,7 +225,7 @@
           }
         } else notice("符号链接和特殊文件不可打开或修改。");
       });
-      label.setAttribute("role","treeitem");label.setAttribute("aria-selected",String(space.selected===item.path));
+      label.dataset.path=item.path;label.setAttribute("role","treeitem");label.setAttribute("aria-selected",String(space.selected===item.path));
       if(item.type==="directory") label.setAttribute("aria-expanded",String(space.dirs.has(item.path)));
       row.append(label);wrapper.append(row);target.append(wrapper);
       if(item.type==="directory"&&space.dirs.has(item.path)) {
@@ -221,6 +288,7 @@
   async function trash() {
     const space=current;if(!space) return;
     const result=await request(base(space)+"/trash");
+    if(current!==space) return;
     if(!result.items.length) {
       $("file-confirmations").replaceChildren();space.showingTrash=false;space.pendingSignature=null;
       notice("回收站为空。");await loadPending(space);return;
@@ -255,7 +323,7 @@
             const output=await request(base(space)+`/outputs/${item.id}/decision`,"POST",{token:item.token,choice});
             window.dispatchEvent(new CustomEvent("chagent-output-decision",{detail:output}));
             notice(choice==="cancel"?"已取消输出，未修改文件。":"输出已保存。");
-          } finally { await loadPending(space);await renderTree(space);await checkExternal(space); }
+          } finally { space.pendingSignature=null;await loadPending(space);await renderTree(space);await checkExternal(space); }
         }));
       }
       return row;
@@ -265,6 +333,13 @@
     if(!space) return;
     for(const tab of [...space.tabs.values()]) {
       try {
+        if(tab.kind!=="text") {
+          const state=await request(base(space)+"/file-state?"+new URLSearchParams({path:tab.path}));
+          if(!space.tabs.has(tab.path)) continue;
+          tab.unavailable=false;
+          if(state.identity!==tab.identity) { await readPreview(space,tab);tab.imageKey=null; }
+          continue;
+        }
         const result=await request(base(space)+"/text?"+new URLSearchParams({path:tab.path}));
         if(tab.saving||!space.tabs.has(tab.path)) continue;
         tab.unavailable=false;

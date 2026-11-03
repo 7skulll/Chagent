@@ -224,3 +224,35 @@ async def proposed_download(workspace_id: UUID, output_id: UUID, current: Curren
     return Response(bytes(row['payload']),media_type='application/octet-stream',headers={
         'Content-Disposition':"attachment; filename*=UTF-8''"+quote(PurePosixPath(row['path']).name,safe=''),
         'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+
+async def preview_service(current, workspace_id):
+    from chagent.previews import PreviewFS
+    fs=await service(current,workspace_id)
+    return PreviewFS(fs.root,expected_identity=fs.identity)
+
+
+async def preview_call(fs,method,*args):
+    from chagent.previews import PreviewUnavailable
+    try:
+        return await perform(fs,method,*args)
+    except PreviewUnavailable as error:
+        raise HTTPException(503,str(error)) from None
+
+
+@router.get('/workspaces/{workspace_id}/file-state')
+async def file_state(workspace_id: UUID, current: Current, path: str):
+    return await preview_call(await preview_service(current,workspace_id),'state',path)
+
+
+@router.get('/workspaces/{workspace_id}/preview')
+async def preview(workspace_id: UUID, current: Current, path: str):
+    return await preview_call(await preview_service(current,workspace_id),'information',path)
+
+
+@router.get('/workspaces/{workspace_id}/preview/page')
+async def preview_page(workspace_id: UUID, current: Current, path: str,
+                       version: str=Query(pattern='^[0-9a-f]{64}$'), page: int=Query(1,ge=1,le=2000)):
+    from fastapi.responses import Response
+    data=await preview_call(await preview_service(current,workspace_id),'raster',path,version,page)
+    return Response(data,media_type='image/png',headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})

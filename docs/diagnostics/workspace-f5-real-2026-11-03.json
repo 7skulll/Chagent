@@ -1,0 +1,33 @@
+{
+  "at": "2026-11-03T11:35:48.200631+00:00",
+  "provider": "deepseek",
+  "model": "deepseek-v4-flash",
+  "modes": [
+    {
+      "mode": "work",
+      "edit_run": "2c0e1dd2-8094-4653-b0b5-a00b02b79a1f",
+      "edited_upload": true,
+      "output_exists": true,
+      "manual_save": true,
+      "collision_run": "cf8e872b-786d-4774-97f0-5bdc04359ee7",
+      "pending_confirmation": true,
+      "original_preserved": true,
+      "keep_both_saved": true,
+      "passed": true,
+      "lifecycle_recovered": true
+    },
+    {
+      "mode": "code",
+      "edit_run": "9ba11765-fecf-4dee-bbc4-4e49cc19d806",
+      "edited_upload": true,
+      "output_exists": true,
+      "manual_save": true,
+      "collision_run": "ed620f12-a7b8-47da-a150-14d88ea55302",
+      "pending_confirmation": true,
+      "original_preserved": true,
+      "keep_both_saved": true,
+      "passed": true,
+      "lifecycle_recovered": true
+    }
+  ]
+}

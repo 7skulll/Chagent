@@ -72,6 +72,64 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
                     return run
                 await asyncio.sleep(.01)
 
+    async def test_preview_routes_are_raster_versioned_and_workspace_scoped(self):
+        from PIL import Image
+        try:
+            from preview_fixtures import pdf_bytes
+        except ImportError:
+            from tests.preview_fixtures import pdf_bytes
+        wid,base=await self.file_workspace()
+        (self.workspace/'pages.pdf').write_bytes(pdf_bytes())
+        info=(await self.client.get(base+'/preview',params={'path':'pages.pdf'})).json()
+        self.assertEqual(info['pages'],2)
+        page=await self.client.get(base+'/preview/page',params={'path':'pages.pdf','version':info['version'],'page':2})
+        self.assertEqual(page.status_code,200,page.text[:100] if page.status_code!=200 else '')
+        self.assertEqual(page.headers['content-type'],'image/png')
+        self.assertEqual(page.headers['x-content-type-options'],'nosniff')
+        (self.workspace/'pages.pdf').write_bytes(pdf_bytes()+b'\n')
+        stale=await self.client.get(base+'/preview/page',params={'path':'pages.pdf','version':info['version']})
+        self.assertEqual(stale.status_code,409)
+        Image.new('RGB',(20,30),'blue').save(self.workspace/'image.png')
+        image=(await self.client.get(base+'/preview',params={'path':'image.png'})).json()
+        self.assertEqual(image['kind'],'image')
+        for path in ['../escape.pdf','.chagent/trash/test','/etc/passwd']:
+            response=await self.client.get(base+'/preview',params={'path':path})
+            self.assertIn(response.status_code,[400,403])
+        self.assertEqual((await self.client.get('/api/workspaces/'+str(uuid4())+'/preview',params={'path':'pages.pdf'})).status_code,404)
+
+    async def test_runtime_restart_restores_workspace_history_pending_and_trash(self):
+        wid,base=await self.file_workspace()
+        session=await self.create_session('restart evidence')
+        (self.workspace/'keep.txt').write_text('existing')
+        pending=(await self.client.post(base+'/outputs',json={'path':'keep.txt','content':'proposed','request_id':str(uuid4())})).json()
+        (self.workspace/'trash.txt').write_text('recover me')
+        read=(await self.client.get(base+'/text',params={'path':'trash.txt'})).json()
+        trash=(await self.client.post(base+'/trash',json={'path':'trash.txt','identity':read['identity']})).json()
+        restarted=WebRuntime(create_demo_runner(self.database),self.workspace)
+        self.addAsyncCleanup(restarted.close)
+        self.app.state.runtime=restarted
+        opened=(await self.client.post('/api/workspaces',json={'path':str(self.workspace)})).json()
+        self.assertEqual(opened['id'],wid)
+        self.assertEqual((await self.client.get(f'/api/sessions/{session}')).json()['title'],'restart evidence')
+        self.assertEqual((await self.client.get(base+'/outputs')).json()['items'][0]['id'],pending['id'])
+        self.assertEqual((await self.client.get(base+'/trash')).json()['items'][0]['id'],trash['id'])
+        restore=await self.client.post(base+'/trash/'+trash['id']+'/restore',json={})
+        self.assertEqual(restore.status_code,200,restore.text)
+        self.assertEqual((self.workspace/'trash.txt').read_text(),'recover me')
+
+    async def test_failed_save_preserves_disk_and_reports_no_success(self):
+        import errno
+        from unittest.mock import patch
+        wid,base=await self.file_workspace()
+        (self.workspace/'draft.txt').write_text('disk')
+        read=(await self.client.get(base+'/text',params={'path':'draft.txt'})).json()
+        with patch('chagent.tools.workspace.os.replace',side_effect=OSError(errno.ENOSPC,'private unrelated path')):
+            response=await self.client.put(base+'/text',json={key:read[key] for key in ['path','version','identity']}|{'content':'draft'})
+        self.assertEqual(response.status_code,400)
+        self.assertNotIn('private unrelated path',response.text)
+        self.assertEqual((self.workspace/'draft.txt').read_text(),'disk')
+        self.assertEqual(list(self.workspace.glob('.chagent-*')),[])
+
     async def file_workspace(self):
         row = (await self.client.post('/api/workspaces', json={'path':str(self.workspace)})).json()
         return row['id'], '/api/workspaces/'+row['id']
