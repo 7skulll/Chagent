@@ -408,11 +408,11 @@
   function dimension(kind,value) {
     let min,max,property;
     if(kind==="sidebar"){
-      const files=document.body.classList.contains("tools-collapsed")?0:Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--tools-w"))||460;
+      const files=document.body.classList.contains("tools-collapsed")?0:Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--tools-w"))||320;
       min=180;max=Math.max(min,Math.min(400,maxWidth()-files-370));property="--sidebar-w";
     }
     else if(kind==="files"){
-      const sidebar=document.body.classList.contains("sidebar-collapsed")?0:Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w"))||240;
+      const sidebar=document.body.classList.contains("sidebar-collapsed")?0:Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w"))||216;
       min=320;max=Math.max(min,maxWidth()-sidebar-370);property="--tools-w";
     }
     else {min=70;max=Math.max(min,($("conversation-tools").clientHeight||document.documentElement.clientHeight)-330);property="--tree-h";}
@@ -423,7 +423,7 @@
     vars.setProperty(property,value+"px");localStorage.setItem("chagent.layout."+kind,String(value));return value;
   }
   for(const [id,kind] of [["sidebar-resize","sidebar"],["files-resize","files"],["tree-resize","tree"]]) {
-    const handle=$(id),saved=Number(localStorage.getItem("chagent.layout."+kind));let value=saved||({sidebar:240,files:460,tree:210}[kind]);
+    const handle=$(id),saved=Number(localStorage.getItem("chagent.layout."+kind));let value=saved||({sidebar:216,files:320,tree:190}[kind]);
     value=dimension(kind,value);
     handle.addEventListener("pointerdown",event=>{
       event.preventDefault();handle.setPointerCapture(event.pointerId);

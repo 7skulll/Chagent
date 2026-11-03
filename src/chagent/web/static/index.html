@@ -11,15 +11,43 @@
   <script src="/static/file-editor.js" defer></script>
 </head>
 <body>
-  <!-- 会话侧栏：唯一的一级导航。图标栏在 Z1 删到只剩一个工作区按钮（侧栏底部已有
-       同名控件），剩下的 60px 只是死掉的壳；头像则是一个不存在的用户。两者都已移除。 -->
+  <!-- 快捷导航只复用已有功能，不增加虚假的用户、通知或终端入口。 -->
+  <nav class="rail" aria-label="快捷导航">
+    <div class="rail-top">
+      <button class="rail-icon" id="rail-home" title="新聊天" aria-label="新聊天">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4 10 8-6 8 6v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 20.5v-7h6v7" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+      </button>
+      <button class="rail-icon" id="rail-workspace" title="切换工作区" aria-label="切换工作区">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 7A2.5 2.5 0 0 1 6 4.5h3.2c.7 0 1.4.3 1.9.8l1.2 1.2H18A2.5 2.5 0 0 1 20.5 9v8A2.5 2.5 0 0 1 18 19.5H6A2.5 2.5 0 0 1 3.5 17Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="rail-icon" id="rail-files" title="打开文件面板" aria-label="打开文件面板" aria-controls="conversation-tools" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3.5h8l4 4V20.5H6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3.5v4h4M9 12h6M9 16h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+      <button class="rail-icon" id="rail-memory" title="长期记忆" aria-label="长期记忆">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.5 5.2A3.4 3.4 0 0 0 4 7.7a3.6 3.6 0 0 0 .4 5.3A3.5 3.5 0 0 0 9 18.6c1.3.9 3-.1 3-1.7V7.1a2.7 2.7 0 0 0-2.5-1.9ZM14.5 5.2A3.4 3.4 0 0 1 20 7.7a3.6 3.6 0 0 1-.4 5.3 3.5 3.5 0 0 1-4.6 5.6c-1.3.9-3-.1-3-1.7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="rail-bottom">
+      <button class="rail-icon" id="rail-archive" title="查看已归档会话" aria-label="查看已归档会话" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7.5h16V20H4ZM3 4h18v3.5H3ZM9 12h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>
+      </button>
+      <button class="rail-icon" id="rail-config" title="运行时配置" aria-label="运行时配置">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 4.2v2.3M12 17.5v2.3M4.2 12h2.3M17.5 12h2.3M6.5 6.5l1.6 1.6M15.9 15.9l1.6 1.6M17.5 6.5l-1.6 1.6M8.1 15.9l-1.6 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+      <span class="rail-avatar" aria-hidden="true">C</span>
+    </div>
+  </nav>
+
   <aside class="sidebar" id="session-sidebar">
     <div class="sidebar-head">
-      <div class="brand"><strong>Chagent</strong></div>
+      <div class="brand"><strong>Chagent</strong><span class="brand-chevron" aria-hidden="true">⌄</span></div>
+      <button class="ghost-icon" id="search-sessions" title="搜索会话" aria-label="搜索会话" aria-controls="session-search" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.8" cy="10.8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m15.5 15.5 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      </button>
     </div>
 
     <label for="session-search" class="sr-only">搜索会话</label>
-    <input id="session-search" class="session-search" type="search" placeholder="搜索会话标题" maxlength="200" autocomplete="off">
+    <input id="session-search" class="session-search" type="search" placeholder="搜索会话标题" maxlength="200" autocomplete="off" hidden>
 
     <div id="mode-picker" class="mode-picker" hidden>
       <label for="new-mode">新会话类型</label>
@@ -30,7 +58,7 @@
       新聊天
     </button>
 
-    <div class="section-label" id="sessions-label">最近</div>
+    <div class="section-label" id="sessions-label">项目</div>
     <nav id="sessions" aria-label="会话列表"></nav>
     <button id="more-sessions" class="load-more" hidden>加载更多会话</button>
     <div class="sidebar-foot">
@@ -53,6 +81,11 @@
         <button class="ghost-icon" id="toggle-sidebar" title="折叠/展开侧栏" aria-label="折叠或展开侧栏" aria-controls="session-sidebar"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 4.5v15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
       </div>
       <div class="tabbar-title" id="session-title">聊天</div>
+      <!-- 会话模式开关：两种模式的工具面完全不同，切换只影响之后的 run。 -->
+      <div class="mode-switch" id="mode-switch" role="group" aria-label="会话模式" hidden>
+        <button type="button" data-mode="work" aria-pressed="true" title="读文档、改工作区文件，不执行命令">资料处理</button>
+        <button type="button" data-mode="code" id="mode-switch-code" aria-pressed="false" title="可执行命令与测试（隔离断网）">代码开发</button>
+      </div>
       <div class="tabbar-right">
         <button class="usage-pill" id="usage-pill" title="本会话 token 用量" hidden>用量</button>
         <button class="ghost-icon" id="toggle-tools" title="折叠/展开工具面板" aria-label="折叠或展开工具面板" aria-controls="conversation-tools"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M14.5 4.5v15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
@@ -82,7 +115,7 @@
       <div id="uploads" class="uploads" aria-live="polite"></div>
       <form id="composer" class="composer">
         <label for="input" class="sr-only">输入消息</label>
-        <textarea id="input" rows="2" placeholder="输入问题，或上传一份资料…" aria-describedby="composer-hint" maxlength="16000"></textarea>
+        <textarea id="input" rows="2" placeholder="和 Chagent 一起工作" aria-describedby="composer-hint" maxlength="16000"></textarea>
         <div class="composer-bottom">
           <button type="button" class="round-btn" id="attach" title="上传文档（PDF / Word / Excel / 文本）"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5.5v13M5.5 12h13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           <input type="file" id="file-input" multiple hidden>
@@ -103,11 +136,11 @@
 
   <!-- 右侧工具面板 -->
   <aside id="conversation-tools" class="tools-panel" aria-label="对话产物与上下文">
-    <div class="tools-heading"><span>文件与上下文</span><button type="button" id="close-tools" class="quiet" aria-label="关闭文件面板">关闭 ×</button></div>
-    <div class="file-panel-tabs" role="tablist" aria-label="文件面板内容">
-      <button id="show-files" role="tab" aria-selected="true">文件</button>
-      <button id="show-context" role="tab" aria-selected="false">上下文</button>
-      <button id="show-history" role="tab" aria-selected="false">历史产物</button>
+    <div class="tools-heading"><span>工具</span><button type="button" id="close-tools" class="quiet" aria-label="关闭文件面板">×</button></div>
+    <div class="file-panel-tabs" role="tablist" aria-label="工具面板内容">
+      <button id="show-files" role="tab" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7A2.5 2.5 0 0 1 6 4.5h3.2c.7 0 1.4.3 1.9.8l1.2 1.2H18A2.5 2.5 0 0 1 20.5 9v8A2.5 2.5 0 0 1 18 19.5H6A2.5 2.5 0 0 1 3.5 17Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>文件</span></button>
+      <button id="show-context" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14v15H5ZM8 8h8M8 12h8M8 16h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>上下文</span></button>
+      <button id="show-history" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h8l4 4V20.5H6ZM14 3.5v4h4M9 12h6M9 16h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg><span>历史产物</span></button>
     </div>
     <section id="workspace-files" aria-label="工作区文件">
       <div class="file-toolbar">

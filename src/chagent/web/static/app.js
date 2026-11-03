@@ -4,6 +4,10 @@ const $ = id => document.getElementById(id);
 const terminal = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const state = {session: null, run: null, source: null, version: 0, before: null, sessionCursor: null,
   busy: false, loading: false, workspace: null, archived: false, query: "", readonly: false,
+  //: Which face this session resolves; null while loading or when no session is open.
+  sessionMode: null,
+  //: A PATCH is in flight, so a second click would race its response.
+  modeSwitching: false,
   active: new Map(), sources: new Map(), runMemories: new Map(), promptPrefix: ""};
 let liveText = null;
 // Streamed answer text, painted once per animation frame instead of per delta.
@@ -81,7 +85,7 @@ function updateComposer() {
   $("send").disabled = blocked;
   $("attach").disabled = state.readonly;
   $("input").disabled = state.readonly;
-  $("input").placeholder = state.readonly ? "该会话已归档，恢复后可继续" : "输入问题，或上传一份资料…";
+  $("input").placeholder = state.readonly ? "该会话已归档，恢复后可继续" : "和 Chagent 一起工作";
   $("send").title = pending ? "等待附件上传完成" : "发送";
   $("composer-hint").textContent = pending ? "附件上传中，完成后即可发送" : "Enter 发送，Shift + Enter 换行";
 }
@@ -94,10 +98,64 @@ $("input").addEventListener("input", () => { resizeComposer(); updateComposer();
 function setBusy(busy) {
   state.busy = busy;
   updateComposer();
+  updateModeSwitch();
   $("stop").hidden = !busy;
   if (busy) $("status").textContent = "正在生成…";
   else $("status").textContent = state.readonly ? ARCHIVED_HINT : "就绪";
 }
+// ---------- 会话模式开关 ----------
+// Mode decides the whole tool face, so it is shown as state, not as a setting:
+// the run in flight keeps the face it started with, and the switch is disabled
+// until it finishes. History from the other face stays as a record, unedited.
+function updateModeSwitch() {
+  const box = $("mode-switch");
+  const show = Boolean(state.config?.code_mode) && Boolean(state.session) && Boolean(state.sessionMode);
+  box.hidden = !show;
+  if (!show) return;
+  for (const button of box.querySelectorAll("button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === state.sessionMode));
+    // Archiving is not a reason to block a metadata change, but a live run is:
+    // switching under it would contradict the tools already declared to the model.
+    button.disabled = state.busy || state.loading || Boolean(state.modeSwitching);
+  }
+}
+function renderModeNote() {
+  const code = state.sessionMode === "code";
+  $("mode-note").hidden = !code;
+  $("mode-note").textContent = code
+    ? (state.config?.code_workspace_writable
+      ? "代码开发 · 允许修改工作区 · 无逐次审批 · 命令断网 · 不支持交互输入"
+      : "只读代码分析 · 工作区不可修改 · 命令断网 · 不支持交互输入") : "";
+}
+async function switchMode(mode) {
+  const id = state.session;
+  if (!id || !mode || mode === state.sessionMode || state.busy || state.loading || state.modeSwitching) return;
+  clearError();
+  // Two switches in flight would race: the row lock settles the database, but
+  // the two responses can arrive in the other order and leave the switch
+  // showing a mode the server did not end up with.
+  state.modeSwitching = true;
+  updateModeSwitch();
+  $("status").textContent = mode === "code" ? "正在检查执行隔离…" : "正在切换模式…";
+  try {
+    const session = await patch(`/api/sessions/${id}`, {mode});
+    if (id !== state.session) return;
+    state.sessionMode = session.mode;
+    $("status").textContent = mode === "code"
+      ? (state.readonly ? "已切到代码开发（会话已归档，恢复后生效）" : "已切到代码开发，下一条消息起生效")
+      : "已切回资料处理";
+  } catch (error) {
+    $("status").textContent = "模式未切换";
+    showError(error);
+  } finally {
+    state.modeSwitching = false;
+    updateModeSwitch(); renderModeNote();
+  }
+}
+$("mode-switch").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-mode]");
+  if (button && !button.disabled) switchMode(button.dataset.mode);
+});
 // The empty state's openers. Each is a task the base tool surface can finish
 // (read, search, explain), so nothing here promises a network call or a host
 // command the current configuration may refuse. They fill the composer rather
@@ -505,7 +563,7 @@ async function listSessions(append = false) {
     if (append && workspace.path !== state.workspace) continue;
     if (state.query && workspace.path !== state.workspace) continue;
     const group = document.createElement("section"); group.className = "workspace-group";
-    const heading = textNode("button", `${workspaceParent(workspace.path)}${workspaceName(workspace.path)}`, "workspace-group-title");
+    const heading = textNode("button", workspaceName(workspace.path), "workspace-group-title");
     heading.type = "button"; heading.title = workspace.path;
     heading.disabled = !workspace.available;
     heading.addEventListener("click", () => switchWorkspace(workspace.path).catch(showError));
@@ -547,7 +605,7 @@ async function listSessions(append = false) {
   }
   state.sessionCursor = currentPage?.next_cursor;
   $("more-sessions").hidden = !state.sessionCursor;
-  $("sessions-label").textContent = state.query ? "当前工作区搜索" : state.archived ? "已归档 · 按工作区" : "工作区";
+  $("sessions-label").textContent = state.query ? "当前工作区搜索" : state.archived ? "已归档 · 按项目" : "项目";
   if (currentPage) {
     $("archived-count").textContent = currentPage.archived_count || 0;
     $("archived-toggle").hidden = !currentPage.archived_count && !state.archived;
@@ -643,7 +701,11 @@ async function openSession(id, {preserveScroll = false} = {}) {
   const anchorId = anchor && anchor.dataset.messageId;
   const anchorTop = anchor && anchor.getBoundingClientRect().top;
   const version = ++state.version;
-  resetStream(); clearError(); state.session = id; state.readonly = false; state.loading = true; setBusy(false);
+  resetStream(); clearError(); state.session = id; state.readonly = false; state.loading = true;
+  // The previous session's mode must not stand in for this one while the fetch
+  // is in flight: the switch would show the wrong face under the new title.
+  state.sessionMode = null;
+  setBusy(false);
   $("messages").replaceChildren(); $("empty").hidden = true;
   $("artifacts-list").replaceChildren(textNode("p", "正在加载…", "artifacts-empty")); $("artifacts-count").textContent = "0";
   state.sources = new Map(); state.runMemories = new Map();
@@ -657,11 +719,8 @@ async function openSession(id, {preserveScroll = false} = {}) {
     if (version !== state.version) return;
     if (session.workspace !== state.workspace) await ensureWorkspace(session.workspace);
     $("session-title").textContent = session.title || "未命名会话";
-    $("mode-note").hidden = session.mode !== "code";
-    $("mode-note").textContent = session.mode === "code"
-      ? (state.config?.code_workspace_writable
-        ? "代码开发 · 允许修改工作区 · 无逐次审批 · 命令断网 · 不支持交互输入"
-        : "只读代码分析 · 工作区不可修改 · 命令断网 · 不支持交互输入") : "";
+    state.sessionMode = session.mode;
+    updateModeSwitch(); renderModeNote();
     // An archived session is still readable; only new input is refused. The
     // server enforces the same rule, this is the part the user can see.
     state.readonly = Boolean(session.archived_at);
@@ -1205,7 +1264,9 @@ $("new-session").addEventListener("click", async () => {
   try {
     // A new session is never archived: leave that view so it is visible.
     if (state.archived) showArchived(false);
-    const session = await post("/api/sessions", {title: "新会话", workspace: state.workspace, mode: $("new-mode").value || "work"});
+    const mode = $("new-mode").value || "work";
+    localStorage.setItem("chagent.mode", mode);
+    const session = await post("/api/sessions", {title: "新会话", workspace: state.workspace, mode});
     await listSessions(); await openSession(session.id); $("input").focus();
   } catch (error) { showError(error); }
 });
@@ -1234,6 +1295,16 @@ $("more-sessions").addEventListener("click", () => listSessions(true).catch(show
 // Search and the archived view are two filters on the same request; each one
 // re-reads the first page rather than patching the list in place.
 let searchTimer = null;
+$("search-sessions").addEventListener("click", () => {
+  const input = $("session-search");
+  input.hidden = !input.hidden;
+  $("search-sessions").setAttribute("aria-expanded", String(!input.hidden));
+  if (!input.hidden) { input.focus(); return; }
+  if (input.value) {
+    input.value = ""; state.query = ""; state.sessionCursor = null;
+    listSessions().catch(showError);
+  }
+});
 $("session-search").addEventListener("input", event => {
   const value = event.target.value.trim();
   clearTimeout(searchTimer);
@@ -1245,6 +1316,7 @@ $("session-search").addEventListener("input", event => {
 function showArchived(archived) {
   state.archived = archived; state.sessionCursor = null;
   $("archived-toggle").setAttribute("aria-pressed", String(archived));
+  $("rail-archive").setAttribute("aria-pressed", String(archived));
   $("archived-toggle").hidden = false;
 }
 $("archived-toggle").addEventListener("click", () => {
@@ -1326,7 +1398,10 @@ async function init() {
   state.config = await api("/api/config");
   $("code-mode-option").textContent = state.config.code_workspace_writable ? "代码开发" : "只读代码分析";
   $("mode-picker").hidden = !info.code_mode;
-  $("new-mode").value = "work";
+  // Remembered like the workspace: a model that cannot execute is usually a
+  // session created in the wrong mode, and re-picking it every time is how that
+  // happens. A remembered "code" is ignored by a build without that face.
+  $("new-mode").value = localStorage.getItem("chagent.mode") === "code" && info.code_mode ? "code" : "work";
   $("model").textContent = `${info.provider} / ${info.model}`;
   const stored = localStorage.getItem("chagent.workspace");
   if (stored && stored !== info.workspace) {
@@ -1374,6 +1449,7 @@ function applyCollapsed(name, collapsed) {
   }
   document.body.classList.toggle(`${name}-collapsed`, collapsed);
   $(name === "sidebar" ? "toggle-sidebar" : "toggle-tools").setAttribute("aria-expanded", String(!collapsed));
+  if (name === "tools") $("rail-files").setAttribute("aria-expanded", String(!collapsed));
   syncDrawers();
   window.dispatchEvent?.(new CustomEvent("chagent-panels-changed"));
   if ((name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches)) return;
@@ -1402,6 +1478,18 @@ $("toggle-sidebar").addEventListener("click", () =>
   applyCollapsed("sidebar", !document.body.classList.contains("sidebar-collapsed")));
 $("toggle-tools").addEventListener("click", () =>
   applyCollapsed("tools", !document.body.classList.contains("tools-collapsed")));
+
+// The compact rail is a second route to real, existing actions. Keeping these
+// as forwarded clicks avoids diverging dialog, session and drawer behavior.
+$("rail-home").addEventListener("click", () => $("new-session").click());
+$("rail-workspace").addEventListener("click", () => $("workspace-button").click());
+$("rail-files").addEventListener("click", () => window.ChagentShowFiles());
+$("rail-memory").addEventListener("click", () => $("open-memory").click());
+$("rail-config").addEventListener("click", () => $("open-config").click());
+$("rail-archive").addEventListener("click", () => {
+  if (narrow.matches) applyCollapsed("sidebar", false);
+  $("archived-toggle").click();
+});
 
 // Memory management is explicit user input; generated candidates never auto-activate.
 const memoryState = {cursor: null, editing: null, version: 0};

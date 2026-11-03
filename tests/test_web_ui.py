@@ -1,9 +1,10 @@
 """The web surface may only show controls that do something.
 
-Z1 removed 24 buttons that were drawing, not working: the home rail, a fake tab,
-a browser bar and three tool cards. This module is why they stay gone. A button
-must either carry an ``id`` that ``app.js`` looks up, or be a submit control
-inside a form whose ``submit`` the script handles.
+Z1 removed 24 buttons that were drawing, not working: a fake tab, a browser bar
+and three tool cards. The reference-inspired rail added later contains only
+shortcuts to existing, functional actions. A button must either carry an ``id``
+that ``app.js`` looks up, or be a submit control inside a form whose ``submit``
+the script handles.
 
 The reverse direction is checked too: every ``$("id")`` in the script must still
 exist in the markup, so deleting an element without its handler fails here
@@ -26,14 +27,11 @@ STYLES = (STATIC / "style.css").read_text(encoding="utf-8")
 # Created by app.js at runtime (approval prompt), so it has no markup of its own.
 RUNTIME_IDS = {"approval"}
 
-# Classes and ids that belonged to controls Z1 deleted. A leftover class means
-# either the element or half its CSS came back.
+# Classes and ids that belonged to placeholder controls Z1 deleted. A leftover
+# class means either the element or half its CSS came back.
 REMOVED_TOKENS = (
-    "rail-top", "rail-bottom", "head-actions", "side-row", "fake-tab", "tab-x",
-    "browser-bar", "url-pill", "tool-card", "tool-ico", "tool-extra",
-    # Z6: the rail itself. One workspace button is not a navigation column, and
-    # #workspace-button in the sidebar foot already does the same job.
-    "rail", "rail-icon", "rail-avatar",
+    "head-actions", "side-row", "fake-tab", "tab-x", "browser-bar", "url-pill",
+    "tool-card", "tool-ico", "tool-extra",
 )
 REMOVED_IDS = ("brand", "open-context")
 
@@ -80,16 +78,18 @@ class WebSurfaceTests(unittest.TestCase):
                 continue
             if attrs.get("type") == "submit" and form and f'$("{form}").addEventListener("submit"' in SCRIPT:
                 continue
+            # Delegated handler: the group is looked up and the child is chosen by
+            # its data attribute, which is how a two-state switch stays one handler.
+            if attrs.get("data-mode") and "mode-switch" in self.lookups:
+                continue
             orphans.append(self.label(attrs))
         self.assertEqual(orphans, [], f"这些按钮没有任何行为：{orphans}")
 
     def test_button_surface_is_pinned(self):
-        # 44 buttons minus the 24 Z1 deleted, plus Z2/Z3's session search toggle
-        # and usage pill, and the usage dialog's close button; Z6 removed the
-        # rail's workspace button; WK1 added the "回到最新" scroll button, which
-        # only exists so a reader who scrolled up can rejoin the stream.
-        # A visible close control also dismisses the narrow tools drawer.
-        self.assertEqual(len(self.page.buttons), 48)
+        # The original 50 controls plus six functional rail shortcuts and the
+        # sidebar search disclosure. Every added button must still pass the
+        # handler check above; this count only prevents accidental duplicates.
+        self.assertEqual(len(self.page.buttons), 57)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)
@@ -108,12 +108,11 @@ class WebSurfaceTests(unittest.TestCase):
         chips = [attrs for attrs, _ in self.page.buttons if "tool-chip" in attrs.get("class", "").split()]
         self.assertEqual([attrs.get("id") for attrs in chips], ["open-config"])
 
-    def test_the_shell_is_one_column(self):
-        # A single 60px icon strip with one button duplicated a control that is
-        # already labelled in the sidebar foot; it also carried an avatar for a
-        # user this single-user app does not have.
-        self.assertNotIn('class="rail"', MARKUP)
-        self.assertNotIn(".rail", STYLES)
+    def test_reference_rail_contains_only_real_shortcuts(self):
+        self.assertIn('class="rail"', MARKUP)
+        rail_ids = {"rail-home", "rail-workspace", "rail-files", "rail-memory", "rail-config", "rail-archive"}
+        self.assertTrue(rail_ids.issubset(self.page.ids))
+        self.assertTrue(rail_ids.issubset(self.lookups))
 
     def test_empty_state_offers_only_real_openers(self):
         # Starters are built in app.js, so the markup holds the container only:
