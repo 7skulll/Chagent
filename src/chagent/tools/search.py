@@ -21,7 +21,7 @@ from chagent.tools.workspace import MAX_FILE_BYTES, WorkspaceFS
 # Vendored, generated and cache directories are never useful hits and can
 # dominate the scan cost of a large workspace.
 SKIPPED_DIRECTORIES = frozenset({
-    ".git", ".hg", ".svn", ".venv", "venv", "node_modules", "__pycache__",
+    ".chagent", ".git", ".hg", ".svn", ".venv", "venv", "node_modules", "__pycache__",
     ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", "dist", "build",
     ".next", "target", ".idea", ".vscode",
 })

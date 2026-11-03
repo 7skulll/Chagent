@@ -1,43 +1,41 @@
-"""Create session-owned text downloads without accessing the workspace."""
+"""Generate real workspace files; collisions become durable host confirmations."""
 import asyncio
-from pathlib import PurePath
-from uuid import uuid4
-
+from pathlib import PurePosixPath
 from chagent.domain.messages import TextContent
 from chagent.tools.base import AgentTool, AgentToolResult
+from chagent.outputs import OutputService
 
 
 class CreateFileTool(AgentTool):
     def __init__(self, database):
-        super().__init__(name="create_file", label="Create downloadable file", requires_workspace=True,
-            description="Create a downloadable text file for this conversation when the user requests a file. "
-                        "Provide the complete content and a meaningful filename ending in .md, .txt, .csv or .json. "
-                        "This saves a conversation artifact, not a workspace file. Never claim a file exists unless this tool succeeds.",
-            parameters={"type": "object", "properties": {
-                "filename": {"type": "string", "minLength": 1, "maxLength": 160},
-                "content": {"type": "string", "maxLength": 200000}},
-                "required": ["filename", "content"], "additionalProperties": False})
+        super().__init__(name='create_file', label='Create workspace file', requires_workspace=True,
+            mutates_workspace=True, execution_mode='sequential', replay='never',
+            description='Create a UTF-8 output file in the workspace (root by default). filename may include an existing subdirectory. '
+                        'A name collision creates a host confirmation; never claim it was saved while pending. '
+                        'Use edit_file with a read SHA256 to edit an existing file; do not use this tool to bypass output confirmation.',
+            parameters={'type':'object','properties':{'filename':{'type':'string','minLength':1,'maxLength':4096},
+                        'content':{'type':'string','maxLength':1_048_576}},'required':['filename','content'],'additionalProperties':False})
         self.database = database
 
     async def execute(self, tool_call_id, params, signal=None, on_update=None, *, context=None):
         if signal is not None and signal.is_set():
             raise asyncio.CancelledError()
         if context is None or context.session_id is None or context.run_id is None:
-            raise PermissionError("File creation requires a session and run")
-        name = params["filename"].strip()
-        if (not name or name in {".", ".."} or "/" in name or "\\" in name or
-                any(ord(ch) < 32 or ord(ch) == 127 for ch in name) or
-                PurePath(name).suffix.lower() not in {".md", ".txt", ".csv", ".json"}):
-            raise ValueError("Filename must be a plain .md, .txt, .csv or .json filename")
-        content = params["content"]
+            raise PermissionError('File creation requires a session and run')
+        name = params['filename']
+        if PurePosixPath(name).suffix.lower() not in {'.md','.txt','.csv','.json','.py','.js','.ts','.html','.css','.yaml','.yml','.xml','.sql','.sh'}:
+            raise ValueError('Output must be a supported text filename')
         async with self.database.connection() as connection:
-            cursor = await connection.execute(
-                "INSERT INTO generated_files (id, session_id, run_id, tool_call_id, name, content) "
-                "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (run_id, tool_call_id) "
-                "DO UPDATE SET tool_call_id = EXCLUDED.tool_call_id "
-                "RETURNING id, name, content", (uuid4(), context.session_id, context.run_id, tool_call_id, name, content))
+            cursor = await connection.execute('SELECT workspace_id FROM sessions WHERE id=%s', (context.session_id,))
             row = await cursor.fetchone()
-            if row["name"] != name or row["content"] != content:
-                raise ValueError("Tool call already created a different file")
-        return AgentToolResult(content=[TextContent(f"Created downloadable file: {name}")],
-            details={"generated_file": {"id": str(row["id"]), "name": name, "size": len(content.encode('utf-8'))}})
+        if row is None:
+            raise ValueError('Session does not exist')
+        output = await OutputService(self.database).submit(row['workspace_id'], context.workspace, name,
+            params['content'].encode('utf-8'), source='agent-output', session_id=context.session_id,
+            run_id=context.run_id, tool_call_id=tool_call_id, workspace_identity=context.workspace_identity)
+        saved = output['status']=='committed'
+        descriptor = {'id':str(output['id']), 'workspace_id':str(output['workspace_id']),
+                      'path':output['output_path'] if saved else output['path'], 'name':PurePosixPath(name).name,
+                      'size':output['size'], 'status':output['status']}
+        return AgentToolResult(content=[TextContent(('Saved workspace file: ' if saved else 'Not saved; awaiting host collision confirmation: ')+descriptor['path'])],
+                               details={'workspace_file':descriptor, 'output_id':str(output['id'])})

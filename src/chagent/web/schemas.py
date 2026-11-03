@@ -153,8 +153,12 @@ class AppInfo(BaseModel):
 
 
 class WorkspaceView(BaseModel):
+    id: UUID | None = None
     path: Path
     sessions: int
+    last_used: datetime | None = None
+    available: bool = True
+    reason: str | None = None
 
 
 class WorkspacePage(BaseModel):
@@ -163,6 +167,7 @@ class WorkspacePage(BaseModel):
 
 class WorkspaceCreate(InputModel):
     path: Annotated[StrictStr, Field(min_length=1, max_length=4096)]
+    touch: StrictBool = True
 
 
 class ConfigView(BaseModel):
@@ -178,6 +183,7 @@ class ConfigView(BaseModel):
     sandbox: str
     sandbox_network: bool
     workspace_writable: bool
+    code_workspace_writable: bool = False
     process_stdin: bool
     readonly_code: bool
     execution_profile: str

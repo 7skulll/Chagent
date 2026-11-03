@@ -99,7 +99,7 @@ globalThis.document = {
   addEventListener() {}, body: makeEl("body"),
 };
 const MEDIA = new Map();
-globalThis.window = {matchMedia: query => {
+globalThis.window = {addEventListener() {}, matchMedia: query => {
   if (!MEDIA.has(query)) MEDIA.set(query, {matches: false, addEventListener(type, fn) { this.changed = fn; }});
   return MEDIA.get(query);
 }};
@@ -150,13 +150,13 @@ const MESSAGES = [
 ];
 const ROUTES = {
   "/api/info": {provider: "demo", model: "fake", workspace: "/tmp", default_mode: "work", code_mode: false},
-  ["/api/sessions/" + SESSION]: {id: SESSION, title: "冒烟", archived_at: null, latest_run: {id: RUN2, status: "completed"}},
+  ["/api/sessions/" + SESSION]: {id: SESSION, workspace: "/tmp", title: "冒烟", archived_at: null, latest_run: {id: RUN2, status: "completed"}},
   ["/api/sessions/" + SESSION + "/messages"]: {items: MESSAGES, next_before: null},
   ["/api/sessions/" + SESSION + "/files"]: {items: [{id:"file-1", name:"故事.md", size:42}]},
   ["/api/sessions/" + SESSION + "/sources"]: {runs: [{run_id: RUN2, memories: [{id: "mem1", key: "project.db",
     scope: "workspace", revision: 1, content: "使用 PostgreSQL", pinned: true, origin: "manual"}]}]},
   ["/api/sessions/" + SESSION + "/usage"]: {totals: {total_tokens: 0}},
-  "/api/workspaces": {path: "/tmp"},
+  "/api/workspaces": {path: "/tmp", items: [{id: "w1", path: "/tmp", available: true, sessions: 1}]},
   "/api/sessions": {items: [], next_cursor: null, archived_count: 0},
   "/api/runs?active=true": {items: []},
 };
@@ -170,6 +170,7 @@ globalThis.fetch = async (path, options) => {
 
 require(process.cwd() + "/markdown.js");
 globalThis.window.ChagentMarkdown = globalThis.ChagentMarkdown;
+localStorage.setItem("chagent.workspace", "/tmp");
 localStorage.setItem("chagent.session", SESSION);
 eval(require("fs").readFileSync(process.cwd() + "/app.js", "utf8") + "\nglobalThis.testOpenSession = openSession; globalThis.testSetFollow = value => {follow = value;};");
 

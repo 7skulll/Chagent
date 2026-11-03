@@ -6,6 +6,7 @@ from hashlib import sha256
 from heapq import nsmallest
 import json
 import os
+import stat
 
 from chagent.domain.messages import JsonObject, TextContent
 from chagent.documents import ParseCache, is_binary_document, parse_with_cache
@@ -55,7 +56,13 @@ class FileTool(AgentTool):
             raise asyncio.CancelledError()
         if context is None:
             raise PermissionError("A session workspace is required")
-        filesystem = WorkspaceFS(context.workspace, expected_identity=context.workspace_identity)
+        from chagent.files import FileService
+        versions = params.get("versions", {})
+        if params.get("expected_sha256") and params.get("path"):
+            probe = WorkspaceFS(context.workspace)
+            versions = {"/".join(probe.parts(params["path"])): params["expected_sha256"]}
+        filesystem = FileService(context.workspace, expected_identity=context.workspace_identity,
+                                 allow_absolute=True, require_versions=getattr(self, "versioned_files", False), versions=versions)
         # Every file tool runs off the event loop, writes included. edit_file
         # searches for a near match when the exact text is absent, and that
         # search is quadratic in the size of old_text: a failing 40-line edit on
@@ -64,9 +71,41 @@ class FileTool(AgentTool):
         # process, and the tool timeout itself, which can only fire at an
         # await point. Serialisation between writes is the scheduler's job, not
         # the loop's: one workspace gate admits a single writer at a time.
-        task = asyncio.create_task(asyncio.to_thread(self.handle, filesystem, params))
+        def coordinated_handle():
+            if self.read_only:
+                return self.handle(filesystem, params)
+            from chagent.tools.workspace import workspace_lock
+            with workspace_lock(filesystem.root):
+                return self.handle(filesystem, params)
+        task = asyncio.create_task(asyncio.to_thread(coordinated_handle))
         try:
-            return await asyncio.shield(task)
+            result = await asyncio.shield(task)
+            database = getattr(self, "database", None)
+            if database is not None and (not self.read_only or self.name == "read_file"):
+                from chagent.outputs import OutputService
+                async with database.connection() as connection:
+                    cursor = await connection.execute("SELECT id FROM workspaces WHERE root_path=%s", (str(filesystem.root),))
+                    row = await cursor.fetchone()
+                if row:
+                    details = result.details if isinstance(result.details, dict) else {}
+                    paths = [item["path"] for item in details.get("files", [])] or [params.get("path", "")]
+                    links = []
+                    for path in paths:
+                        relative = '/'.join(filesystem.parts(path))
+                        if not self.read_only:
+                            await OutputService(database).record(row['id'], 'agent', self.name, relative)
+                        try:
+                            with filesystem.parent(path) as (parent, name):
+                                info = filesystem.object_info(parent, name)
+                            if stat.S_ISREG(info.st_mode):
+                                links.append({'workspace_id':str(row['id']), 'path':relative, 'name':name,
+                                              'status':'committed', 'size':info.st_size})
+                        except OSError:
+                            pass  # Deleted/moved files have no current download link.
+                    if links:
+                        details['workspace_files'] = links
+                        result.details = details
+            return result
         except asyncio.CancelledError:
             # A thread cannot be forcibly cancelled. Drain it before releasing
             # its scheduler slot so late reads cannot cross a write barrier and
@@ -266,3 +305,13 @@ def _edit_pair(entry: dict, index: int) -> tuple[str, str]:
     if not isinstance(new_text, str):
         raise ValueError(f"edits[{index}].new_text must be a string")
     return old_text, new_text
+
+
+class CreateDirectoryTool(FileTool):
+    def __init__(self):
+        super().__init__('create_directory', 'Create one workspace directory in an existing parent; never overwrite or recursively create implicit parents.',
+                         {'path': PATH_SCHEMA}, ['path'], read_only=False)
+
+    def handle(self, filesystem, params):
+        filesystem.create(params['path'], 'directory')
+        return text_result('Created directory: '+params['path'], {'path':params['path'], 'type':'directory'})

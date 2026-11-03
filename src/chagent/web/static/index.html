@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/markdown.js" defer></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/file-editor.js" defer></script>
 </head>
 <body>
   <!-- 会话侧栏：唯一的一级导航。图标栏在 Z1 删到只剩一个工作区按钮（侧栏底部已有
@@ -42,6 +43,8 @@
   </aside>
 
   <div id="scrim" class="scrim" aria-hidden="true"></div>
+
+  <div id="sidebar-resize" class="column-resize" role="separator" aria-label="调整导航宽度" tabindex="0"></div>
 
   <!-- 中间聊天区 -->
   <main class="chat">
@@ -96,21 +99,71 @@
     </footer>
   </main>
 
+  <div id="files-resize" class="column-resize" role="separator" aria-label="调整文件面板宽度" tabindex="0"></div>
+
   <!-- 右侧工具面板 -->
   <aside id="conversation-tools" class="tools-panel" aria-label="对话产物与上下文">
     <div class="tools-heading"><span>文件与上下文</span><button type="button" id="close-tools" class="quiet" aria-label="关闭文件面板">关闭 ×</button></div>
-    <div class="tools-body">
+    <div class="file-panel-tabs" role="tablist" aria-label="文件面板内容">
+      <button id="show-files" role="tab" aria-selected="true">文件</button>
+      <button id="show-context" role="tab" aria-selected="false">上下文</button>
+      <button id="show-history" role="tab" aria-selected="false">历史产物</button>
+    </div>
+    <section id="workspace-files" aria-label="工作区文件">
+      <div class="file-toolbar">
+        <button id="file-refresh" title="刷新目录与磁盘状态">刷新</button>
+        <button id="file-new">新建文件</button><button id="folder-new">新建文件夹</button>
+        <button id="file-rename">重命名</button><button id="file-delete">删除</button><button id="file-trash">回收站</button>
+        <label><input id="file-hidden" type="checkbox">隐藏文件</label>
+      </div>
+      <div id="file-notice" role="status">选择工作区后浏览文件</div>
+      <div id="file-tree" role="tree" aria-label="文件树"></div>
+      <div id="tree-resize" role="separator" aria-label="调整文件树高度" tabindex="0"></div>
+      <div id="file-tabs" role="tablist" aria-label="已打开文件"></div>
+      <div class="editor-actions">
+        <span id="file-path">未打开文件</span><span id="file-state"></span>
+        <button id="file-save">保存 ⌘S</button><button id="file-save-as">另存为</button><button id="file-markdown">Markdown 预览</button>
+      </div>
+      <label for="file-editor" class="sr-only">文件内容</label>
+      <textarea id="file-editor" spellcheck="false" wrap="off" hidden></textarea>
+      <div id="file-markdown-view" class="md" hidden></div>
+      <div id="file-conflict" hidden>
+        <p>磁盘文件已变化，草稿已保留。</p>
+        <button id="file-view-disk">查看磁盘版本</button><button id="file-overwrite">确认覆盖…</button>
+      </div>
+      <div id="file-confirmations" aria-live="polite"></div>
+    </section>
+    <div class="tools-body" id="file-history-pane" hidden>
       <section class="artifacts-panel" aria-labelledby="artifacts-heading">
         <div class="artifacts-heading"><h2 id="artifacts-heading">对话产物</h2><span id="artifacts-count">0</span></div>
         <p class="artifacts-intro">本会话中生成的文件</p>
         <div id="artifacts-list" class="artifacts-list" aria-live="polite"><p class="artifacts-empty">选择会话后查看文件。</p></div>
       </section>
+    </div>
+    <div class="tools-body" id="file-context-pane" hidden>
       <details id="context-panel">
         <summary>上下文与会话摘要</summary>
         <div id="context-info">选择会话后可查看。</div>
       </details>
     </div>
   </aside>
+
+  <dialog id="file-name-dialog" aria-labelledby="file-name-title">
+    <h2 id="file-name-title">文件名称</h2>
+    <form id="file-name-form">
+      <label for="file-name-input">名称或相对路径</label>
+      <input id="file-name-input" required maxlength="4096" autocomplete="off">
+      <div class="file-name-actions"><button id="file-name-submit" type="submit">确定</button><button id="file-name-cancel" type="button">取消</button></div>
+    </form>
+  </dialog>
+  <dialog id="file-choice-dialog" aria-labelledby="file-choice-title">
+    <h2 id="file-choice-title">未保存的修改</h2><p id="file-choice-message"></p>
+    <div id="file-choice-actions"></div>
+  </dialog>
+  <dialog id="file-disk-dialog" aria-labelledby="file-disk-title">
+    <h2 id="file-disk-title">磁盘版本</h2><pre id="file-disk-content"></pre>
+    <button id="file-disk-close">关闭</button>
+  </dialog>
 
   <dialog id="memory-dialog" aria-labelledby="memory-heading">
     <div class="memory-heading"><div><h2 id="memory-heading">长期记忆</h2><p>用户偏好跨工作区使用，项目事实仅用于当前工作区。</p></div><button id="close-memory" class="quiet" aria-label="关闭记忆">关闭 ×</button></div>
@@ -132,11 +185,12 @@
     <div id="workspace-notice" role="status"></div>
     <div id="workspace-list" class="workspace-list"></div>
     <form id="workspace-form">
-      <label for="workspace-path">打开其他目录</label>
+      <button type="button" id="native-workspace-picker">打开文件夹…</button>
+      <label for="workspace-path">或手工输入本机目录</label>
       <input id="workspace-path" placeholder="~/projects/example" required maxlength="4096">
       <button type="submit">打开</button>
     </form>
-    <p class="memory-footnote">打开过的目录列在上方，按最近活跃排序；服务重启后需要重新打开一次。</p>
+    <p class="memory-footnote">打开过的目录按最近打开排序；重启后恢复列表并重新检查目录。不可用目录保留历史记录。</p>
   </dialog>
 
   <dialog id="config-dialog" aria-labelledby="config-heading">

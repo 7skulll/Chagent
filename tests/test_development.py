@@ -26,7 +26,7 @@ class DevelopmentTests(unittest.TestCase):
         self.addCleanup(sandbox.close)
         return create_runner(MagicMock(), Model('fake', 'local', 'fake', 8192, 512), FakeModelClient(),
                              code_mode=True, allow_host_commands=True, sandbox=sandbox,
-                             allow_workspace_writes=False, code_workspace_writes=settings.trusted_development,
+                             allow_workspace_writes=True, code_workspace_writes=settings.trusted_development,
                              process_stdin=False, approval_policy=ApprovalPolicy.from_settings(settings))
 
     def test_profile_is_explicit_and_env_parses_it(self):
@@ -51,15 +51,15 @@ class DevelopmentTests(unittest.TestCase):
                 replace(good, **changes)
         self.assertEqual(Settings(approval='untrusted').approval, 'untrusted')
 
-    def test_code_writes_do_not_expand_work_or_stdin(self):
+    def test_work_and_code_share_file_writes_without_stdin(self):
         cfg = development_settings()
         runner = self.runner(cfg)
         validate_web_runner(cfg, runner)
         names = lambda mode: {t.name for t in runner.tool_faces[mode].registry.definitions()}
         self.assertEqual(WRITE_TOOLS & names('code'), WRITE_TOOLS)
-        self.assertFalse(WRITE_TOOLS & names('work'))
+        self.assertEqual(WRITE_TOOLS & names('work'), WRITE_TOOLS)
         self.assertIn('create_file', names('work'))
-        self.assertNotIn('create_file', names('code'))
+        self.assertIn('create_file', names('code'))
         self.assertEqual(set(runner.tool_faces['code'].registry.get('process').allowed_actions), {'read','stop'})
         self.assertFalse(runner.scheduler.policy.requires_approval('exec_command', {'cmd':'echo test'}, sandbox='isolated'))
 

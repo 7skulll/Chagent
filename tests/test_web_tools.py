@@ -299,7 +299,7 @@ class WebAccessTests(unittest.TestCase):
     def test_a_key_registers_both_tools_alongside_the_work_face(self):
         registry = create_builtin_registry(mode="work", web=WebAccess("ds-k"))
         names = [item.name for item in registry.definitions()]
-        self.assertEqual(names, ["apply_patch", "edit_file", "glob", "grep", "list_dir",
+        self.assertEqual(names, ["apply_patch", "create_directory", "edit_file", "glob", "grep", "list_dir",
                                  "read_file", "web_fetch", "web_search", "write_file"])
         declaration = registry.get("web_search").declaration()
         self.assertEqual(declaration.parameters["required"], ["query"])

@@ -140,7 +140,7 @@ def main():
     if selected is not None:
         print(f"Resolved: {selected.describe()}", flush=True)
     # Report the web code capability; work remains read-only.
-    print(f"Behavior: {describe_behavior(settings, compaction, workspace_writes=settings.trusted_development)}", flush=True)
+    print(f"Behavior: {describe_behavior(settings, compaction, workspace_writes=True)}", flush=True)
     for warning in describe_warnings(settings):
         print(f"Warning: {warning}", flush=True)
     print(f"Chagent 网页：{url}（工作区 {Path(args.workspace).expanduser().resolve()}）", flush=True)

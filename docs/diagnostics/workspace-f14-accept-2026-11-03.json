@@ -1,0 +1,168 @@
+{
+  "at": "2026-11-03T10:32:25.159111+00:00",
+  "base": "http://127.0.0.1:8901",
+  "workspace": "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-f14-wsA.Ktb0",
+  "other": "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-f14-wsB.A9eh",
+  "checks": [
+    {
+      "name": "F1 same directory reuses one workspace",
+      "passed": true,
+      "detail": {
+        "id": "e491ce6f-b12f-4f47-b445-ad92cadbfe8e",
+        "sessions": 0
+      }
+    },
+    {
+      "name": "F1 source directory is rejected and not registered",
+      "passed": true,
+      "detail": 400
+    },
+    {
+      "name": "F1 session list is workspace-scoped",
+      "passed": true,
+      "detail": {
+        "sessions": 1
+      }
+    },
+    {
+      "name": "F1 deleted directory stays listed but unavailable",
+      "passed": true,
+      "detail": {
+        "available": false,
+        "files": 403
+      }
+    },
+    {
+      "name": "F2 root listing hides internal paths",
+      "passed": true,
+      "detail": [
+        "README.md",
+        "binary.bin",
+        "data.csv",
+        "notes-crlf.txt",
+        "src",
+        "uploads"
+      ]
+    },
+    {
+      "name": "F2 directory pagination",
+      "passed": true,
+      "detail": {
+        "first": 2,
+        "last": 1
+      }
+    },
+    {
+      "name": "F2 read returns version, identity and newline",
+      "passed": true,
+      "detail": {
+        "version": "bac3f17adea0",
+        "newline": "lf"
+      }
+    },
+    {
+      "name": "F2 stale save is rejected without touching disk",
+      "passed": true,
+      "detail": {
+        "stale": 409
+      }
+    },
+    {
+      "name": "F2 CRLF bytes survive a save",
+      "passed": true,
+      "detail": {
+        "newline": "crlf"
+      }
+    },
+    {
+      "name": "F2 binary and traversal are refused",
+      "passed": true,
+      "detail": {
+        "binary": 400,
+        "traversal": "rejected"
+      }
+    },
+    {
+      "name": "F2 create, duplicate and missing parent",
+      "passed": true,
+      "detail": {
+        "create": 201,
+        "duplicate": 409,
+        "missing_parent": 404
+      }
+    },
+    {
+      "name": "F2 rename is identity-checked and never overwrites",
+      "passed": true,
+      "detail": {
+        "rename": 200,
+        "stale": 409,
+        "collision": 409
+      }
+    },
+    {
+      "name": "F2 recycle, collision and restore as new name",
+      "passed": true,
+      "detail": {
+        "recycle": 201,
+        "collision": 409,
+        "restore": 200
+      }
+    },
+    {
+      "name": "F2 concurrent saves have one winner",
+      "passed": true,
+      "detail": {
+        "statuses": [
+          200,
+          409
+        ]
+      }
+    },
+    {
+      "name": "F2 download is an attachment with exact bytes",
+      "passed": true,
+      "detail": {
+        "bytes": 8
+      }
+    },
+    {
+      "name": "F4 new output commits, collision waits and token rotates",
+      "passed": true,
+      "detail": {
+        "direct": "committed",
+        "pending": "confirmed",
+        "statuses": [
+          200,
+          409
+        ]
+      }
+    },
+    {
+      "name": "F4 keep-both and cancel do not overwrite",
+      "passed": true,
+      "detail": {
+        "keep_both": "keep-1.md",
+        "cancel": 200
+      }
+    },
+    {
+      "name": "F4 output request is idempotent and scoped",
+      "passed": true,
+      "detail": {
+        "idempotent": true
+      }
+    },
+    {
+      "name": "F4 upload collision is pending and cancellable",
+      "passed": true,
+      "detail": {
+        "committed": 201,
+        "collision": 202,
+        "cancel": 200
+      }
+    }
+  ],
+  "passed": 19,
+  "total": 19
+}

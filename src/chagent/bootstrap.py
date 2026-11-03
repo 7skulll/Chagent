@@ -35,6 +35,7 @@ def _tool_faces(
     allow_workspace_writes: bool = True,
     code_workspace_writes: bool | None = None,
     process_stdin: bool = True,
+    versioned_files: bool = False,
 ) -> dict[str, ToolExecutor]:
     """One executor per enabled mode, built once per runner.
 
@@ -63,7 +64,7 @@ def _tool_faces(
             mode=mode, allow_host_commands=allow_host_commands,
             allow_workspace_writes=(code_workspace_writes if mode == "code" and code_workspace_writes is not None
                                     else allow_workspace_writes),
-            process_stdin=process_stdin,
+            process_stdin=process_stdin, versioned_files=versioned_files,
             artifacts=ArtifactRepository(database), sandbox=sandbox,
             processes=processes, web=web, include_echo=include_echo,
         )
@@ -91,9 +92,10 @@ def create_demo_runner(
     web: WebAccess | None = None,
     work_only: bool = False,
     allow_workspace_writes: bool = True,
+    versioned_files: bool = False,
 ) -> AgentRunner:
     return create_runner(
-        database, Model(id="fake-echo", provider="local-test", api="fake", context_window=8192, max_tokens=512),
+        database, Model(id="fake-echo", provider="local-test", api="fake", context_window=12_288, max_tokens=512),
         FakeModelClient(tool_name, tool_arguments), allow_host_commands=allow_host_commands,
         context_policy=context_policy, token_counter=token_counter, compaction_policy=compaction_policy, timeout=60, max_turns=max_turns,
         memory_policy=memory_policy,
@@ -111,7 +113,7 @@ def create_demo_runner(
         # a model drives; it is asserted on ``create_runner`` and on
         # ``create_builtin_registry``, not here.
         code_mode=not work_only, single_face=not work_only,
-        allow_workspace_writes=allow_workspace_writes,
+        allow_workspace_writes=allow_workspace_writes, versioned_files=versioned_files,
         # ``echo`` is the neutral tool that needs no filesystem: this is the only
         # path that gets it.
         include_echo=True,
@@ -142,6 +144,7 @@ def create_runner(
     single_face: bool = False,
     code_workspace_writes: bool | None = None,
     process_stdin: bool = True,
+    versioned_files: bool = False,
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -151,7 +154,7 @@ def create_runner(
     faces = _tool_faces(database, code_mode=code_mode, allow_host_commands=allow_host_commands,
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
                         single_face=single_face, allow_workspace_writes=allow_workspace_writes,
-                        code_workspace_writes=code_workspace_writes, process_stdin=process_stdin)
+                        code_workspace_writes=code_workspace_writes, process_stdin=process_stdin, versioned_files=versioned_files)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))

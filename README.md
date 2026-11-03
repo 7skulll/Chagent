@@ -2,9 +2,9 @@
 
 本机单用户 Agent：在本地网页对话，Python 进程调用模型和工具，PostgreSQL 保存可检查的历史、请求、工具结果与事件。
 
-默认使用 **work 模式**读取资料、理解文档、生成可下载文本。网页现支持按配置开启 **只读代码分析**：读代码、查看 Git 历史与差异、运行适用测试；工作区由内核禁写，命令断网，process 仅 read/stop。显式 `trusted-development` 配置现支持网页可写 code：创建、编辑、命令和测试无需逐次审批；命令仍隔离断网，process 仅 read/stop。CLI work 仍保留既有写工具。支持范围见[实施计划](docs/实施计划.md)。
+默认使用 **work 模式**读取资料、理解文档、修改文件并生成工作区输出。右侧文件面板支持文本多标签编辑、手动保存、版本冲突与回收恢复。网页现支持按配置开启 **只读代码分析**：读代码、查看 Git 历史与差异、运行适用测试；工作区由内核禁写，命令断网，process 仅 read/stop。显式 `trusted-development` 配置现支持网页可写 code：创建、编辑、命令和测试无需逐次审批；命令仍隔离断网，process 仅 read/stop。普通 work 与可写 code 共用文件工具，显式只读 code 保持禁写。支持范围见[实施计划](docs/实施计划.md)。
 
-可信开发配置借鉴 pi 的直接工具循环，复用现有 Runner 与工具，在工作区与 isolated 边界内完成创建、修改、执行、测试及修复；work 保持禁写。配置方法见[模型配置](docs/模型配置.md)，真实验收见[开发版验收](docs/代码开发验收-2026-11-03.md)。后续优先验证真实项目，再完善交互审批、网络和扩展回归。
+可信开发配置借鉴 pi 的直接工具循环，复用现有 Runner 与工具，在工作区与 isolated 边界内完成创建、修改、执行、测试及修复；work 现已允许工作区文件编辑，见[工作区 F1–F4 实施与验收](docs/工作区F1-F4验收-2026-11-03.md)。配置方法见[模型配置](docs/模型配置.md)，真实验收见[开发版验收](docs/代码开发验收-2026-11-03.md)。后续优先验证真实项目，再完善交互审批、网络和扩展回归。
 
 ## 启动
 
@@ -42,7 +42,7 @@ uv run --env-file .env ./scripts/start.command --demo
 - Markdown、代码复制、来源卡片；重新生成/编辑重发/重试，旧记录折叠而正文不改写。
 - 点选/拖拽/粘贴的多文件上传队列；文本、PDF、Word、Excel 读取，保留页码/标题/工作表位置。
 - 文件检索；上下文预算、自动摘要、工具大输出产物化；用户/工作区长期记忆，显式 `/remember` 零模型调用。
-- `create_file` 生成 `.md/.txt/.csv/.json` 等受支持文本下载，存数据库，不修改工作区。
+- `create_file` 将受支持文本写入工作区；生成/上传/另存为撞名时由宿主确认覆盖、保留两份或取消。旧数据库产物保留历史下载和主动导出。
 - 网页搜索和 Markdown 正文抓取，默认关闭。长页支持 find 定位和 offset 分页。
 
 扫描 PDF 无 OCR，图片只存不读，旧 `.doc/.xls` 不解析；文档只提文本，不计算 Excel 公式。暂不生成 PDF/Word/Excel 文件。联网没有登录态、JS 渲染或截图能力。
@@ -65,17 +65,20 @@ CHAGENT_WEB_ACCESS=deepseek
 ## 验证与维护
 
 ```sh
+# 项目未做 editable 安装，需要 PYTHONPATH=src，否则报 ModuleNotFoundError: chagent
 NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
-  uv run python -m unittest discover -s tests -q
+  PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -q
 # macOS 真正可施加 seatbelt 的环境中运行
 PYTHONPATH=src .venv/bin/python scripts/probe_code_isolation.py \
   --output docs/diagnostics/code-isolation-2026-11-02.json
 ```
 
-数据库测试用独立临时 schema，不读写业务表。未设置测试数据库时集成测试跳过；没有 node 或不能施加 seatbelt 时相应测试可能跳过，跳过不是通过。
+数据库测试用独立临时 schema，不读写业务表。未设置测试数据库时集成测试跳过；没有 node 或不能施加 seatbelt 时相应测试可能跳过，跳过不是通过。若宿主注入了 `NODE_OPTIONS`（node 代理 shim），前端相关用例会假失败，用 `env -u NODE_OPTIONS ...` 复跑。
 
-最近完整回归（2026-11-03）**555 项通过、0 跳过**；只读 R4 的 77 项检查通过，真实项目浏览器验收见[只读验收记录](docs/只读code验收-2026-11-02.md)；C2 的 14 项正反向探针和实际 Shell/Git/Python 测试/长进程通过。真实 work 流程的已验收范围及未测项见[浏览器验收记录](docs/work模式真实验收-2026-11-02.md)，不要把合成项目当作真实项目回归。
+最近完整回归（2026-11-03，工作区 F1–F4）**573 项通过、0 跳过**；只读 R4 的 77 项检查通过，真实项目浏览器验收见[只读验收记录](docs/只读code验收-2026-11-02.md)；C2 的 14 项正反向探针和实际 Shell/Git/Python 测试/长进程通过。真实 work 流程的已验收范围及未测项见[浏览器验收记录](docs/work模式真实验收-2026-11-02.md)，不要把合成项目当作真实项目回归。
 
 CLI 保留一次性运行与确定性 `--tool` 诊断，不再扩张为第二套产品入口。从源码启动 CLI 时需显式指定已存在的安全工作区，例如 `--workspace /你的资料目录`；继续会话沿用保存的工作区。
 
 完整架构、配置、接口、历史与证据见[文档目录](docs/README.md)。
+
+工作区 F1–F4 已实施分组导航、文件管理、右侧编辑器及 Agent/输出统一。接口、证据与未验证范围见[工作区 F1–F4 实施与验收](docs/工作区F1-F4验收-2026-11-03.md)。PDF/图片预览仍属 F5。

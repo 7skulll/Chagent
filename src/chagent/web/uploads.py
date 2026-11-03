@@ -10,6 +10,7 @@ from hashlib import sha256
 from pathlib import Path
 import re
 
+from chagent.files import FileService
 from chagent.tools.workspace import WorkspaceFS
 
 
@@ -56,13 +57,13 @@ def _candidate(name: str, attempt: int) -> str:
     return f"{name}-{attempt}"
 
 
-async def save(workspace: Path, raw_name: str, read) -> dict:
+async def save(workspace: Path, raw_name: str, read, *, outputs=None, workspace_id=None, request_id=None) -> dict:
     """Stream one upload to ``<workspace>/uploads`` and return its descriptor.
 
     ``read`` is an async iterator of byte chunks; the size limit is enforced
     while reading so an oversized body is refused before it reaches disk.
     """
-    filesystem = WorkspaceFS(workspace)
+    filesystem = FileService(workspace)
     with filesystem.directory(()) as descriptor:
         import os
         try:
@@ -83,6 +84,11 @@ async def save(workspace: Path, raw_name: str, read) -> dict:
     data = bytes(received)
     digest = sha256(data).hexdigest()
     name = safe_name(raw_name)
+    if outputs is not None:
+        relative = f"{UPLOAD_DIRECTORY}/{name}"
+        output = await outputs.submit(workspace_id, workspace, relative, data, source='upload', request_id=request_id)
+        return {"path": output['output_path'] or relative, "name": name, "size": len(data), "sha256": digest,
+                "workspace_id": workspace_id, "output_id": output['id'], "status": output['status']}
     for attempt in range(100):
         candidate = _candidate(name, attempt)
         relative = f"{UPLOAD_DIRECTORY}/{candidate}"

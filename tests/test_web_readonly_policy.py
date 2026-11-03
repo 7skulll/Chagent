@@ -29,7 +29,7 @@ class WebReadonlyPolicyTests(unittest.TestCase):
         cfg=Settings(code_mode=True,allow_host_commands=True,sandbox='isolated',sandbox_writable=False)
         sb=Sandbox(SandboxSettings(mode='isolated',writable_workspace=False));self.addCleanup(sb.close)
         runner=create_runner(MagicMock(),Model('fake','local','fake',8192,512),FakeModelClient(),
-                             code_mode=True,allow_host_commands=True,sandbox=sb,allow_workspace_writes=False)
+                             code_mode=True,allow_host_commands=True,sandbox=sb,allow_workspace_writes=True,code_workspace_writes=False)
         validate_web_runner(cfg,runner)
         runner.tool_faces['code'].registry.get('process').allowed_actions=('write',)
         with self.assertRaisesRegex(ValueError,'read/stop'):validate_web_runner(cfg,runner)

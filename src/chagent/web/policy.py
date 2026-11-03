@@ -1,4 +1,4 @@
-"""Web capabilities: existing read-only analysis or explicit writable development."""
+"""Shared work file editing, explicit read-only code, and isolated writable code."""
 from chagent.config import Settings
 from chagent.tools.builtin import WRITE_TOOLS
 
@@ -13,6 +13,10 @@ def validate_web_settings(settings: Settings) -> None:
 
 def validate_web_runner(settings: Settings, runner) -> None:
     validate_web_settings(settings)
+    file_writers = WRITE_TOOLS | {'create_file'}
+    work = (runner.tool_faces or {}).get('work')
+    if work is not None and file_writers & {tool.name for tool in work.registry.definitions()} != file_writers:
+        raise ValueError("网页 work 工具面必须允许工作区文件编辑")
     if not settings.code_mode:
         return
     writable = settings.trusted_development
@@ -25,8 +29,8 @@ def validate_web_runner(settings: Settings, runner) -> None:
     if face is None or not face.allow_host_commands:
         raise ValueError("网页 code 缺少独立工具面或宿主命令权限")
     for mode, executor in faces.items():
-        writes = WRITE_TOOLS & {tool.name for tool in executor.registry.definitions()}
-        expected = WRITE_TOOLS if mode == "code" and writable else frozenset()
+        writes = file_writers & {tool.name for tool in executor.registry.definitions()}
+        expected = file_writers if mode == "work" or writable else frozenset()
         if writes != expected:
             raise ValueError("网页工具面工作区写工具与配置不一致")
     if writable and runner.scheduler.policy.mode != "never":

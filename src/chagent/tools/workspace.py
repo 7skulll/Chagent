@@ -8,10 +8,25 @@ from hashlib import sha256
 import os
 from pathlib import Path
 import stat
+from threading import RLock
+from functools import wraps
 from uuid import uuid4
 
-
 from chagent.boundaries import validate_workspace, validate_file_identity
+
+_LOCKS = {}
+_LOCK_GUARD = RLock()
+
+def workspace_lock(root):
+    with _LOCK_GUARD:
+        return _LOCKS.setdefault(str(root), RLock())
+
+def coordinated(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with workspace_lock(self.root):
+            return method(self, *args, **kwargs)
+    return call
 
 
 MAX_FILE_BYTES = 1_048_576
@@ -41,6 +56,8 @@ class WorkspaceFS:
                     raise PermissionError("Path is outside the session workspace") from None
         if ".." in value.parts:
             raise PermissionError("Parent traversal is not allowed")
+        if value.parts[:2] == (".chagent", "trash"):
+            raise PermissionError("Workspace trash is reserved for file recovery")
         return value.parts
 
     @contextmanager
@@ -84,6 +101,7 @@ class WorkspaceFS:
         with self.parent(path) as (parent, name):
             return self._read_at(parent, name, limit)[0]
 
+    @coordinated
     def write(
         self, path: str, data: bytes, *, overwrite: bool = False, expected_hash: str | None = None,
         limit: int = MAX_FILE_BYTES,
@@ -115,7 +133,7 @@ class WorkspaceFS:
                 if overwrite:
                     # Replacement never writes through the destination inode or a hard link.
                     if expected_hash is not None:
-                        latest, _ = self._read_at(parent, name)
+                        latest, _ = self._read_at(parent, name, limit)
                         if sha256(latest).hexdigest() != expected_hash:
                             raise ValueError("File changed while preparing the edit")
                     os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
@@ -129,6 +147,7 @@ class WorkspaceFS:
                     pass
         return sha256(data).hexdigest()
 
+    @coordinated
     def remove(self, path: str, *, expected_hash: str | None = None) -> None:
         """Unlink one regular file; symlinks and directories are never followed."""
         with self.parent(path) as (parent, name):

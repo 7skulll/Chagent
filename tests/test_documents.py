@@ -328,7 +328,8 @@ class UploadFailureTests(unittest.IsolatedAsyncioTestCase):
         from starlette.exceptions import HTTPException
         from chagent.web.app import upload
 
-        current = SimpleNamespace(root=lambda workspace: Path('/private/tmp/upload-test'))
+        current = SimpleNamespace(root=lambda workspace: Path('/private/tmp/upload-test'),
+            runner=SimpleNamespace(conversations=SimpleNamespace(database=object())), workspace_id=AsyncMock(return_value=None))
         request = SimpleNamespace(stream=lambda: None)
         for error, status, message in [
             (PermissionError('secret/path'), 403, '权限'),
@@ -338,7 +339,7 @@ class UploadFailureTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(status=status):
                 with patch('chagent.web.app.save_upload', new=AsyncMock(side_effect=error)):
                     with self.assertRaises(HTTPException) as caught:
-                        await upload(request, current, name='test.txt', workspace=None)
+                        await upload(request, current, __import__('starlette.responses', fromlist=['Response']).Response(), name='test.txt', workspace=None)
                 self.assertEqual(caught.exception.status_code, status)
                 self.assertIn(message, caught.exception.detail)
                 self.assertNotIn('secret/path', caught.exception.detail)

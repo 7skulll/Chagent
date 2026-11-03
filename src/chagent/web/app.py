@@ -127,11 +127,11 @@ class WebRuntime:
     def root(self, raw: str | None) -> Path:
         """The workspace a request is about; ``None`` means the startup one."""
         if raw is None or not raw.strip():
-            return self.workspace
+            return validate_workspace(self.workspace)
         target = Path(raw).expanduser().resolve(strict=False)
         if target not in self.roots:
             raise ValueError("该工作区尚未打开")
-        return target
+        return validate_workspace(target)
 
     async def workspace_id(self, workspace: Path | None = None):
         root = self.workspace if workspace is None else workspace
@@ -262,18 +262,16 @@ async def info(current: Current):
 
 @api.get("/workspaces", response_model=WorkspacePage, tags=["本地 Agent"])
 async def workspaces(current: Current):
-    """Every workspace this installation has seen, most recently used first.
-
-    Rows whose directory is gone are dropped: a picker entry that cannot be
-    opened is worse than no entry, and tests leave temporary roots behind.
-    """
+    """Known workspaces, including unavailable directories; registration grants no access."""
     rows = await ConversationRepository(current.runner.conversations.database).workspaces()
     items = []
     for row in rows:
         try:
             validate_workspace(Path(row["path"]))
         except (ValueError, OSError, RuntimeError):
-            continue
+            row.update(available=False, reason="目录不存在、无权访问或不符合工作区准入要求")
+        else:
+            row.update(available=True, reason=None)
         items.append(row)
     return {"items": items}
 
@@ -282,7 +280,10 @@ async def workspaces(current: Current):
 async def open_workspace(value: WorkspaceCreate, current: Current):
     """Open one directory; from then on requests may name it as their workspace."""
     path = current.open_workspace(value.path)
-    await current.workspace_id(path)
+    identity = await current.workspace_id(path)
+    if value.touch:
+        async with current.runner.conversations.database.connection() as connection:
+            await connection.execute("UPDATE workspaces SET last_opened_at = now() WHERE id = %s", (identity,))
     repository = ConversationRepository(current.runner.conversations.database)
     return next((row for row in await repository.workspaces() if Path(row["path"]) == path),
                 {"path": path, "sessions": 0})
@@ -298,11 +299,13 @@ async def config(current: Current):
     # harness has one face, so the default-mode lookup falls back to it.
     faces = current.runner.tool_faces or {}
     tools = len((faces.get(settings.default_mode) or current.runner.tools).registry.definitions())
+    from chagent.tools.builtin import WRITE_TOOLS
+    work_writable = WRITE_TOOLS <= {tool.name for tool in (faces.get('work') or current.runner.tools).registry.definitions()}
     return {
         "provider": current.runner.model.provider, "model": current.runner.model.id,
         "run_timeout": current.runner.timeout,
         "sandbox": settings.sandbox, "sandbox_network": settings.sandbox_network,
-        "workspace_writable": settings.trusted_development, "process_stdin": False,
+        "workspace_writable": work_writable, "code_workspace_writable": settings.trusted_development, "process_stdin": False,
         "execution_profile": settings.execution_profile,
         "readonly_code": settings.readonly_code_available,
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
@@ -315,8 +318,8 @@ async def config(current: Current):
         "max_processes": settings.max_processes, "process_timeout": settings.process_timeout,
         "default_mode": settings.default_mode, "code_mode": settings.code_mode,
         "tools": tools,
-        # Writes describe the code face; work remains read-only in the web.
-        "behavior": describe_behavior(settings, policy, tokenizer, workspace_writes=settings.trusted_development),
+        # Describe the actual work face; code capability is a separate field.
+        "behavior": describe_behavior(settings, policy, tokenizer, workspace_writes=work_writable),
     }
 
 
@@ -424,14 +427,20 @@ async def create_session(value: SessionCreate, current: Current):
     return await current.sessions.create(current.root(value.workspace), value.title, mode=mode)
 
 
-@api.post("/uploads", response_model=UploadView, status_code=201, tags=["会话"])
-async def upload(request: Request, current: Current,
+@api.post("/uploads", status_code=201, tags=["会话"])
+async def upload(request: Request, current: Current, response: Response,
+                 request_id: UUID | None = None,
                  name: Annotated[str, Query(min_length=1, max_length=300)] = "upload",
                  workspace: WorkspacePath = None):
     """Store one file under the workspace, where read_file can parse it."""
     root = current.root(workspace)
     try:
-        return await save_upload(root, name, request.stream())
+        from chagent.outputs import OutputService
+        result = await save_upload(root, name, request.stream(), outputs=OutputService(current.runner.conversations.database),
+                                   workspace_id=await current.workspace_id(root), request_id=request_id)
+        if result['status'] != 'committed':
+            response.status_code = 202
+        return result
     except PermissionError:
         raise HTTPException(403, "上传目录不可写，请检查工作区权限后重试") from None
     except OSError as error:
@@ -468,10 +477,12 @@ async def history(session_id: UUID, current: Current, limit: MessageLimit = 100,
 async def generated_files(session_id: UUID, current: Current):
     await current.session(session_id)
     async with current.runner.conversations.database.connection() as connection:
+        outputs = await connection.execute("SELECT id,workspace_id,output_path AS path,size,status FROM file_outputs WHERE session_id=%s AND status='committed' ORDER BY created_at DESC", (session_id,))
+        disk = [{**row, "name": Path(row["path"]).name} for row in await outputs.fetchall()]
         cursor = await connection.execute(
             "SELECT id, run_id, name, octet_length(content) AS size, created_at FROM generated_files "
             "WHERE session_id = %s ORDER BY created_at DESC, id DESC", (session_id,))
-        return {"items": await cursor.fetchall()}
+        return {"items": disk + await cursor.fetchall()}
 
 
 @api.get("/sessions/{session_id}/files/{file_id}", tags=["上下文与产物"])
@@ -485,6 +496,19 @@ async def generated_file_download(session_id: UUID, file_id: UUID, current: Curr
     return Response(content=row["content"].encode("utf-8"), media_type="application/octet-stream",
                     headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(row["name"], safe=""),
                              "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+
+@api.post('/sessions/{session_id}/files/{file_id}/export', tags=['上下文与产物'])
+async def export_legacy(session_id: UUID, file_id: UUID, current: Current):
+    from chagent.outputs import OutputService
+    session = await current.session(session_id)
+    async with current.runner.conversations.database.connection() as connection:
+        cursor = await connection.execute('SELECT name,content FROM generated_files WHERE id=%s AND session_id=%s', (file_id,session_id))
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(404, '历史产物不存在')
+    return await OutputService(current.runner.conversations.database).submit(session.workspace_id, session.workspace,
+        row['name'],row['content'].encode('utf-8'),source='legacy-export',session_id=session_id)
 
 
 @api.get("/sessions/{session_id}/artifacts/{artifact_id}", response_model=ArtifactPage, tags=["上下文与产物"])
@@ -612,6 +636,8 @@ async def cancel(run_id: UUID, current: Current, response: Response, value: Canc
         if latest["status"] in TERMINAL:
             return {"accepted": False, "status": latest["status"]}
         raise HTTPException(409, "Run belongs to another process or needs recovery")
+    async with current.runner.conversations.database.connection() as connection:
+        await connection.execute("UPDATE file_outputs SET status='cancelled',payload=NULL WHERE run_id=%s AND status='pending'", (run_id,))
     response.status_code = 202
     return {"accepted": accepted}
 
@@ -680,7 +706,7 @@ async def events(run_id: UUID, request: Request, current: Current, after: Sequen
 async def asset(name: str = "index.html"):
     # An allow-list, not a directory read: the route must not become a way to
     # fetch anything else that happens to sit next to the page.
-    media = {"index.html": "text/html", "app.js": "text/javascript", "markdown.js": "text/javascript",
+    media = {"index.html": "text/html", "app.js": "text/javascript", "file-editor.js": "text/javascript", "markdown.js": "text/javascript",
              "style.css": "text/css", "api-docs.html": "text/html", "api-docs.js": "text/javascript"}
     if name not in media:
         raise HTTPException(404)
@@ -731,7 +757,7 @@ class LocalBoundary:
         # The upload route reads its own body: it accepts any content type and
         # enforces its limit while streaming. Buffering it here would hold a
         # whole document in memory twice and reject it for not being JSON.
-        if (scope["path"].startswith("/api/") and scope["method"] in {"POST", "PATCH", "DELETE"}
+        if (scope["path"].startswith("/api/") and scope["method"] in {"POST", "PUT", "PATCH", "DELETE"}
                 and not scope["path"].startswith(UPLOAD_PATH)):
             content = bytearray()
             while True:
@@ -739,8 +765,10 @@ class LocalBoundary:
                 if message["type"] == "http.disconnect":
                     return
                 content.extend(message.get("body", b""))
-                if len(content) > 65_536:
-                    return await reply({"error": "Request exceeds 64 KiB"}, 413)(scope, receive, send)
+                file_request = scope["path"].startswith("/api/workspaces/")
+                body_limit = 6_400_000 if file_request else 65_536
+                if len(content) > body_limit:
+                    return await reply({"error": "Request exceeds body limit"}, 413)(scope, receive, send)
                 if not message.get("more_body", False):
                     break
             media_type = headers.get(b"content-type", b"").split(b";", 1)[0].strip().lower()
@@ -809,14 +837,14 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                                 approval_grace=configured.approval_unwatched_grace,
                                                 process_wall_timeout=configured.process_timeout,
                                                 max_processes=configured.max_processes, web=web,
-                                                allow_workspace_writes=False)
+                                                allow_workspace_writes=True, versioned_files=True)
                 else:
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
                                            code_mode=configured.code_mode,
-                                           # Work stays read-only; only the explicit development
-                                           # code face gets writes. Approval policy is separate.
-                                           allow_workspace_writes=False,
+                                           # File editing is shared; explicit read-only code
+                                           # still trims writes. Command policy is separate.
+                                           allow_workspace_writes=True, versioned_files=True,
                                            code_workspace_writes=configured.trusted_development,
                                            process_stdin=False,
                                            timeout=selected.run_timeout, max_turns=configured.max_turns,
@@ -851,6 +879,8 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                             Exception: application_error},
     )
     app.include_router(api)
+    from chagent.web.file_api import router as file_router
+    app.include_router(file_router)
     app.add_api_route("/", asset, include_in_schema=False)
     app.add_api_route("/static/{name}", asset, include_in_schema=False)
     async def local_docs():

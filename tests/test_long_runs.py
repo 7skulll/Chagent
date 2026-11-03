@@ -33,7 +33,7 @@ from chagent.tools.context import ToolContext
 # Sized so a 2.4 KB tool result plus the fixed prompt still leaves room for the
 # retained input. The named system sections added ~150 bytes of prefix; the
 # fixture follows the prompt rather than the prompt being trimmed to the fixture.
-LONG_RUN_WINDOW = 13_600
+LONG_RUN_WINDOW = 14_500
 
 
 class EmitTool(AgentTool):

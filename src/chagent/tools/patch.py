@@ -187,6 +187,11 @@ class ApplyPatchTool(FileTool):
         duplicates = {plan.path for plan in plans if [item.path for item in plans].count(plan.path) > 1}
         if duplicates:
             raise PatchError(f"Each file may appear once per patch: {', '.join(sorted(duplicates))}")
+        if getattr(filesystem, 'require_versions', False):
+            # Validate every read revision before any file is changed.
+            for plan in plans:
+                if plan.action != 'created' and filesystem.versions.get(plan.path) != sha256(plan.before).hexdigest():
+                    raise PatchError(f'{plan.path}: provide the latest read SHA256 in versions before patching')
         return self._commit(filesystem, plans)
 
     def _plan(self, filesystem: WorkspaceFS, section: Section) -> Plan:

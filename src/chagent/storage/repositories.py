@@ -141,11 +141,11 @@ class ConversationRepository:
         """
         async with self.database.connection() as connection:
             cursor = await connection.execute(
-                "SELECT w.root_path AS path, count(s.id) AS sessions, max(s.updated_at) AS last_used "
+                "SELECT w.id, w.root_path AS path, count(s.id) AS sessions, w.last_opened_at AS last_used "
                 "FROM workspaces w LEFT JOIN sessions s ON s.workspace_id = w.id AND s.archived_at IS NULL "
-                "GROUP BY w.root_path ORDER BY max(s.updated_at) DESC NULLS LAST, w.root_path"
+                "GROUP BY w.id ORDER BY w.last_opened_at DESC, w.root_path"
             )
-            return [{"path": row["path"], "sessions": row["sessions"]} for row in await cursor.fetchall()]
+            return [dict(row) for row in await cursor.fetchall()]
 
     async def _lock_session(self, connection: AsyncConnection[DictRow], session_id: UUID, *, idle: bool = False) -> None:
         cursor = await connection.execute("SELECT archived_at FROM sessions WHERE id = %s FOR UPDATE", (session_id,))

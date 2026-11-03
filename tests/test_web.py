@@ -72,6 +72,187 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
                     return run
                 await asyncio.sleep(.01)
 
+    async def file_workspace(self):
+        row = (await self.client.post('/api/workspaces', json={'path':str(self.workspace)})).json()
+        return row['id'], '/api/workspaces/'+row['id']
+
+    async def test_outputs_are_persistent_version_bound_and_single_use(self):
+        from uuid import uuid4
+        wid,base = await self.file_workspace()
+        (self.workspace/'a.txt').write_text('old')
+        output = (await self.client.post(base+'/outputs',json={'path':'a.txt','content':'proposed','request_id':str(uuid4())})).json()
+        self.assertEqual(output['status'],'pending')
+        self.assertEqual((self.workspace/'a.txt').read_text(),'old')
+        pending = (await self.client.get(base+'/outputs')).json()['items']
+        self.assertEqual(pending[0]['id'],output['id'])
+        decision = base+'/outputs/'+output['id']+'/decision'
+        forged = await self.client.post(decision,json={'choice':'overwrite','token':str(uuid4())})
+        self.assertEqual(forged.status_code,409)
+        (self.workspace/'a.txt').write_text('external')
+        stale = await self.client.post(decision,json={'choice':'overwrite','token':output['token']})
+        self.assertEqual(stale.status_code,409,stale.text)
+        latest = (await self.client.get(base+'/outputs')).json()['items'][0]
+        self.assertNotEqual(latest['token'],output['token'])
+        self.assertEqual((self.workspace/'a.txt').read_text(),'external')
+        self.assertEqual((await self.client.post(decision,json={'choice':'overwrite','token':output['token']})).status_code,409)
+        responses = await asyncio.gather(*[self.client.post(decision,json={'choice':'overwrite','token':latest['token']}) for _ in range(2)])
+        self.assertEqual(sorted(r.status_code for r in responses),[200,409])
+        self.assertEqual((self.workspace/'a.txt').read_text(),'proposed')
+        self.assertEqual((await self.client.get(base+'/outputs')).json()['items'],[])
+
+    async def test_outputs_keep_both_cancel_expire_scope_and_idempotence(self):
+        from uuid import uuid4
+        wid,base = await self.file_workspace()
+        (self.workspace/'a.txt').write_text('keep')
+        key=str(uuid4())
+        body={'path':'a.txt','content':'new','request_id':key}
+        result=(await self.client.post(base+'/outputs',json=body)).json()
+        repeated=(await self.client.post(base+'/outputs',json=body)).json()
+        self.assertEqual(result['id'],repeated['id'])
+        invalid=await self.client.post(base+'/outputs',json={**body,'content':'different'})
+        self.assertEqual(invalid.status_code,409)
+        url=base+'/outputs/'+result['id']+'/decision'
+        response=await self.client.post(url,json={'choice':'keep-both','token':result['token']})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual((self.workspace/'a-1.txt').read_text(),'new')
+        self.assertEqual((self.workspace/'a.txt').read_text(),'keep')
+        for choice in ['cancel','expired']:
+            output=(await self.client.post(base+'/outputs',json={**body,'request_id':str(uuid4())})).json()
+            if choice=='expired':
+                async with self.database.connection() as connection:
+                    await connection.execute("UPDATE file_outputs SET expires_at=now()-interval '1 second' WHERE id=%s",(UUID(output['id']),))
+            response=await self.client.post(base+'/outputs/'+output['id']+'/decision',json={'choice':'overwrite' if choice=='expired' else choice,'token':output['token']})
+            self.assertEqual(response.status_code,409 if choice=='expired' else 200,response.text)
+            self.assertEqual((self.workspace/'a.txt').read_text(),'keep')
+        self.assertEqual((await self.client.get('/api/workspaces/'+str(uuid4())+'/outputs')).status_code,404)
+
+    async def test_upload_collision_is_pending_and_edited_upload_is_read_fresh(self):
+        from chagent.tools.filesystem import ReadFileTool
+        from chagent.tools.context import ToolContext
+        wid,base=await self.file_workspace()
+        first=await self.client.post('/api/uploads?name=note.txt',content=b'old')
+        self.assertEqual(first.status_code,201,first.text)
+        second=await self.client.post('/api/uploads?name=note.txt',content=b'new')
+        self.assertEqual(second.status_code,202,second.text)
+        self.assertEqual((self.workspace/'uploads/note.txt').read_text(),'old')
+        output=(await self.client.get(base+'/outputs')).json()['items'][0]
+        response=await self.client.post(base+'/outputs/'+output['id']+'/decision',json={'token':output['token'],'choice':'keep-both'})
+        self.assertEqual(response.status_code,200,response.text)
+        read=(await self.client.get(base+'/text',params={'path':'uploads/note.txt'})).json()
+        result=await self.client.put(base+'/text',json={key:read[key] for key in ['path','identity','version']}|{'content':'edited'})
+        self.assertEqual(result.status_code,200,result.text)
+        tool=ReadFileTool()
+        text=await tool.execute('read',{'path':'uploads/note.txt'},context=ToolContext(self.workspace))
+        self.assertIn('edited',text.content[0].text)
+        self.assertNotEqual(read['version'],result.json()['version'])
+
+    async def test_versioned_agent_file_tools_in_both_writable_modes(self):
+        from chagent.tools.builtin import create_builtin_registry
+        from chagent.tools.context import ToolContext
+        from chagent.tools.executor import ToolExecutor
+        from chagent.domain.messages import ToolCall
+        from chagent.storage.artifacts import ArtifactRepository
+        await self.file_workspace()
+        for mode in ['work','code']:
+            registry=create_builtin_registry(mode=mode,artifacts=ArtifactRepository(self.database),versioned_files=True)
+            self.assertIsNotNone(registry.get('create_file'))
+            executor=ToolExecutor(registry)
+            path=mode+'.txt';(self.workspace/path).write_text('old')
+            context=ToolContext(self.workspace)
+            read=await executor.execute(ToolCall('r','read_file',{'path':path}),context=context)
+            digest=read.details['sha256']
+            missing=await executor.execute(ToolCall('w','write_file',{'path':path,'content':'unsafe','overwrite':True}),context=context)
+            self.assertTrue(missing.is_error)
+            (self.workspace/path).write_text('manual')
+            stale=await executor.execute(ToolCall('w2','write_file',{'path':path,'content':'unsafe','overwrite':True,'expected_sha256':digest}),context=context)
+            self.assertTrue(stale.is_error)
+            fresh=await executor.execute(ToolCall('r2','read_file',{'path':path}),context=context)
+            updated=await executor.execute(ToolCall('w3','edit_file',{'path':path,'edits':[{'old_text':'manual','new_text':'agent'}],'expected_sha256':fresh.details['sha256']}),context=context)
+            self.assertFalse(updated.is_error,updated.content)
+            self.assertEqual(updated.details['workspace_files'][0]['path'],path)
+            self.assertEqual((self.workspace/path).read_text(),'agent')
+
+    async def test_text_put_local_boundary_and_large_payload(self):
+        wid,base=await self.file_workspace()
+        (self.workspace/'a.txt').write_text('old')
+        read=(await self.client.get(base+'/text',params={'path':'a.txt'})).json()
+        payload={key:read[key] for key in ['path','identity','version']}|{'content':'字'*50000}
+        cross=await self.client.put(base+'/text',headers={'Origin':'https://evil.example'},json=payload)
+        self.assertEqual(cross.status_code,403)
+        saved=await self.client.put(base+'/text',json=payload)
+        self.assertEqual(saved.status_code,200,saved.text[:200])
+        self.assertEqual((self.workspace/'a.txt').read_text(),payload['content'])
+
+    async def test_legacy_artifact_download_and_explicit_export(self):
+        from uuid import uuid4
+        sid=await self.create_session()
+        sent=await self.client.post(f'/api/sessions/{sid}/runs',json={'text':'hello'})
+        rid=sent.json()['run_id'];await self.wait_run(rid)
+        identity=uuid4()
+        async with self.database.connection() as connection:
+            await connection.execute('INSERT INTO generated_files(id,session_id,run_id,tool_call_id,name,content) VALUES(%s,%s,%s,%s,%s,%s)',(identity,UUID(sid),UUID(rid),'legacy','old.md','# old'))
+        url=f'/api/sessions/{sid}/files/{identity}'
+        self.assertEqual((await self.client.get(url)).text,'# old')
+        self.assertFalse((self.workspace/'old.md').exists())
+        exported=await self.client.post(url+'/export',json={})
+        self.assertEqual(exported.status_code,200,exported.text)
+        self.assertEqual((self.workspace/'old.md').read_text(),'# old')
+        pending=await self.client.post(url+'/export',json={})
+        self.assertEqual(pending.json()['status'],'pending')
+
+    async def test_workspace_file_api_roundtrip_and_conflict(self):
+        opened = (await self.client.post('/api/workspaces', json={'path': str(self.workspace)})).json()
+        base = f"/api/workspaces/{opened['id']}"
+        self.assertEqual((await self.client.post(base+'/entries', json={'path':'folder', 'type':'directory'})).status_code, 201)
+        self.assertEqual((await self.client.post(base+'/entries', json={'path':'folder/a', 'content':'one'})).status_code, 201)
+        read = (await self.client.get(base+'/text', params={'path':'folder/a'})).json()
+        payload = {key:read[key] for key in ['path','version','identity']}
+        payload['content'] = 'two'
+        self.assertEqual((await self.client.put(base+'/text', json=payload)).status_code, 200)
+        self.assertEqual((await self.client.put(base+'/text', json=payload)).status_code, 409)
+        item = (await self.client.get(base+'/entries', params={'path':'folder'})).json()['items'][0]
+        renamed = await self.client.post(base+'/rename', json={'path':'folder/a','target':'folder/b','identity':item['identity']})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        item = (await self.client.get(base+'/entries', params={'path':'folder'})).json()['items'][0]
+        recycled = await self.client.post(base+'/trash', json={'path':'folder/b','identity':item['identity']})
+        self.assertEqual(recycled.status_code, 201, recycled.text)
+        record = recycled.json()['id']
+        self.assertEqual(len((await self.client.get(base+'/trash')).json()['items']), 1)
+        self.assertEqual((await self.client.post(base+f'/trash/{record}/restore', json={})).status_code, 200)
+        self.assertEqual((self.workspace/'folder/b').read_text(), 'two')
+        for path in ['../escape', '/tmp/escape', '.chagent/trash/x']:
+            self.assertIn((await self.client.post(base+'/entries', json={'path':path})).status_code, [400,403])
+        self.assertEqual((await self.client.get(base+'/text', params={'path':'missing'})).status_code,404)
+
+    async def test_unavailable_workspace_and_file_scope(self):
+        with tempfile.TemporaryDirectory() as other:
+            target = Path(other).resolve()
+            identity = await self.runner.conversations.create_session(target)
+            rows = (await self.client.get('/api/workspaces')).json()['items']
+            workspace = next(row for row in rows if row['path']==str(target))
+            response = await self.client.get(f"/api/workspaces/{workspace['id']}/entries")
+            self.assertEqual(response.status_code,403)
+        rows = (await self.client.get('/api/workspaces')).json()['items']
+        workspace = next(row for row in rows if row['id']==workspace['id'])
+        self.assertFalse(workspace['available'])
+        self.assertTrue(workspace['reason'])
+        self.assertEqual((await self.client.get(f'/api/sessions/{identity}')).status_code,404)
+
+    async def test_picker_cancel_and_failure_do_not_register_workspace(self):
+        from unittest.mock import patch
+        before = (await self.client.get('/api/workspaces')).json()
+        with patch('chagent.web.file_api.choose_directory', return_value=''):
+            response = await self.client.post('/api/workspace-picker', json={})
+        self.assertEqual(response.json(), {'cancelled': True})
+        self.assertEqual((await self.client.get('/api/workspaces')).json(), before)
+        with patch('chagent.web.file_api.choose_directory', return_value=str(self.workspace)):
+            response = await self.client.post('/api/workspace-picker', json={})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertFalse(response.json()['cancelled'])
+        first = response.json()['workspace']['id']
+        second = (await self.client.post('/api/workspaces', json={'path':str(self.workspace)})).json()['id']
+        self.assertEqual(first,second)
+
     async def test_work_agent_creates_a_downloadable_file(self):
         runner = create_demo_runner(self.database, tool_name="create_file", work_only=True,
                                     tool_arguments={"filename": "最后一行代码.md", "content": "# 故事\n正文"})
@@ -80,14 +261,14 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         listing = (await self.client.get(f"/api/sessions/{session}/files")).json()["items"]
         self.assertEqual(len(listing), 1)
         self.assertEqual(listing[0]["name"], "最后一行代码.md")
-        download = await self.client.get(f"/api/sessions/{session}/files/{listing[0]['id']}")
+        download = await self.client.get(f"/api/workspaces/{listing[0]['workspace_id']}/content", params={"path":listing[0]["path"]})
         self.assertEqual(download.text, "# 故事\n正文")
         self.assertTrue(result.run_id)
         messages = (await self.client.get(f"/api/sessions/{session}/messages")).json()["items"]
         created = [item for item in messages if item["message"].get("tool_name") == "create_file"]
-        self.assertEqual(created[0]["message"]["details"]["generated_file"]["name"], "最后一行代码.md")
+        self.assertEqual(created[0]["message"]["details"]["workspace_file"]["name"], "最后一行代码.md")
 
-    async def test_generated_file_is_downloadable_only_in_its_session(self):
+    async def test_workspace_output_is_session_listed_and_idempotent(self):
         from chagent.tools.generated_files import CreateFileTool
         from chagent.tools.context import ToolContext
         first, other = await self.create_session(), await self.create_session()
@@ -97,14 +278,14 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         tool = CreateFileTool(self.database)
         context = ToolContext(self.workspace, UUID(first), UUID(run_id))
         result = await tool.execute("call-1", {"filename": "故事.md", "content": "# 故事\n你好"}, context=context)
-        file = result.details["generated_file"]
+        file = result.details["workspace_file"]
         repeated = await tool.execute("call-1", {"filename": "故事.md", "content": "# 故事\n你好"}, context=context)
-        self.assertEqual(file["id"], repeated.details["generated_file"]["id"])
-        with self.assertRaises(ValueError):
+        self.assertEqual(file["id"], repeated.details["workspace_file"]["id"])
+        with self.assertRaises((ValueError, PermissionError)):
             await tool.execute("call-2", {"filename": "../evil.md", "content": "x"}, context=context)
         listing = (await self.client.get(f"/api/sessions/{first}/files")).json()["items"]
         self.assertEqual([item["name"] for item in listing], ["故事.md"])
-        response = await self.client.get(f"/api/sessions/{first}/files/{file['id']}")
+        response = await self.client.get(f"/api/workspaces/{file['workspace_id']}/content",params={"path":file["path"]})
         self.assertEqual(response.text, "# 故事\n你好")
         self.assertIn("attachment", response.headers["content-disposition"])
         self.assertEqual((await self.client.get(f"/api/sessions/{other}/files/{file['id']}")).status_code, 404)
@@ -438,13 +619,13 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         from dataclasses import replace
         self.runner = create_runner(self.database, replace(self.runner.model, context_window=65536), FakeModelClient(),
             code_mode=True, allow_host_commands=True, sandbox=sb,
-            allow_workspace_writes=False, code_workspace_writes=True, process_stdin=False)
+            allow_workspace_writes=True, code_workspace_writes=True, process_stdin=False)
         self.runtime = WebRuntime(self.runner, self.workspace, cfg)
         self.app.state.runtime = self.runtime
         self.addAsyncCleanup(self.runtime.close)
 
     @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
-    async def test_development_writes_tests_and_work_stays_readonly_without_approvals(self):
+    async def test_development_and_work_write_files_without_command_approvals(self):
         await self.enable_development()
         cfg = (await self.client.get("/api/config")).json()
         self.assertEqual(cfg["execution_profile"], "trusted-development")
@@ -479,7 +660,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.runner.client = FakeModelClient("write_file", {"path":"blocked.txt", "content":"no"})
         sent = await self.client.post(f"/api/sessions/{work}/runs", json={"text":"write"})
         await self.wait_run(sent.json()["run_id"])
-        self.assertFalse((self.workspace/"blocked.txt").exists())
+        self.assertTrue((self.workspace/"blocked.txt").exists())
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT count(*) AS n FROM approval_requests")
             self.assertEqual((await cursor.fetchone())["n"], 0)
@@ -501,7 +682,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         sb=Sandbox(SandboxSettings(mode="isolated",writable_workspace=False))
         self.addCleanup(sb.close)
         runner=create_runner(self.database,self.runner.model,FakeModelClient("exec_command", {"cmd":"printf readonly-ok"}),
-                             code_mode=True,allow_host_commands=True,sandbox=sb,allow_workspace_writes=False)
+                             code_mode=True,allow_host_commands=True,sandbox=sb,allow_workspace_writes=True,code_workspace_writes=False)
         self.runner=runner
         self.runtime=WebRuntime(runner,self.workspace,cfg)
         self.app.state.runtime=self.runtime
@@ -516,7 +697,8 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         await self.enable_readonly()
         cfg=(await self.client.get("/api/config")).json()
         self.assertTrue(cfg["readonly_code"])
-        self.assertFalse(cfg["workspace_writable"])
+        self.assertTrue(cfg["workspace_writable"])
+        self.assertFalse(cfg["code_workspace_writable"])
         self.assertFalse(cfg["process_stdin"])
         self.assertIn("isolated(ro)",cfg["behavior"])
         response=await self.client.post("/api/sessions",json={"mode":"code"})
@@ -571,7 +753,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(source, self.runtime.roots)
         identity = await self.runner.conversations.create_session(source, title="old source session")
         listed = await self.client.get("/api/workspaces")
-        self.assertNotIn(str(source), [item["path"] for item in listed.json()["items"]])
+        self.assertFalse(next(item for item in listed.json()["items"] if item["path"] == str(source))["available"])
         response = await self.client.get(f"/api/sessions/{identity}")
         self.assertEqual(response.status_code, 404)
 
@@ -793,7 +975,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("max_turns=", value["behavior"])
         # This entry point assembles ``work`` without the write tools, because
         # no approval gate exists yet for a file mutation made on its behalf.
-        self.assertIn("writes=off", value["behavior"])
+        self.assertIn("writes=on", value["behavior"])
         # A read-only page must never become a way to read a credential back out.
         self.assertNotIn("postgres", json.dumps(value))
         self.assertNotIn("api_key", json.dumps(value))

@@ -20,7 +20,7 @@ from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "src" / "chagent" / "web" / "static"
 MARKUP = (STATIC / "index.html").read_text(encoding="utf-8")
-SCRIPT = (STATIC / "app.js").read_text(encoding="utf-8")
+SCRIPT = (STATIC / "app.js").read_text(encoding="utf-8") + (STATIC / "file-editor.js").read_text(encoding="utf-8")
 STYLES = (STATIC / "style.css").read_text(encoding="utf-8")
 
 # Created by app.js at runtime (approval prompt), so it has no markup of its own.
@@ -89,7 +89,7 @@ class WebSurfaceTests(unittest.TestCase):
         # rail's workspace button; WK1 added the "回到最新" scroll button, which
         # only exists so a reader who scrolled up can rejoin the stream.
         # A visible close control also dismisses the narrow tools drawer.
-        self.assertEqual(len(self.page.buttons), 24)
+        self.assertEqual(len(self.page.buttons), 42)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)

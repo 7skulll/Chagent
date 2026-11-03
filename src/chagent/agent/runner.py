@@ -216,6 +216,11 @@ class AgentRunner:
                 await self.scheduler.cancel_approvals(run_id)
             except BaseException:
                 pass
+            try:
+                async with self.runs.database.connection() as connection:
+                    await connection.execute("UPDATE file_outputs SET status='cancelled',payload=NULL WHERE run_id=%s AND status='pending' AND EXISTS (SELECT 1 FROM runs WHERE id=%s AND status='cancelled')", (run_id,run_id))
+            except Exception:
+                pass
             self.scheduler.release(run_id)
             if self.memory_service is not None:
                 self.memory_service.release(run_id)

@@ -76,7 +76,7 @@ function scheduleLiveFlush() {
 // One place decides whether the composer accepts input: a run in flight, a
 // turn loading, and an archived session all block it for different reasons.
 function updateComposer() {
-  const pending = uploads.items.some(item => ["queued", "uploading"].includes(item.status));
+  const pending = uploads.items.some(item => ["queued", "uploading", "pending"].includes(item.status));
   const blocked = state.busy || state.loading || state.readonly || pending || !$("input").value.trim();
   $("send").disabled = blocked;
   $("attach").disabled = state.readonly;
@@ -351,6 +351,32 @@ function fileRow(file, session, inMessage = false) {
   const download = textNode("a", "下载", "generated-file-download");
   download.href = fileUrl(session, file); download.download = file.name;
   download.setAttribute("aria-label", `下载 ${file.name}`);
+  if (file.workspace_id && file.path) {
+    if (file.status === "committed") {
+      download.href = `/api/workspaces/${file.workspace_id}/content?${new URLSearchParams({path:file.path})}`;
+      const open = textNode("button", "打开文件", "generated-file-download"); open.type = "button";
+      open.addEventListener("click", () => window.ChagentFiles?.open(file.workspace_id,file.path).catch(showError));
+      info.append(open);
+    } else {
+      download.removeAttribute("href"); download.textContent = "等待确认";
+      const view = textNode("button", "查看输出状态", "generated-file-download"); view.type="button";
+      view.addEventListener("click", async () => {
+        try {
+          const output=await api(`/api/workspaces/${file.workspace_id}/outputs/${file.id}`);
+          if(output.status === "committed") await window.ChagentFiles?.open(file.workspace_id,output.output_path);
+          else { window.ChagentShowFiles?.();await window.ChagentFiles?.refresh(); }
+        } catch(error) { showError(error); }
+      }); info.append(view);
+    }
+  } else {
+    const save = textNode("button", "保存到工作区", "generated-file-download"); save.type="button";
+    save.addEventListener("click", async () => {
+      try {
+        await post(`/api/sessions/${session}/files/${file.id}/export`, {});
+        window.ChagentShowFiles?.(); await window.ChagentFiles?.refresh();
+      } catch(error) { showError(error); }
+    }); info.append(save);
+  }
   row.append(icon, info, download);
   return row;
 }
@@ -363,6 +389,7 @@ async function loadGeneratedFiles() {
   $("artifacts-count").textContent = String(items.length);
   list.replaceChildren(...items.map(file => fileRow(file, id)));
   if (!items.length) list.append(textNode("p", "生成文件后会显示在这里。", "artifacts-empty"));
+  window.ChagentFiles?.refresh().catch(showError);
 }
 
 function displayMessage(message, target = $("messages"), meta = {}, live = false) {
@@ -395,6 +422,12 @@ function displayMessage(message, target = $("messages"), meta = {}, live = false
       details.append(summary, textNode("pre", JSON.stringify(block.arguments, null, 2)));
       node.append(details);
     }
+  }
+  if (message.role === "toolResult" && message.details?.workspace_files && !message.is_error) {
+    for(const file of message.details.workspace_files) node.append(fileRow(file,state.session,true));
+  }
+  if (message.role === "toolResult" && message.details?.workspace_file && !message.is_error) {
+    node.append(fileRow(message.details.workspace_file, state.session, true));
   }
   if (message.role === "toolResult" && message.tool_name === "create_file" && message.details && message.details.generated_file && !message.is_error) {
     node.append(fileRow(message.details.generated_file, state.session, true));
@@ -462,23 +495,66 @@ function resetStream() {
   if (liveFrame) { cancelAnimationFrame(liveFrame); liveFrame = 0; }
 }
 async function listSessions(append = false) {
-  const params = new URLSearchParams();
-  if (state.workspace) params.set("workspace", state.workspace);
-  if (append && state.sessionCursor) params.set("before", state.sessionCursor);
-  if (state.archived) params.set("archived", "only");
-  if (state.query) params.set("q", state.query);
-  const query = params.toString();
-  const page = await api(`/api/sessions${query ? `?${query}` : ""}`);
-  if (!append) $("sessions").replaceChildren();
-  for (const session of page.items) $("sessions").append(sessionRow(session));
-  state.sessionCursor = page.next_cursor; $("more-sessions").hidden = !page.next_cursor;
-  $("sessions-label").textContent = state.archived ? "已归档" : "最近";
-  if (page.archived_count !== null && page.archived_count !== undefined) {
-    $("archived-count").textContent = page.archived_count;
-    $("archived-toggle").hidden = page.archived_count === 0 && !state.archived;
+  const epoch = state.navEpoch = (state.navEpoch || 0) + 1;
+  const workspaces = await api("/api/workspaces");
+  if (epoch !== state.navEpoch) return;
+  const target = $("sessions");
+  if (!append) target.replaceChildren();
+  let currentPage = null;
+  for (const workspace of workspaces.items) {
+    if (append && workspace.path !== state.workspace) continue;
+    if (state.query && workspace.path !== state.workspace) continue;
+    const group = document.createElement("section"); group.className = "workspace-group";
+    const heading = textNode("button", `${workspaceParent(workspace.path)}${workspaceName(workspace.path)}`, "workspace-group-title");
+    heading.type = "button"; heading.title = workspace.path;
+    heading.disabled = !workspace.available;
+    heading.addEventListener("click", () => switchWorkspace(workspace.path).catch(showError));
+    group.append(heading);
+    if (!workspace.available) {
+      group.append(textNode("p", workspace.reason || "工作区不可用", "muted"));
+      target.append(group); continue;
+    }
+    const add = textNode("button", "＋ 新对话", "workspace-new"); add.type = "button";
+    add.addEventListener("click", async () => {
+      try {
+        await switchWorkspace(workspace.path);
+        $("new-session").click();
+      } catch (error) { showError(error); }
+    });
+    group.append(add);
+    const params = new URLSearchParams({workspace: workspace.path});
+    if (state.archived) params.set("archived", "only");
+    if (state.query) params.set("q", state.query);
+    if (append && state.sessionCursor) params.set("before", state.sessionCursor);
+    // Register explicitly before listing: historical registration is not permission.
+    try {
+      await post("/api/workspaces", {path: workspace.path, touch: false});
+      const page = await api(`/api/sessions?${params}`);
+      if (epoch !== state.navEpoch) return;
+      for (const session of page.items) {
+        const row = sessionRow(session);
+        row.dataset.workspace = workspace.path;
+        group.append(row);
+      }
+      if (workspace.path === state.workspace) currentPage = page;
+      if (page.next_cursor && workspace.path !== state.workspace) {
+        const more = textNode("button", "切换以查看更多", "load-more");
+        more.addEventListener("click", () => switchWorkspace(workspace.path).catch(showError));
+        group.append(more);
+      }
+    } catch (error) { group.append(textNode("p", error.message, "muted")); }
+    target.append(group);
+  }
+  state.sessionCursor = currentPage?.next_cursor;
+  $("more-sessions").hidden = !state.sessionCursor;
+  $("sessions-label").textContent = state.query ? "当前工作区搜索" : state.archived ? "已归档 · 按工作区" : "工作区";
+  if (currentPage) {
+    $("archived-count").textContent = currentPage.archived_count || 0;
+    $("archived-toggle").hidden = !currentPage.archived_count && !state.archived;
   }
   paintActivity();
 }
+
 function sessionRow(session) {
   const row = document.createElement("div");
   row.className = "session-row"; row.dataset.id = session.id; row.dataset.archived = session.archived_at ? "1" : "";
@@ -492,7 +568,12 @@ function sessionRow(session) {
   const name = document.createElement("span"); name.className = "session-name";
   name.textContent = session.title || "未命名会话";
   open.append(dot, name);
-  open.addEventListener("click", () => openSession(session.id).catch(showError));
+  open.addEventListener("click", async () => {
+    try {
+      if (row.dataset.workspace && row.dataset.workspace !== state.workspace) await switchWorkspace(row.dataset.workspace);
+      await openSession(session.id);
+    } catch (error) { showError(error); }
+  });
   const menu = document.createElement("button");
   menu.type = "button"; menu.className = "session-menu"; menu.textContent = "⋯";
   menu.title = "会话操作"; menu.setAttribute("aria-label", "会话操作");
@@ -567,17 +648,18 @@ async function openSession(id, {preserveScroll = false} = {}) {
   $("artifacts-list").replaceChildren(textNode("p", "正在加载…", "artifacts-empty")); $("artifacts-count").textContent = "0";
   state.sources = new Map(); state.runMemories = new Map();
   localStorage.setItem("chagent.session", id);
-  for (const row of $("sessions").children) row.classList.toggle("active", row.dataset.id === id);
+  for (const row of $("sessions").querySelectorAll(".session-row")) row.classList.toggle("active", row.dataset.id === id);
   try {
     const [session, page, sources] = await Promise.all([
       api(`/api/sessions/${id}`), api(`/api/sessions/${id}/messages`),
       // Citations are an enhancement: a failure here must not cost the transcript.
       api(`/api/sessions/${id}/sources`).catch(() => ({runs: []}))]);
     if (version !== state.version) return;
+    if (session.workspace !== state.workspace) await ensureWorkspace(session.workspace);
     $("session-title").textContent = session.title || "未命名会话";
     $("mode-note").hidden = session.mode !== "code";
     $("mode-note").textContent = session.mode === "code"
-      ? (state.config?.workspace_writable
+      ? (state.config?.code_workspace_writable
         ? "代码开发 · 允许修改工作区 · 无逐次审批 · 命令断网 · 不支持交互输入"
         : "只读代码分析 · 工作区不可修改 · 命令断网 · 不支持交互输入") : "";
     // An archived session is still readable; only new input is refused. The
@@ -716,7 +798,7 @@ $("close-usage").addEventListener("click", () => $("usage-dialog").close());
 // ---------- 后台运行可见 ----------
 let activeTimer = null;
 function paintActivity() {
-  for (const row of $("sessions").children) {
+  for (const row of $("sessions").querySelectorAll(".session-row")) {
     const dot = row.querySelector(".dot");
     if (dot) dot.hidden = !state.active.has(row.dataset.id);
   }
@@ -852,7 +934,8 @@ async function showApproval(runId) {
 $("composer").addEventListener("submit", async event => {
   event.preventDefault();
   const text = $("input").value;
-  if (!text.trim() || state.busy || state.loading || state.readonly || uploads.items.some(item => ["queued", "uploading"].includes(item.status))) return;
+  if (!state.workspace) { $("workspace-button").click(); return; }
+  if (!text.trim() || state.busy || state.loading || state.readonly || uploads.items.some(item => ["queued", "uploading", "pending"].includes(item.status))) return;
   clearError(); state.loading = true; updateComposer();
   try {
     if (!state.session) {
@@ -932,7 +1015,7 @@ function uploadItemView(item) {
   facts.append(textNode("div", item.name, "upload-name"));
   const meta = textNode("div", "", "upload-meta");
   const labels = {queued: "等待上传", uploading: `上传中 ${Math.round(item.progress * 100)}%`,
-    done: `已上传 ${formatSize(item.size)}`, failed: item.error || "上传失败"};
+    pending: "等待同名输出确认", done: `已上传 ${formatSize(item.size)}`, failed: item.error || "上传失败"};
   meta.textContent = labels[item.status];
   meta.classList.toggle("failed", item.status === "failed");
   facts.append(meta);
@@ -945,6 +1028,12 @@ function uploadItemView(item) {
     facts.append(bar);
   }
   if (item.note) facts.append(textNode("div", item.note, "upload-meta"));
+  if(item.status === "done" && item.workspaceId && item.path) {
+    const open=textNode("button","打开文件","upload-meta");open.type="button";
+    open.addEventListener("click",()=>window.ChagentFiles?.open(item.workspaceId,item.path).catch(showError));
+    const download=textNode("a","下载","upload-meta");download.href=`/api/workspaces/${item.workspaceId}/content?${new URLSearchParams({path:item.path})}`;download.download=item.name;
+    facts.append(open,download);
+  }
   row.append(thumb, facts);
   if (item.status === "failed" && item.retryable) {
     const retry = textNode("button", "↻", "upload-retry");
@@ -954,7 +1043,14 @@ function uploadItemView(item) {
   }
   const remove = textNode("button", "×", "upload-remove");
   remove.type = "button"; remove.title = "移除"; remove.setAttribute("aria-label", `移除 ${item.name}`);
-  remove.addEventListener("click", () => {
+  remove.addEventListener("click", async () => {
+    if (item.status === "pending" && item.outputId) {
+      try {
+        const output = await api(`/api/workspaces/${item.workspaceId}/outputs/${item.outputId}`);
+        if (output.status === "pending") await post(`/api/workspaces/${item.workspaceId}/outputs/${item.outputId}/decision`, {token:output.token,choice:"cancel"});
+        await window.ChagentFiles?.refresh();
+      } catch (error) { showError(error); return; }
+    }
     if (item.request) { try { item.request.abort(); } catch { /* already finished */ } }
     uploads.items = uploads.items.filter(other => other !== item);
     renderUploads(); applyUploadPrompt();
@@ -974,7 +1070,8 @@ function uploadOne(item) {
     // Painted before the first byte: the row says "上传中" the moment it is
     // queued, not when the first progress event arrives.
     renderUploads();
-    request.open("POST", withWorkspace(`/api/uploads?name=${encodeURIComponent(item.name)}`));
+    if (!item.requestId) item.requestId = crypto.randomUUID();
+    request.open("POST", withWorkspace(`/api/uploads?name=${encodeURIComponent(item.name)}&request_id=${item.requestId}`));
     request.setRequestHeader("Content-Type", item.file.type || "application/octet-stream");
     request.upload.addEventListener("progress", event => {
       if (!event.lengthComputable) return;
@@ -985,7 +1082,14 @@ function uploadOne(item) {
       let value = {};
       try { value = JSON.parse(request.responseText || "{}"); } catch { value = {}; }
       if (request.status >= 200 && request.status < 300) {
-        item.status = "done"; item.path = value.path; item.progress = 1; item.error = "";
+        item.status = value.status === "pending" || value.status === "staged" ? "pending" : "done";
+        item.path = value.path; item.progress = 1; item.error = "";
+        item.outputId = value.output_id; item.workspaceId = value.workspace_id;
+        if (item.status === "pending") {
+          item.note = "同名文件等待确认：请在文件面板选择覆盖、保留两份或取消。";
+          window.ChagentShowFiles?.();
+        }
+        window.ChagentFiles?.refresh().catch(showError);
       } else {
         item.status = "failed"; item.retryable = request.status !== 413;
         item.error = request.status === 413
@@ -1097,6 +1201,7 @@ document.addEventListener("click", event => {
   if (code) copyText(code.textContent, button);
 });
 $("new-session").addEventListener("click", async () => {
+  if (!state.workspace) { $("workspace-button").click(); return; }
   try {
     // A new session is never archived: leave that view so it is visible.
     if (state.archived) showArchived(false);
@@ -1194,12 +1299,15 @@ $("context-panel").addEventListener("toggle", () => { if ($("context-panel").ope
 // Opening a directory is a server-side decision: it joins the set of roots this
 // process may touch. The choice is remembered per browser, not per session.
 async function ensureWorkspace(path) {
+  if (window.ChagentFiles && !await window.ChagentFiles.beforeWorkspace(path)) throw new Error("已取消切换工作区；草稿保留。");
   const opened = await post("/api/workspaces", {path});
   state.workspace = opened.path;
   localStorage.setItem("chagent.workspace", opened.path);
   $("workspace").textContent = workspaceName(opened.path);
   $("workspace-parent").textContent = workspaceParent(opened.path);
   $("workspace").title = opened.path;
+  window.ChagentCurrentWorkspace = opened;
+  window.ChagentFiles?.workspace(opened);
   return opened;
 }
 // The full path lives in the title. The sidebar shows the last segment in ink
@@ -1216,20 +1324,34 @@ function workspaceParent(path) {
 async function init() {
   const info = await api("/api/info");
   state.config = await api("/api/config");
-  $("code-mode-option").textContent = state.config.workspace_writable ? "代码开发" : "只读代码分析";
+  $("code-mode-option").textContent = state.config.code_workspace_writable ? "代码开发" : "只读代码分析";
   $("mode-picker").hidden = !info.code_mode;
   $("new-mode").value = "work";
   $("model").textContent = `${info.provider} / ${info.model}`;
   const stored = localStorage.getItem("chagent.workspace");
   if (stored && stored !== info.workspace) {
     try { await ensureWorkspace(stored); }
-    catch { await ensureWorkspace(info.workspace); }
-  } else await ensureWorkspace(info.workspace);
+    catch {
+      state.workspace = null;
+      $("workspace-button").click();
+      workspaceNotice("上次工作区已不可用，请明确选择本机目录。历史会话仍保留。", true);
+      return;
+    }
+  } else if (stored) await ensureWorkspace(info.workspace);
+  else {
+    $("workspace-button").click();
+    $("status").textContent = "请先打开本机文件夹，再开始聊天";
+    return;
+  }
   await listSessions();
   refreshActive();
   const previous = localStorage.getItem("chagent.session");
   if (previous) {
-    try { await openSession(previous); }
+    try {
+      const groups = await api("/api/workspaces");
+      for (const item of groups.items.filter(item => item.available)) await post("/api/workspaces", {path: item.path, touch: false});
+      await openSession(previous);
+    }
     catch (error) { localStorage.removeItem("chagent.session"); state.session = null; loadGeneratedFiles(); showError(error); }
   }
 }
@@ -1253,6 +1375,7 @@ function applyCollapsed(name, collapsed) {
   document.body.classList.toggle(`${name}-collapsed`, collapsed);
   $(name === "sidebar" ? "toggle-sidebar" : "toggle-tools").setAttribute("aria-expanded", String(!collapsed));
   syncDrawers();
+  window.dispatchEvent?.(new CustomEvent("chagent-panels-changed"));
   if ((name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches)) return;
   localStorage.setItem(`chagent.${name}.collapsed`, collapsed ? "1" : "0");
 }
@@ -1260,7 +1383,7 @@ function restorePanels() {
   for (const name of ["sidebar", "tools"]) {
     const overlay = (name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches);
     const saved = localStorage.getItem(`chagent.${name}.collapsed`);
-    applyCollapsed(name, overlay || (saved === null ? name === "tools" : saved === "1"));
+    applyCollapsed(name, overlay || (saved === null ? false : saved === "1"));
   }
 }
 restorePanels();
@@ -1407,7 +1530,8 @@ async function loadWorkspaces() {
     row.classList.toggle("active", item.path === state.workspace);
     const label = textNode("span", `${workspaceParent(item.path)}${workspaceName(item.path)}`);
     label.title = item.path;
-    row.append(label, textNode("span", `${item.sessions} 个会话`, "muted"));
+    row.append(label, textNode("span", item.available ? `${item.sessions} 个会话` : item.reason, "muted"));
+    row.disabled = !item.available;
     row.addEventListener("click", () => {
       switchWorkspace(item.path).then(() => $("workspace-dialog").close())
         .catch(error => workspaceNotice(error.message, true));
@@ -1446,7 +1570,7 @@ function configValue(key, c) {
     case "sandbox": return c.sandbox === "off" ? "关闭" : `${c.sandbox}${c.readonly_code ? "（只读）" : ""}，${c.sandbox_network ? "允许出网" : "禁止出网"}`;
     case "approval": return `${c.approval}，等待 ${Math.round(c.approval_timeout)} 秒，` +
       (c.approval_grace ? `无人查看 ${Math.round(c.approval_grace)} 秒后放弃` : "无人查看也等到超时");
-    case "workspace_writable": return c.workspace_writable ? "code 允许，work 关闭" : "关闭";
+    case "workspace_writable": return `work ${c.workspace_writable ? "允许" : "关闭"}；code ${c.code_workspace_writable ? "允许" : c.readonly_code ? "显式只读" : "未开启"}`;
     case "process_stdin": return c.process_stdin ? "允许" : "关闭";
     case "host_commands": return c.host_commands ? "开启" : "关闭";
     case "web_access": return c.web_access === "off" ? "关闭" : `${c.web_access}，密钥${c.web_key === "set" ? "已配置" : "缺失"}`;
@@ -1482,3 +1606,36 @@ $("open-config").addEventListener("click", () => {
   loadConfigUsage().catch(error => { notice.textContent = error.message; notice.classList.add("failed"); });
 });
 $("close-config").addEventListener("click", () => $("config-dialog").close());
+
+$("native-workspace-picker").addEventListener("click", async () => {
+  const button = $("native-workspace-picker"); button.disabled = true;
+  workspaceNotice("请选择本机文件夹…");
+  try {
+    const result = await post("/api/workspace-picker", {});
+    if (result.cancelled) workspaceNotice("已取消选择");
+    else { await switchWorkspace(result.workspace.path); $("workspace-dialog").close(); }
+  } catch (error) { workspaceNotice(error.message, true); }
+  finally { button.disabled = false; }
+});
+
+window.ChagentWorkspaceSwitch = switchWorkspace;
+window.ChagentShowFiles = () => { applyCollapsed("tools", false); window.ChagentFiles?.selectFiles(); };
+window.ChagentLoadContext = () => loadContext().catch(showError);
+window.addEventListener("chagent-output-decision", event => {
+  const output = event.detail;
+  for (const item of uploads.items) if (item.outputId === output.id) {
+    item.status = output.status === "committed" ? "done" : "failed";
+    item.path = output.output_path || item.path;
+    item.note = output.status === "committed" ? "文件已保存到工作区" : "输出已取消或超时";
+  }
+  renderUploads(); applyUploadPrompt(); loadGeneratedFiles().catch(showError);
+});
+
+window.ChagentCheckUploads = async () => {
+  for(const item of uploads.items.filter(item=>item.status === "pending" && item.outputId)) {
+    const output=await api(`/api/workspaces/${item.workspaceId}/outputs/${item.outputId}`);
+    if(["committed","cancelled","expired","failed"].includes(output.status)) {
+      window.dispatchEvent(new CustomEvent("chagent-output-decision", {detail:output}));
+    }
+  }
+};
