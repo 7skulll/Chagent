@@ -171,6 +171,21 @@ class ConversationRepository:
                 "updated_at = now() WHERE id = %s", (archived, session_id),
             )
 
+    async def set_session_mode(self, session_id: UUID, mode: str) -> None:
+        """Switch the face later runs of this session resolve.
+
+        Idle-locked on purpose: a run pins its face when it starts, so switching
+        under it would make the prompt and the executing face disagree mid-run.
+        The history keeps whatever the earlier face did; it is a record, not a
+        claim about the current tools.
+        """
+        if mode not in {"work", "code"}:
+            raise ValueError("Session mode must be work or code")
+        async with self.database.transaction() as connection:
+            await self._lock_session(connection, session_id, idle=True)
+            await connection.execute(
+                "UPDATE sessions SET mode = %s, updated_at = now() WHERE id = %s", (mode, session_id))
+
     async def message_page(self, session_id: UUID, *, before: int | None = None, limit: int = 100) -> MessagePage:
         if not 1 <= limit <= 200 or (before is not None and before < 1):
             raise ValueError("Invalid message page bounds")

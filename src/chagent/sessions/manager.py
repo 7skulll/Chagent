@@ -52,6 +52,10 @@ class SessionManager:
         await self.repository.archive_session(session_id, False)
         return await self.get(session_id)
 
+    async def set_mode(self, session_id: UUID, mode: str) -> Session:
+        await self.repository.set_session_mode(session_id, validate_mode(mode))
+        return await self.get(session_id)
+
     async def messages(self, session_id: UUID, *, before: int | None = None, limit: int = 100) -> MessagePage:
         return await self.repository.message_page(session_id, before=before, limit=limit)
 

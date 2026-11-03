@@ -29,6 +29,7 @@ def main():
         result = {"provider": settings.provider, "model": settings.model_id, "base_url": settings.base_url,
                   "api": settings.api, "context_budget": settings.context_window,
                   "output_budget": settings.max_tokens, "key_configured": True,
+                  "thinking": settings.thinking, "thinking_source": settings.thinking_source,
                   "network_checked": False}
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

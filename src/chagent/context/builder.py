@@ -56,12 +56,41 @@ TOOLS_SECTION = (
     "for a downloadable text file, use it with complete content and a descriptive filename."
 )
 
+# The tool list alone is a weak signal: a model that cannot find ``exec_command``
+# tends to report the capability as absent from the product, not from this
+# session. Naming the mode, and whether the build has the other one, keeps a
+# refusal accurate and actionable. Run-static like ``environment``: the mode is
+# fixed when the session is created, so this never changes between the turns of a
+# run and cannot break the provider cache prefix.
+#
+# Work mode only gets a section when the build actually has a code face. In a
+# work-only build "I cannot run commands" is the whole truth and there is nothing
+# for the user to act on, so the section would spend tokens saying nothing — and
+# a small context window is exactly where that cost is not affordable.
+MODE_SECTIONS = {
+    "work": (
+        "This session is work mode: it reads documents and edits workspace files, but host "
+        "commands are not part of its tools. This build also offers code mode, where "
+        "exec_command, run_tests and process exist. If the user asks you to run something, "
+        "say this session cannot, and that switching this session to code mode — or starting "
+        "a code session — makes it possible. Frame it as the session's scope, not as a "
+        "limitation of the product."
+    ),
+    "code": (
+        "This session is code mode: exec_command, run_tests and process are available. Work "
+        "through them instead of describing what could be done. Commands run in an isolated "
+        "sandbox with network off, writes confined to the workspace, and no interactive "
+        "stdin. Pass yield_time_ms to keep a long command alive and manage it with process "
+        "(read/stop only)."
+    ),
+}
+
 # The system prompt is assembled from named sections in a fixed order. The order
 # and the bytes matter: this text is the provider's cache prefix, so it is built
 # once per run and never re-ordered. Naming the parts makes a prompt change
 # auditable as "which section moved" instead of a diff of one long string, and
 # gives the cache audit a stable label per section.
-SECTION_ORDER = ("preamble", "tools", "rules", "environment", "state")
+SECTION_ORDER = ("preamble", "tools", "mode", "rules", "environment", "state")
 
 RULES_SECTION = (
     "Do not assume the working directory, operating system, repository, branch, file contents, "
@@ -91,6 +120,8 @@ class BasicContextBuilder:
         cache: ProjectionCache | None = None,
         recovery: RecoveryNote | None = None,
         environment: str | None = None,
+        mode: str | None = None,
+        other_modes: tuple[str, ...] = (),
     ) -> BuiltContext:
         original = history
         if len({item.id for item in history}) != len(history):
@@ -121,6 +152,8 @@ class BasicContextBuilder:
             # Computed once per run by the runner, so the prefix stays byte-identical
             # between turns; see environment.py for why that matters.
             sections["environment"] = environment
+        if mode in MODE_SECTIONS and (mode != "work" or "code" in other_modes):
+            sections["mode"] = MODE_SECTIONS[mode]
         state_parts: list[str] = []
         if task_state is not None:
             state = asdict(task_state)

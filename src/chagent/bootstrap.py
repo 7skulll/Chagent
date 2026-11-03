@@ -167,7 +167,8 @@ def create_runner(
     runner = AgentRunner(
         model=model, client=client, context=builder,
         tools=(faces.get("code") or default_face) if single_face else default_face,        conversations=conversations, runs=runs,
-        context_manager=ContextManager(builder, conversations, runs, SummaryRepository(database), policy=compaction_policy),
+        context_manager=ContextManager(builder, conversations, runs, SummaryRepository(database), policy=compaction_policy,
+                                       modes=tuple(faces)),
         memory_service=memory_service,
         timeout=timeout, max_turns=max_turns,
         max_tool_concurrency=max_tool_concurrency,

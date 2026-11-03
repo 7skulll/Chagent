@@ -35,16 +35,21 @@ class SessionCreate(InputModel):
 
 
 class SessionEdit(InputModel):
-    """Session metadata; both fields are optional but at least one is required.
+    """Session metadata; every field is optional but at least one is required.
 
     ``title`` empty means "no title", not "leave it alone": an explicit null is
     rejected so a missing field and a cleared one stay different requests.
+    ``mode`` switches which tool face later runs of this session resolve; it is
+    refused while a run is active, because that run already pinned its face.
     """
 
     title: Annotated[StrictStr, Field(max_length=200)] | None = None
     archived: StrictBool | None = None
+    #: Absent means "leave the mode alone". A build with no code face refuses
+    #: code with 409 rather than silently downgrading it to work.
+    mode: Literal["work", "code"] | None = None
 
-    @field_validator("title", "archived", mode="before")
+    @field_validator("title", "archived", "mode", mode="before")
     @classmethod
     def not_null(cls, value):
         if value is None:
@@ -53,8 +58,8 @@ class SessionEdit(InputModel):
 
     @model_validator(mode="after")
     def nonempty(self):
-        if not self.model_fields_set.intersection({"title", "archived"}):
-            raise ValueError("Provide title or archived to edit")
+        if not self.model_fields_set.intersection({"title", "archived", "mode"}):
+            raise ValueError("Provide title, archived or mode to edit")
         return self
 
 

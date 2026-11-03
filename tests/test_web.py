@@ -683,6 +683,69 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.runtime.close)
 
     @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
+    async def test_mode_switches_inside_one_session_and_pins_per_run(self):
+        """The chat switch changes the next run's face, never the running one."""
+        await self.enable_development()
+        identity = await self.create_session()
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).json()["mode"], "work")
+        switched = await self.client.patch(f"/api/sessions/{identity}", json={"mode": "code"})
+        self.assertEqual(switched.status_code, 200, switched.text)
+        self.assertEqual(switched.json()["mode"], "code")
+        # The history keeps the work-face turn; nothing is rewritten on switch.
+        self.runner.client = FakeModelClient("exec_command", {"cmd": "echo switched"})
+        sent = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "run"})
+        self.assertEqual(sent.status_code, 202, sent.text)
+        result = await self.wait_run(sent.json()["run_id"])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIn("switched", json.dumps((await self.client.get(
+            f"/api/sessions/{identity}/messages")).json()))
+        back = await self.client.patch(f"/api/sessions/{identity}", json={"mode": "work"})
+        self.assertEqual(back.json()["mode"], "work")
+        # Switching back removes the command tool from the declared face, so the
+        # same call now fails as unknown instead of executing — the face really
+        # did change, it is not merely relabelled.
+        self.runner.client = FakeModelClient("exec_command", {"cmd": "echo again"})
+        sent = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "run"})
+        result = await self.wait_run(sent.json()["run_id"])
+        history = json.dumps((await self.client.get(f"/api/sessions/{identity}/messages")).json())
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIn("Unknown tool: exec_command", history)
+        self.assertNotIn("again\n", history)
+
+    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
+    async def test_mode_cannot_switch_under_an_active_run(self):
+        await self.enable_development()
+        identity = await self.create_session()
+        gate, release = asyncio.Event(), asyncio.Event()
+
+        class Slow(FakeModelClient):
+            async def stream(self, request):
+                gate.set()
+                await release.wait()
+                async for event in super().stream(request):
+                    yield event
+
+        self.runner.client = Slow("read_file", {"path": "x"})
+        sent = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "slow"})
+        await asyncio.wait_for(gate.wait(), 5)
+        refused = await self.client.patch(f"/api/sessions/{identity}", json={"mode": "code"})
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).json()["mode"], "work")
+        release.set()
+        await self.wait_run(sent.json()["run_id"])
+
+    async def test_mode_switch_to_code_is_refused_by_a_work_only_build(self):
+        identity = await self.create_session()
+        refused = await self.client.patch(f"/api/sessions/{identity}", json={"mode": "code"})
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertIn("code", refused.text)
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).json()["mode"], "work")
+
+    async def test_session_edit_still_rejects_an_empty_body(self):
+        identity = await self.create_session()
+        self.assertEqual((await self.client.patch(f"/api/sessions/{identity}", json={})).status_code, 400)
+
+    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
     async def test_development_and_work_write_files_without_command_approvals(self):
         await self.enable_development()
         cfg = (await self.client.get("/api/config")).json()

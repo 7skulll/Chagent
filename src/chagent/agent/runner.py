@@ -308,10 +308,14 @@ class AgentRunner:
 
     async def _loop(self, state: RunState, budget=None) -> RunResult:
         run_id, session_id = state.run_id, state.session.id
-        # Resolved once: a run inherits its session's mode and may not switch it,
-        # so the tool declarations in the prompt and the executing face agree for
-        # the whole run.
+        # Resolved once per run: the mode can be switched between runs, so a run
+        # that started in one face finishes in it. Switching mid-run is refused
+        # by the idle lock, which is what keeps the declared tools and the
+        # executing face in agreement for the whole run.
         executor = self.executor_for(state.session.mode)
+        # Only a build with per-mode faces can speak about modes truthfully; the
+        # single-face harness resolves code tools whatever the session row says.
+        prompt_mode = state.session.mode if self.tool_faces is not None else None
         tool_context = ToolContext(
             workspace=state.session.workspace, session_id=session_id, run_id=run_id,
             workspace_identity=state.workspace_identity,
@@ -327,7 +331,7 @@ class AgentRunner:
             try:
                 if self.context_manager is not None:
                     built = await self.context_manager.prepare(session_id, run_id, self.model, self.client,
-                                                                state.tools, state=state)
+                                                                state.tools, state=state, prompt_mode=prompt_mode)
                 else:
                     built = await self.context.build(state.history, self.model, state.tools,
                                                      task_state=state.task_state, current_run_id=run_id,

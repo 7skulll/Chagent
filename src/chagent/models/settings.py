@@ -46,6 +46,16 @@ class ModelSettings:
     # the pre-retry behaviour exactly.
     retry_attempts: int = 2
     retry_delay: float = 0.5
+    #: Ask the provider for its reasoning channel instead of suppressing it. The
+    #: decoders already read ``reasoning_content``/signed thinking into
+    #: ThinkingContent, so this only changes what the request asks for. Off is
+    #: the pre-existing wire behaviour: a provider that ignores the field costs
+    #: nothing, one that rejects it would fail every turn, so it is opt-in.
+    thinking: bool = False
+    #: Which variable stated it, for the same reason as ``key_source``: one place
+    #: resolves precedence so diagnostics cannot re-derive it differently.
+    #: ``CHAGENT_THINKING`` wins when both are set.
+    thinking_source: str = ""
     # Name only; never include the credential in diagnostics.
     key_source: str = ""
 
@@ -84,8 +94,11 @@ class ModelSettings:
         """
         source = self.key_source or "environment"
         retries = f"retry {self.retry_attempts}" if self.retry_attempts else "no retry"
+        # Silent either way is the failure mode worth naming: thinking off looks
+        # like a model that simply did not reason.
+        reasoning = f"thinking on ({self.thinking_source or 'default'})" if self.thinking else "thinking off"
         return (f"{self.provider}/{self.model_id} ({self.api}) -> {self.base_url} "
-                f"| key {source} | {retries}")
+                f"| key {source} | {retries} | {reasoning}")
 
     def model(self) -> Model:
         return Model(self.model_id, self.provider, self.api, self.context_window, self.max_tokens, endpoint=self.base_url)
@@ -121,6 +134,20 @@ class ModelSettings:
             raise ModelConfigurationError("Custom providers require CHAGENT_BASE_URL and CHAGENT_MODEL")
         if not key:
             raise ModelConfigurationError(f"No API key configured: set {key_source} for {provider}")
+        # Accept the same on/off spelling as the other switches; anything else is
+        # a typo that would otherwise silently mean "off" and look like the
+        # provider ignoring us.
+        thinking_source = ""
+        thinking = False
+        for name in ("CHAGENT_THINKING", "CHAGENT_REASONING"):
+            if values.get(name, "").strip():
+                thinking_source = name
+                break
+        if thinking_source:
+            stated = values[thinking_source].strip().lower()
+            if stated not in {"on", "off"}:
+                raise ModelConfigurationError(f"{thinking_source} must be on or off")
+            thinking = stated == "on"
         try:
             return cls(
                 provider=provider, model_id=model, base_url=base_url, api_key=key,
@@ -131,6 +158,8 @@ class ModelSettings:
                 request_timeout=float(values.get("CHAGENT_MODEL_TIMEOUT", "60")),
                 run_timeout=float(values.get("CHAGENT_RUN_TIMEOUT", "180")),
                 retry_attempts=int(values.get("CHAGENT_RETRY_ATTEMPTS", "2")),
+                thinking=thinking,
+                thinking_source=thinking_source,
             )
         except ModelConfigurationError:
             raise

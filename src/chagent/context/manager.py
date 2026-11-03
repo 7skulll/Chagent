@@ -18,8 +18,12 @@ from chagent.storage.summaries import SummaryRepository
 
 class ContextManager:
     def __init__(self, builder: BasicContextBuilder, conversations: ConversationRepository,
-                 runs: RunRepository, summaries: SummaryRepository, *, policy: CompactionPolicy | None = None):
+                 runs: RunRepository, summaries: SummaryRepository, *, policy: CompactionPolicy | None = None,
+                 modes: tuple[str, ...] = ("work",)):
         self.builder, self.conversations, self.runs, self.summaries = builder, conversations, runs, summaries
+        # Which faces this build can hand a session. The prompt names the other
+        # mode only when it is really reachable.
+        self.modes = tuple(modes)
         self.policy = policy or CompactionPolicy.from_env()
         self.compactor = ContextCompactor(builder, summaries, self.policy)
         self._attempted: dict[UUID, tuple[int, int]] = {}
@@ -44,7 +48,7 @@ class ContextManager:
         return built
 
     async def prepare(self, session_id: UUID, run_id: UUID, model: Model, client: ModelClient, tools,
-                      *, state: RunState | None = None) -> BuiltContext:
+                      *, state: RunState | None = None, prompt_mode: str | None = None) -> BuiltContext:
         history = state.history if state else await self.conversations.messages(session_id, current_run=run_id, project_artifacts=True)
         task_state = state.task_state if state else await self.conversations.task_state(session_id)
         previous = state.summary if state else await self.summaries.latest(session_id, current_run=run_id)
@@ -52,6 +56,13 @@ class ContextManager:
         # Run-static facts; absent only when a caller drives the builder without
         # a run state, in which case the prompt keeps its bare form.
         environment = state.environment if state is not None else None
+        # The session's mode, for the same reason: fixed at creation, so it can sit
+        # in the cached prefix. ``prompt_mode`` is stated by the runner, which is
+        # the only object that knows which face it actually resolved — a
+        # single-face harness runs code tools under a work session row, and the
+        # prompt must not claim otherwise.
+        mode = prompt_mode
+        other_modes = tuple(name for name in self.modes if name != mode)
         current_input = next(item for item in reversed(history) if isinstance(item.message, UserMessage))
         owned = any(item.run_id == run_id for item in history)
 
@@ -59,7 +70,7 @@ class ContextManager:
             return await self.builder.build(history, model, tools, task_state=task_state,
                                             current_run_id=run_id, summary=summary, allow_over_budget=True,
                                             cache=self._cache(run_id), recovery=recovery,
-                                            environment=environment)
+                                            environment=environment, mode=mode, other_modes=other_modes)
 
         baseline = await build(previous)
         omissions = any(not item.selected and item.reason != "summarized" for item in baseline.snapshot.selections)

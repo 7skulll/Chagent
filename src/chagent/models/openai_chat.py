@@ -49,12 +49,13 @@ class OpenAIChatClient(HTTPModelClient):
         reasoning_model = request.model.id.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
         token_field = "max_completion_tokens" if self.settings.provider == "openai" and reasoning_model else "max_tokens"
         body[token_field] = request.max_tokens or request.model.max_tokens
+        thinking = self.settings.thinking
         if self.settings.provider == "openai" and reasoning_model:
-            body["reasoning_effort"] = "low"
+            body["reasoning_effort"] = "high" if thinking else "low"
         elif self.settings.provider == "deepseek":
-            body["thinking"] = {"type": "disabled"}
+            body["thinking"] = {"type": "enabled" if thinking else "disabled"}
         elif self.settings.provider == "qwen":
-            body["enable_thinking"] = False
+            body["enable_thinking"] = thinking
         return body
 
     async def decode(self, response: httpx.Response, partial: AssistantMessage) -> AsyncIterator[AssistantMessageEvent]:

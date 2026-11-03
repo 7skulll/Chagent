@@ -393,14 +393,21 @@ async def sessions(current: Current, limit: PageLimit = 50, before: UUID | None 
 
 @api.patch("/sessions/{session_id}", response_model=Session, tags=["会话"])
 async def edit_session(session_id: UUID, value: SessionEdit, current: Current):
-    """Rename or archive; both are the same question about session metadata."""
-    await current.session(session_id)
-    session = await current.sessions.get(session_id)
+    """Rename, archive or switch mode; all three are session metadata.
+
+    Switching to code runs the same preflight a code session gets on every
+    access, so a broken sandbox is refused here instead of failing mid-run.
+    """
+    session = await current.session(session_id)
     if value.title is not None:
         session = await current.sessions.rename(session_id, value.title)
     if value.archived is not None:
         session = (await current.sessions.archive(session_id) if value.archived
                    else await current.sessions.restore(session_id))
+    if value.mode is not None and value.mode != session.mode:
+        if value.mode == "code":
+            await current.require_code(session.workspace)
+        session = await current.sessions.set_mode(session_id, value.mode)
     return session
 
 
@@ -420,7 +427,7 @@ async def usage(current: Current, days: Annotated[int, Query(ge=1, le=90)] = 7):
 
 @api.post("/sessions", response_model=Session, status_code=201, tags=["会话"])
 async def create_session(value: SessionCreate, current: Current):
-    """Mode is chosen once, here, and only if this build can serve it."""
+    """Mode may be given here; it can also be switched later through PATCH."""
     mode = value.mode or current.settings.default_mode
     if mode == "code":
         await current.require_code(current.root(value.workspace))

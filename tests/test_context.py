@@ -263,6 +263,24 @@ class PromptSectionTests(unittest.IsolatedAsyncioTestCase):
         built = await builder.build(self.history(), self.model, [])
         self.assertEqual(list(built.request.messages[0].sections), ["preamble", "tools", "rules"])
 
+    async def test_mode_section_names_the_session_and_the_other_face(self):
+        """A work session in a code-capable build must not report a missing capability."""
+        builder = BasicContextBuilder(policy=ContextPolicy(safety_tokens=0))
+        work = await builder.build(self.history(), self.model, [], mode="work", other_modes=("code",))
+        text = work.request.messages[0].sections["mode"]
+        self.assertIn("work mode", text)
+        self.assertIn("code mode", text)
+        self.assertIn("exec_command", text)
+        code = await builder.build(self.history(), self.model, [], mode="code", other_modes=("work",))
+        self.assertIn("exec_command", code.request.messages[0].sections["mode"])
+        # Order is the cache prefix: mode sits right after the tool list.
+        self.assertEqual(list(code.request.messages[0].sections)[:4], ["preamble", "tools", "mode", "rules"])
+
+    async def test_work_only_build_spends_no_tokens_on_a_mode_the_user_cannot_reach(self):
+        builder = BasicContextBuilder(policy=ContextPolicy(safety_tokens=0))
+        built = await builder.build(self.history(), self.model, [], mode="work", other_modes=())
+        self.assertEqual(list(built.request.messages[0].sections), ["preamble", "tools", "rules"])
+
     async def test_each_section_is_byte_identical_across_turns(self):
         builder = BasicContextBuilder(policy=ContextPolicy(safety_tokens=0))
         first = await builder.build(self.history(), self.model, [], task_state=TaskState(goal="ship"),
