@@ -2,7 +2,9 @@
 
 本机单用户 Agent：在本地网页对话，Python 进程调用模型和工具，PostgreSQL 保存可检查的历史、请求、工具结果与事件。
 
-默认使用 **work 模式**读取资料、理解文档、生成可下载文本。网页现支持按配置开启 **只读代码分析**：读代码、查看 Git 历史与差异、运行适用测试；工作区由内核禁写，命令断网，process 仅 read/stop。网页不开放可写 code 或交互 stdin；CLI work 仍保留既有写工具。支持范围见[实施计划](docs/实施计划.md)。
+默认使用 **work 模式**读取资料、理解文档、生成可下载文本。网页现支持按配置开启 **只读代码分析**：读代码、查看 Git 历史与差异、运行适用测试；工作区由内核禁写，命令断网，process 仅 read/stop。显式 `trusted-development` 配置现支持网页可写 code：创建、编辑、命令和测试无需逐次审批；命令仍隔离断网，process 仅 read/stop。CLI work 仍保留既有写工具。支持范围见[实施计划](docs/实施计划.md)。
+
+可信开发配置借鉴 pi 的直接工具循环，复用现有 Runner 与工具，在工作区与 isolated 边界内完成创建、修改、执行、测试及修复；work 保持禁写。配置方法见[模型配置](docs/模型配置.md)，真实验收见[开发版验收](docs/代码开发验收-2026-11-03.md)。后续优先验证真实项目，再完善交互审批、网络和扩展回归。
 
 ## 启动
 
@@ -30,7 +32,7 @@ uv run --env-file .env ./scripts/start.command --demo
 
 命名 Key 只有一把时自动选择相应供应商；多把时设置 `CHAGENT_PROVIDER`。支持 OpenAI、DeepSeek、Anthropic、通义及自定义兼容服务，预设和预算见[模型配置](docs/模型配置.md)。启动打印 `Resolved:` 与 `Behavior:`，网页齿轮显示同源配置。
 
-只读 code 底层已实现：`CHAGENT_SANDBOX=isolated` 配合 `CHAGENT_SANDBOX_WRITABLE=false` 时，code 裁掉工作区写工具，命令由内核拒绝写入，process 仅允许 read/stop；私有 HOME/tmp 按 run 分配。网页只开放满足这些条件且宿主命令开启、命令断网的只读 code，配置及验收见实施计划。work 工具面保持原有入口设置。
+只读 code 底层已实现：`CHAGENT_SANDBOX=isolated` 配合 `CHAGENT_SANDBOX_WRITABLE=false` 时，code 裁掉工作区写工具，命令由内核拒绝写入，process 仅允许 read/stop；私有 HOME/tmp 按 run 分配。网页默认只开放满足这些条件且宿主命令开启、命令断网的只读 code；可写 code 必须另外显式启用可信开发配置。work 工具面保持原有入口设置。
 
 网页入口现自动加载项目 `.env`，只补充进程中缺失的变量；可用 `--env-file /路径/.env` 指定文件，已有环境变量优先。安装依赖后可直接运行或双击 `scripts/start.command`。复用旧服务会显示该服务的实际配置，新配置需要重启才生效。不会自动把 shell/工作区资料放进模型请求。
 
@@ -56,7 +58,7 @@ CHAGENT_WEB_ACCESS=deepseek
 
 网页工具运行在 agent 进程中，命令沙箱的断网不覆盖它。私有地址拒绝由供应商执行，本机不能审计完整名单。
 
-`CHAGENT_CODE_MODE=off` 保持默认。生产模型的 code 命令要求 macOS `CHAGENT_SANDBOX=isolated`：默认拒绝、明确读取白名单、独立 HOME/tmp、环境清空、探针失败不降级。旧 workspace-write 只是诊断兼容档，通常仍可读工作区外文件。网页只接受 isolated + sandbox_writable=false + network=false + host_commands=true 的只读 code 配置；可写 code 仍拒绝。详见[执行边界契约](docs/执行边界设计.md)与[隔离验收](docs/code模式执行隔离.md)。
+`CHAGENT_CODE_MODE=off` 保持默认。生产模型的 code 命令要求 macOS `CHAGENT_SANDBOX=isolated`：默认拒绝、明确读取白名单、独立 HOME/tmp、环境清空、探针失败不降级。旧 workspace-write 只是诊断兼容档，通常仍可读工作区外文件。网页接受 isolated + network=false + host_commands=true；默认 configured 要求 sandbox_writable=false，trusted-development 要求 sandbox_writable=true 且 approval=never。详见[执行边界契约](docs/执行边界设计.md)与[隔离验收](docs/code模式执行隔离.md)。
 
 命令/测试和长进程已有底层实现；长进程只属于本 run，正常结束、失败、取消与超时回收进程组，没有 PTY 或重启接管。`process write` 还未进入审批；网页只读档直接禁止 write/EOF，后续交互版仍需 C3。
 
@@ -72,7 +74,7 @@ PYTHONPATH=src .venv/bin/python scripts/probe_code_isolation.py \
 
 数据库测试用独立临时 schema，不读写业务表。未设置测试数据库时集成测试跳过；没有 node 或不能施加 seatbelt 时相应测试可能跳过，跳过不是通过。
 
-最近完整回归 **547 项通过、0 跳过**；只读 R4 的 77 项检查通过，真实项目浏览器验收见[只读验收记录](docs/只读code验收-2026-11-02.md)；C2 的 14 项正反向探针和实际 Shell/Git/Python 测试/长进程通过。真实 work 流程的已验收范围及未测项见[浏览器验收记录](docs/work模式真实验收-2026-11-02.md)，不要把合成项目当作真实项目回归。
+最近完整回归（2026-11-03）**555 项通过、0 跳过**；只读 R4 的 77 项检查通过，真实项目浏览器验收见[只读验收记录](docs/只读code验收-2026-11-02.md)；C2 的 14 项正反向探针和实际 Shell/Git/Python 测试/长进程通过。真实 work 流程的已验收范围及未测项见[浏览器验收记录](docs/work模式真实验收-2026-11-02.md)，不要把合成项目当作真实项目回归。
 
 CLI 保留一次性运行与确定性 `--tool` 诊断，不再扩张为第二套产品入口。从源码启动 CLI 时需显式指定已存在的安全工作区，例如 `--workspace /你的资料目录`；继续会话沿用保存的工作区。
 

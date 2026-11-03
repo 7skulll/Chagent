@@ -10,8 +10,8 @@ files at all. ``code`` adds the host-execution tools, and only exists when the
 build-level switch ``CHAGENT_CODE_MODE`` is on.
 
 A caller that must not let the model change the workspace says so with
-``allow_workspace_writes=False``: the local web app does, because no approval
-gate exists yet for file mutations performed on its behalf. The switch trims the
+``allow_workspace_writes=False``. Web work and read-only code use this;
+explicit development code enables writes independently of per-call approval. The switch trims the
 face at construction; it is not a runtime permission the model can argue with.
 """
 
@@ -46,7 +46,8 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
                             sandbox: Sandbox | None = None,
                             processes: ProcessManager | None = None,
                             web: WebAccess | None = None,
-                            include_echo: bool = False) -> ToolRegistry:
+                            include_echo: bool = False,
+                            process_stdin: bool = True) -> ToolRegistry:
     """One tool face. ``mode`` is required so no call site gets a face by accident.
 
     The second layer (``ToolExecutor``) is the registry itself: an executor built
@@ -71,12 +72,12 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
         registry.register(tool)
     if mode == "code" and allow_host_commands:
         # Both run host processes; the executor enforces the same switch.
-        registry.register(ExecCommandTool(sandbox, processes))
+        registry.register(ExecCommandTool(sandbox, processes, process_stdin=process_stdin))
         registry.register(RunTestsTool(sandbox))
         if processes is not None:
             # Useless without a command to attach to, so it follows the same
             # switch instead of appearing in every session.
-            registry.register(ProcessTool(processes, allowed_actions=("read", "stop") if readonly_code else None))
+            registry.register(ProcessTool(processes, allowed_actions=("read", "stop") if readonly_code or not process_stdin else None))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
         if mode == "work":

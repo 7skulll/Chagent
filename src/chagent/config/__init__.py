@@ -74,8 +74,20 @@ class Settings:
     #: Mode new sessions get. A build that cannot honour it refuses to start
     #: rather than silently creating work sessions.
     default_mode: str = "work"
+    # configured preserves existing approval policy; trusted-development is an
+    # explicit writable web capability, never an automatic approval override.
+    execution_profile: str = "configured"
 
     def __post_init__(self) -> None:
+        if self.execution_profile not in {"configured", "trusted-development"}:
+            raise ValueError("CHAGENT_EXECUTION_PROFILE must be configured or trusted-development")
+        if self.trusted_development and not (
+            self.code_mode and self.allow_host_commands and self.sandbox == "isolated"
+            and self.sandbox_writable and not self.sandbox_network and self.approval == "never"
+        ):
+            raise ValueError("trusted-development requires code=on, host commands, isolated, "
+                             "writable=true, network=false and CHAGENT_APPROVAL=never; "
+                             "existing approval settings are never overridden")
         if not self.database_url.strip():
             raise ValueError("CHAGENT_DATABASE_URL must not be empty")
         try:
@@ -150,8 +162,12 @@ class Settings:
         return ("work", "code") if self.code_mode else ("work",)
 
     @property
+    def trusted_development(self) -> bool:
+        return self.execution_profile == "trusted-development"
+
+    @property
     def readonly_code_available(self) -> bool:
-        """Capability precondition; the web release gate remains closed until R3."""
+        """Configured read-only web capability, before backend preflight."""
         return (self.code_mode and self.allow_host_commands and self.sandbox == "isolated"
                 and not self.sandbox_writable and not self.sandbox_network)
 
@@ -174,6 +190,7 @@ class Settings:
         if sandbox_writable not in {"true", "false"}:
             raise ValueError("CHAGENT_SANDBOX_WRITABLE must be true or false")
         return cls(
+            execution_profile=values.get("CHAGENT_EXECUTION_PROFILE", "configured").strip().lower(),
             sandbox_writable=sandbox_writable == "true",
             database_url=values.get("CHAGENT_DATABASE_URL", "postgresql:///chagent"),
             db_pool_min_size=int(values.get("CHAGENT_DB_POOL_MIN_SIZE", "1")),

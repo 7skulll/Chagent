@@ -33,6 +33,8 @@ def _tool_faces(
     sandbox: Sandbox | None, processes: ProcessManager, web: WebAccess | None,
     include_echo: bool, single_face: bool = False,
     allow_workspace_writes: bool = True,
+    code_workspace_writes: bool | None = None,
+    process_stdin: bool = True,
 ) -> dict[str, ToolExecutor]:
     """One executor per enabled mode, built once per runner.
 
@@ -41,8 +43,8 @@ def _tool_faces(
     absent tool is an unknown tool rather than a permission decision.
 
     Reads and workspace writes are in both faces; ``allow_workspace_writes=False``
-    is how an entry point that cannot supervise a file mutation (the local web)
-    keeps the model away from the user's files without inventing a new mode.
+    keeps a face read-only. code_workspace_writes can explicitly grant code
+    writes without expanding work; process_stdin is independent of both.
 
     ``single_face`` is for the deterministic harness only: it names a tool, so it
     keeps the code face and the runner never resolves by session mode.
@@ -59,7 +61,9 @@ def _tool_faces(
     for mode in modes:
         registry = create_builtin_registry(
             mode=mode, allow_host_commands=allow_host_commands,
-            allow_workspace_writes=allow_workspace_writes,
+            allow_workspace_writes=(code_workspace_writes if mode == "code" and code_workspace_writes is not None
+                                    else allow_workspace_writes),
+            process_stdin=process_stdin,
             artifacts=ArtifactRepository(database), sandbox=sandbox,
             processes=processes, web=web, include_echo=include_echo,
         )
@@ -136,6 +140,8 @@ def create_runner(
     code_mode: bool = False,
     allow_workspace_writes: bool = True,
     single_face: bool = False,
+    code_workspace_writes: bool | None = None,
+    process_stdin: bool = True,
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -144,7 +150,8 @@ def create_runner(
     processes = ProcessManager(wall_timeout=process_wall_timeout, max_per_run=max_processes)
     faces = _tool_faces(database, code_mode=code_mode, allow_host_commands=allow_host_commands,
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
-                        single_face=single_face, allow_workspace_writes=allow_workspace_writes)
+                        single_face=single_face, allow_workspace_writes=allow_workspace_writes,
+                        code_workspace_writes=code_workspace_writes, process_stdin=process_stdin)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))

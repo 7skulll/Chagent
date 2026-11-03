@@ -102,6 +102,11 @@ class IsolatedExecutionTests(unittest.IsolatedAsyncioTestCase):
             await manager.terminate_run(self.context.run_id)
         (self.workspace / 'tests').mkdir()
         (self.workspace / 'tests/test_env.py').write_text(
-            'import os, unittest\nclass Env(unittest.TestCase):\n def test_env(self): self.assertNotIn("PYTHONPATH", os.environ)\n')
-        run = await RunTestsTool(self.sandbox).execute('tests', {'suite': 'unittest'}, context=self.context)
+            'import os, unittest\nclass Env(unittest.TestCase):\n'
+            ' def test_env(self):\n'
+            '  self.assertEqual(os.environ["PYTHONPATH"], os.getcwd())\n'
+            '  self.assertNotIn("DEEPSEEK_API_KEY", os.environ)\n'
+            '  self.assertEqual(os.environ["PYTHONDONTWRITEBYTECODE"], "1")\n')
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "synthetic-only", "PYTHONPATH": "/synthetic-outside"}):
+            run = await RunTestsTool(self.sandbox).execute('tests', {'suite': 'unittest'}, context=self.context)
         self.assertFalse(run.is_error, run)

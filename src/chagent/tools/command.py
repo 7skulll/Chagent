@@ -15,12 +15,14 @@ from chagent.tools.workspace import WorkspaceFS
 
 
 class ExecCommandTool(AgentTool):
-    def __init__(self, sandbox: Sandbox | None = None, processes: ProcessManager | None = None):
+    def __init__(self, sandbox: Sandbox | None = None, processes: ProcessManager | None = None, *,
+                 process_stdin: bool = True):
         self.sandbox = sandbox
         # Session processes are opt-in per call (``yield_time_ms``); without a
         # manager the one-shot behaviour is unchanged and a session request is
         # refused rather than silently downgraded.
         self.processes = processes
+        self.process_stdin = process_stdin and not (sandbox is not None and not sandbox.settings.writable_workspace)
         confined = sandbox is not None and sandbox.enabled
         readonly = confined and not sandbox.settings.writable_workspace
         super().__init__(
@@ -56,6 +58,14 @@ class ExecCommandTool(AgentTool):
                 "In isolated mode, reads are allowlisted and command network is off. "
                 "Use yield_time_ms for a long command; process() only reads output or stops it. "
                 "Interactive stdin/EOF is disabled. Configure tool caches explicitly in scratch."
+            )
+
+        if not self.process_stdin and not readonly:
+            self.description = (
+                "Run a command in the writable workspace under the platform sandbox. "
+                "In isolated mode reads are allowlisted, HOME/tmp are private and command network is off. "
+                "Use yield_time_ms for a long command; process only reads output or stops it. "
+                "Interactive stdin/EOF is disabled. Python uses PYTHONSAFEPATH=1; for project imports set PYTHONPATH=. explicitly or use run_tests. Inspect output and exit status before reporting success."
             )
 
     def execution_timeout(self, params: JsonObject) -> float:
@@ -198,12 +208,11 @@ class ExecCommandTool(AgentTool):
         }
         gap = f"[Output before cursor {missed} was dropped]\n" if missed is not None else ""
         if record.running:
-            readonly = self.sandbox is not None and not self.sandbox.settings.writable_workspace
             head = (f"Running in background: process_id={record.id}\n"
                     f"Yielded after {params['yield_time_ms']}ms; the process keeps running.\n"
                     f"Next: process(action='read', process_id='{record.id}', since={next_cursor}, "
                     "wait_ms=30000) to collect more output.\n"
-                    + ("Interactive stdin is disabled.\n" if readonly else "Use action='write' to send stdin.\n"))
+                    + ("Interactive stdin is disabled.\n" if not self.process_stdin else "Use action='write' to send stdin.\n"))
             return AgentToolResult(content=[TextContent(head + gap + shown)],
                                    details=details)
         if not truncated:

@@ -139,10 +139,8 @@ def main():
     # Ambient variables win over --env-file, so name the resolved pair once.
     if selected is not None:
         print(f"Resolved: {selected.describe()}", flush=True)
-    # ``writes=off`` is what this entry point assembles (see create_app), not a
-    # setting: printing the bare settings line here would advertise a capability
-    # the browser never gets.
-    print(f"Behavior: {describe_behavior(settings, compaction, workspace_writes=False)}", flush=True)
+    # Report the web code capability; work remains read-only.
+    print(f"Behavior: {describe_behavior(settings, compaction, workspace_writes=settings.trusted_development)}", flush=True)
     for warning in describe_warnings(settings):
         print(f"Warning: {warning}", flush=True)
     print(f"Chagent 网页：{url}（工作区 {Path(args.workspace).expanduser().resolve()}）", flush=True)

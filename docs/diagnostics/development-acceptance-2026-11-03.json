@@ -1,0 +1,401 @@
+{
+  "date": "2026-11-03",
+  "workspace": "/private/tmp/chagent-development-20261103-ciy4e04d",
+  "config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "run_timeout": 180.0,
+    "sandbox": "isolated",
+    "sandbox_network": false,
+    "workspace_writable": true,
+    "process_stdin": false,
+    "readonly_code": false,
+    "execution_profile": "trusted-development",
+    "approval": "never",
+    "approval_timeout": 300.0,
+    "approval_grace": 10.0,
+    "host_commands": true,
+    "web_access": "off",
+    "web_key": "set",
+    "compaction": true,
+    "tokenizer": "tiktoken/cl100k_base",
+    "max_turns": 32,
+    "max_tool_concurrency": 4,
+    "max_processes": 4,
+    "process_timeout": 600.0,
+    "tools": 6,
+    "default_mode": "work",
+    "code_mode": true,
+    "behavior": "sandbox=isolated/no-network approval=never/unwatched=10s execution_profile=trusted-development mode=work code=on host_commands=on writes=on web=off compaction=on processes=4/600s process_stdin=off max_turns=32 tokenizer=tiktoken/cl100k_base"
+  },
+  "sessions": [
+    {
+      "id": "d4212eea-ae3d-4d4a-a627-08165a8cf336",
+      "latest_run": null,
+      "tool_counts": {
+        "write_file": 6,
+        "run_tests": 4,
+        "exec_command": 16,
+        "read_file": 4,
+        "edit_file": 4,
+        "process": 1
+      },
+      "tests": [
+        {
+          "is_error": false,
+          "details": {
+            "suite": "unittest",
+            "counts": {
+              "errors": 0,
+              "failed": 0,
+              "passed": 3
+            },
+            "output": "...\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+            "command": [
+              "/opt/anaconda3/bin/python3.13",
+              "-m",
+              "unittest",
+              "discover",
+              "-s",
+              "."
+            ],
+            "sandbox": {
+              "home": "synthetic",
+              "backend": "seatbelt",
+              "isolated": true,
+              "environment": "allowlist",
+              "unsandboxed": false,
+              "denied_reads": [
+                "/Users/macbook/.ssh",
+                "/Users/macbook/.aws",
+                "/Users/macbook/.kube",
+                "/Users/macbook/.docker",
+                "/Users/macbook/.config/gh",
+                "/Users/macbook/.config/gcloud",
+                "/Users/macbook/.npmrc",
+                "/Users/macbook/.pypirc",
+                "/Users/macbook/.git-credentials"
+              ],
+              "read_allowlist": [
+                "/bin",
+                "/sbin",
+                "/usr/bin",
+                "/usr/sbin",
+                "/usr/lib",
+                "/usr/share",
+                "/System/Library",
+                "/System/iOSSupport",
+                "/Library/Apple",
+                "/Library/Developer/CommandLineTools",
+                "/private/var/select",
+                "/opt/anaconda3/bin",
+                "/opt/anaconda3/lib",
+                "/opt/anaconda3/include",
+                "/opt/anaconda3/share",
+                "/private/tmp/chagent-development-20261103-ciy4e04d",
+                "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-isolated-kapc2uvv"
+              ],
+              "network_allowed": false,
+              "workspace_writable": true
+            },
+            "failures": [],
+            "exit_code": 0,
+            "timed_out": false,
+            "duration_ms": 58.1
+          }
+        },
+        {
+          "is_error": true,
+          "details": {
+            "suite": "unittest",
+            "counts": {
+              "errors": 1,
+              "failed": 0,
+              "passed": 0
+            },
+            "output": "E\n======================================================================\nERROR: test_calculator (unittest.loader._FailedTest.test_calculator)\n----------------------------------------------------------------------\nImportError: Failed to import test module: test_calculator\nTraceback (most recent call last):\n  File \"/opt/anaconda3/lib/python3.13/unittest/loader.py\", line 396, in _find_test_path\n    module = self._get_module_from_name(name)\n  File \"/opt/anaconda3/lib/python3.13/unittest/loader.py\", line 339, in _get_module_from_name\n    __import__(name)\n    ~~~~~~~~~~^^^^^^\n  File \"/private/tmp/chagent-development-20261103-ciy4e04d/test_calculator.py\", line 14, in <module>\n    from calculator import add, divide  # noqa: E402  (import after sys.path setup)\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nImportError: cannot import name 'divide' from 'calculator' (/private/tmp/chagent-development-20261103-ciy4e04d/calculator.py)\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)\n",
+            "command": [
+              "/opt/anaconda3/bin/python3.13",
+              "-m",
+              "unittest",
+              "discover",
+              "-s",
+              "."
+            ],
+            "sandbox": {
+              "home": "synthetic",
+              "backend": "seatbelt",
+              "isolated": true,
+              "environment": "allowlist",
+              "unsandboxed": false,
+              "denied_reads": [
+                "/Users/macbook/.ssh",
+                "/Users/macbook/.aws",
+                "/Users/macbook/.kube",
+                "/Users/macbook/.docker",
+                "/Users/macbook/.config/gh",
+                "/Users/macbook/.config/gcloud",
+                "/Users/macbook/.npmrc",
+                "/Users/macbook/.pypirc",
+                "/Users/macbook/.git-credentials"
+              ],
+              "read_allowlist": [
+                "/bin",
+                "/sbin",
+                "/usr/bin",
+                "/usr/sbin",
+                "/usr/lib",
+                "/usr/share",
+                "/System/Library",
+                "/System/iOSSupport",
+                "/Library/Apple",
+                "/Library/Developer/CommandLineTools",
+                "/private/var/select",
+                "/opt/anaconda3/bin",
+                "/opt/anaconda3/lib",
+                "/opt/anaconda3/include",
+                "/opt/anaconda3/share",
+                "/private/tmp/chagent-development-20261103-ciy4e04d",
+                "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-isolated-f14rxxoo"
+              ],
+              "network_allowed": false,
+              "workspace_writable": true
+            },
+            "failures": [
+              {
+                "name": "unittest.loader._FailedTest.test_calculator",
+                "message": "ImportError: cannot import name 'divide' from 'calculator' (/private/tmp/chagent-development-20261103-ciy4e04d/calculator.py)"
+              }
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "duration_ms": 54.2
+          }
+        },
+        {
+          "is_error": false,
+          "details": {
+            "suite": "unittest",
+            "counts": {
+              "errors": 0,
+              "failed": 0,
+              "passed": 5
+            },
+            "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.000s\n\nOK\n",
+            "command": [
+              "/opt/anaconda3/bin/python3.13",
+              "-m",
+              "unittest",
+              "discover",
+              "-s",
+              "."
+            ],
+            "sandbox": {
+              "home": "synthetic",
+              "backend": "seatbelt",
+              "isolated": true,
+              "environment": "allowlist",
+              "unsandboxed": false,
+              "denied_reads": [
+                "/Users/macbook/.ssh",
+                "/Users/macbook/.aws",
+                "/Users/macbook/.kube",
+                "/Users/macbook/.docker",
+                "/Users/macbook/.config/gh",
+                "/Users/macbook/.config/gcloud",
+                "/Users/macbook/.npmrc",
+                "/Users/macbook/.pypirc",
+                "/Users/macbook/.git-credentials"
+              ],
+              "read_allowlist": [
+                "/bin",
+                "/sbin",
+                "/usr/bin",
+                "/usr/sbin",
+                "/usr/lib",
+                "/usr/share",
+                "/System/Library",
+                "/System/iOSSupport",
+                "/Library/Apple",
+                "/Library/Developer/CommandLineTools",
+                "/private/var/select",
+                "/opt/anaconda3/bin",
+                "/opt/anaconda3/lib",
+                "/opt/anaconda3/include",
+                "/opt/anaconda3/share",
+                "/private/tmp/chagent-development-20261103-ciy4e04d",
+                "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-isolated-f14rxxoo"
+              ],
+              "network_allowed": false,
+              "workspace_writable": true
+            },
+            "failures": [],
+            "exit_code": 0,
+            "timed_out": false,
+            "duration_ms": 53.0
+          }
+        },
+        {
+          "is_error": false,
+          "details": {
+            "suite": "unittest",
+            "counts": {
+              "errors": 0,
+              "failed": 0,
+              "passed": 5
+            },
+            "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.000s\n\nOK\n",
+            "command": [
+              "/usr/bin/env",
+              "PYTHONPATH=/private/tmp/chagent-development-20261103-ciy4e04d",
+              "PYTHONDONTWRITEBYTECODE=1",
+              "PYTHONPYCACHEPREFIX=/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-isolated-fa0edmkh/tmp/pycache-67aebb7bf80b43c5af97ff5aa9985d8e",
+              "/opt/anaconda3/bin/python3.13",
+              "-m",
+              "unittest",
+              "discover",
+              "-s",
+              "."
+            ],
+            "sandbox": {
+              "home": "synthetic",
+              "backend": "seatbelt",
+              "isolated": true,
+              "environment": "allowlist",
+              "unsandboxed": false,
+              "denied_reads": [
+                "/Users/macbook/.ssh",
+                "/Users/macbook/.aws",
+                "/Users/macbook/.kube",
+                "/Users/macbook/.docker",
+                "/Users/macbook/.config/gh",
+                "/Users/macbook/.config/gcloud",
+                "/Users/macbook/.npmrc",
+                "/Users/macbook/.pypirc",
+                "/Users/macbook/.git-credentials"
+              ],
+              "read_allowlist": [
+                "/bin",
+                "/sbin",
+                "/usr/bin",
+                "/usr/sbin",
+                "/usr/lib",
+                "/usr/share",
+                "/System/Library",
+                "/System/iOSSupport",
+                "/Library/Apple",
+                "/Library/Developer/CommandLineTools",
+                "/private/var/select",
+                "/opt/anaconda3/bin",
+                "/opt/anaconda3/lib",
+                "/opt/anaconda3/include",
+                "/opt/anaconda3/share",
+                "/private/tmp/chagent-development-20261103-ciy4e04d",
+                "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-isolated-fa0edmkh"
+              ],
+              "network_allowed": false,
+              "workspace_writable": true
+            },
+            "failures": [],
+            "exit_code": 0,
+            "timed_out": false,
+            "duration_ms": 178.4
+          }
+        }
+      ]
+    }
+  ],
+  "full_regression": {
+    "tests": 555,
+    "skipped": 0,
+    "seconds": 77.779
+  },
+  "readonly_probe": {
+    "checks": 77,
+    "passed": true
+  },
+  "run_status_counts": {
+    "completed": 5,
+    "cancelled": 1
+  },
+  "approval_requests": 0,
+  "files": {
+    "test_calculator.py": {
+      "bytes": 657,
+      "sha256": "b0260c78eea45a220c1abce816d1e510c59232db12d3a8247cf128c2ed9452c8"
+    },
+    "README.md": {
+      "bytes": 1027,
+      "sha256": "64b047aa66588a73040ec043fe78a1c578994a22958f164154bb0405258ccdbc"
+    },
+    "calculator.py": {
+      "bytes": 330,
+      "sha256": "e30e6ade10baafe9dc6524cfb03c9b035d14a4f56c8004cd5e8ab96b53bbb9d8"
+    }
+  },
+  "independent_final_tests": {
+    "suite": "unittest",
+    "command": [
+      "/usr/bin/env",
+      "PYTHONPATH=/private/tmp/chagent-development-20261103-ciy4e04d",
+      "PYTHONDONTWRITEBYTECODE=1",
+      "PYTHONPYCACHEPREFIX=/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-isolated-ofy7i_72/tmp/pycache-b829d39d242745eb8fa510135cdb467f",
+      "/opt/anaconda3/bin/python3.13",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "."
+    ],
+    "exit_code": 0,
+    "duration_ms": 179.2,
+    "counts": {
+      "passed": 5,
+      "failed": 0,
+      "errors": 0
+    },
+    "failures": [],
+    "timed_out": false,
+    "sandbox": {
+      "backend": "seatbelt",
+      "network_allowed": false,
+      "denied_reads": [
+        "/Users/macbook/.ssh",
+        "/Users/macbook/.aws",
+        "/Users/macbook/.kube",
+        "/Users/macbook/.docker",
+        "/Users/macbook/.config/gh",
+        "/Users/macbook/.config/gcloud",
+        "/Users/macbook/.npmrc",
+        "/Users/macbook/.pypirc",
+        "/Users/macbook/.git-credentials"
+      ],
+      "unsandboxed": false,
+      "workspace_writable": true,
+      "read_allowlist": [
+        "/bin",
+        "/sbin",
+        "/usr/bin",
+        "/usr/sbin",
+        "/usr/lib",
+        "/usr/share",
+        "/System/Library",
+        "/System/iOSSupport",
+        "/Library/Apple",
+        "/Library/Developer/CommandLineTools",
+        "/private/var/select",
+        "/opt/anaconda3/bin",
+        "/opt/anaconda3/lib",
+        "/opt/anaconda3/include",
+        "/opt/anaconda3/share",
+        "/private/tmp/chagent-development-20261103-ciy4e04d",
+        "/private/var/folders/nk/xjkmm1s10w923d400vjwvsx00000gn/T/chagent-isolated-ofy7i_72"
+      ],
+      "environment": "allowlist",
+      "home": "synthetic",
+      "isolated": true
+    },
+    "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.000s\n\nOK\n"
+  },
+  "remaining_exact_sleep_commands": []
+}

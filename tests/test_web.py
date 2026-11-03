@@ -428,6 +428,72 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status_code, 413)
         self.assertEqual((await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"], [])
 
+    async def enable_development(self):
+        from chagent.bootstrap import create_runner
+        from chagent.tools.sandbox import Sandbox, SandboxSettings
+        cfg = Settings(code_mode=True, allow_host_commands=True, sandbox="isolated",
+                       execution_profile="trusted-development")
+        sb = Sandbox(SandboxSettings(mode="isolated"))
+        self.addCleanup(sb.close)
+        from dataclasses import replace
+        self.runner = create_runner(self.database, replace(self.runner.model, context_window=65536), FakeModelClient(),
+            code_mode=True, allow_host_commands=True, sandbox=sb,
+            allow_workspace_writes=False, code_workspace_writes=True, process_stdin=False)
+        self.runtime = WebRuntime(self.runner, self.workspace, cfg)
+        self.app.state.runtime = self.runtime
+        self.addAsyncCleanup(self.runtime.close)
+
+    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
+    async def test_development_writes_tests_and_work_stays_readonly_without_approvals(self):
+        await self.enable_development()
+        cfg = (await self.client.get("/api/config")).json()
+        self.assertEqual(cfg["execution_profile"], "trusted-development")
+        self.assertTrue(cfg["workspace_writable"])
+        self.assertFalse(cfg["readonly_code"])
+        self.assertFalse(cfg["process_stdin"])
+        response = await self.client.post("/api/sessions", json={"mode":"code"})
+        self.assertEqual(response.status_code, 201, response.text)
+        identity = response.json()["id"]
+        async def invoke(name, arguments):
+            self.runner.client = FakeModelClient(name, arguments)
+            sent = await self.client.post(f"/api/sessions/{identity}/runs", json={"text":name})
+            self.assertEqual(sent.status_code, 202, sent.text)
+            run_id = sent.json()["run_id"]
+            result = await self.wait_run(run_id)
+            self.assertEqual(result["status"], "completed", result)
+            return run_id
+        await invoke("write_file", {"path":"test_value.py", "content":
+            "import unittest\nclass TestValue(unittest.TestCase):\n def test_value(self): self.assertEqual(1, 2)\n"})
+        failed = await invoke("run_tests", {"suite":"unittest"})
+        history = (await self.client.get(f"/api/sessions/{identity}/messages")).json()
+        self.assertIn("Result: failed", json.dumps(history))
+        await invoke("edit_file", {"path":"test_value.py", "edits":[
+            {"old_text":"self.assertEqual(1, 2)", "new_text":"self.assertEqual(2, 2)"}]})
+        passed = await invoke("run_tests", {"suite":"unittest"})
+        messages = (await self.client.get(f"/api/sessions/{identity}/messages")).json()["items"]
+        self.assertTrue(any(m.get("run_id") == passed and "Result: passed" in json.dumps(m) for m in messages), messages)
+        self.assertIn("self.assertEqual(2, 2)", (self.workspace/"test_value.py").read_text())
+        for run_id in (failed, passed):
+            self.assertEqual((await self.client.get(f"/api/runs/{run_id}/approvals")).json()["pending"], [])
+        work = await self.create_session()
+        self.runner.client = FakeModelClient("write_file", {"path":"blocked.txt", "content":"no"})
+        sent = await self.client.post(f"/api/sessions/{work}/runs", json={"text":"write"})
+        await self.wait_run(sent.json()["run_id"])
+        self.assertFalse((self.workspace/"blocked.txt").exists())
+        async with self.database.connection() as connection:
+            cursor = await connection.execute("SELECT count(*) AS n FROM approval_requests")
+            self.assertEqual((await cursor.fetchone())["n"], 0)
+
+    async def test_development_missing_backend_refuses_before_model(self):
+        await self.enable_development()
+        from chagent.tools.sandbox import SeatbeltBackend
+        self.runner.sandbox.backend = SeatbeltBackend('/missing/chagent-seatbelt')
+        response = await self.client.post("/api/sessions", json={"mode":"code"})
+        self.assertEqual(response.status_code, 503, response.text)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute("SELECT count(*) AS n FROM model_calls")
+            self.assertEqual((await cursor.fetchone())["n"], 0)
+
     async def enable_readonly(self):
         from chagent.bootstrap import create_runner
         from chagent.tools.sandbox import Sandbox, SandboxSettings

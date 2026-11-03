@@ -180,6 +180,7 @@ class ConfigView(BaseModel):
     workspace_writable: bool
     process_stdin: bool
     readonly_code: bool
+    execution_profile: str
     approval: str
     approval_timeout: float
     approval_grace: float

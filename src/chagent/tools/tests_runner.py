@@ -14,6 +14,7 @@ import re
 import signal as signals
 import sys
 from time import monotonic
+from uuid import uuid4
 
 from chagent.domain.messages import JsonObject, TextContent
 from chagent.tools.base import AgentTool, AgentToolResult, AgentToolUpdateCallback
@@ -163,6 +164,15 @@ class RunTestsTool(AgentTool):
         if self.sandbox is not None and self.sandbox.settings.mode == "isolated" and command[0] == sys.executable:
             command[0] = str(Path(sys.executable).resolve())
         child_env = self.sandbox.environment(workspace, owner=context.run_id) if self.sandbox is not None else None
+        if child_env is not None and self.sandbox.settings.mode == "isolated" and suite in {"unittest", "pytest"}:
+            # Sandbox.wrap clears the spawn environment again inside seatbelt.
+            # Set only explicit test variables after that reset. Project imports
+            # are intentional; never inherit the host PYTHONPATH. A private fresh
+            # cache path also prevents stale bytecode after rapid same-size edits.
+            command = ["/usr/bin/env", f"PYTHONPATH={workspace}",
+                       "PYTHONDONTWRITEBYTECODE=1",
+                       f"PYTHONPYCACHEPREFIX={Path(child_env['TMPDIR']) / ('pycache-' + uuid4().hex)}",
+                       *command]
         timeout = params.get("timeout_ms", 120_000) / 1000
         argv, sandbox_record = ["/bin/sh", "-c", " ".join(_quote(part) for part in command)], {}
         if self.sandbox is not None:

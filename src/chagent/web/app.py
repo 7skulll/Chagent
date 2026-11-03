@@ -165,7 +165,7 @@ class WebRuntime:
         # Explicit preflight owner, separate from all conversation runs.
         support = await self.runner.sandbox.audit(workspace, owner="web-preflight")
         if not support["available"]:
-            raise HTTPException(503, "只读隔离探针失败，code 不可用；不会降低隔离等级")
+            raise HTTPException(503, "执行隔离探针失败，code 不可用；不会降低隔离等级")
 
     async def run(self, identity: UUID):
         run = await self.runner.runs.get(identity)
@@ -302,7 +302,8 @@ async def config(current: Current):
         "provider": current.runner.model.provider, "model": current.runner.model.id,
         "run_timeout": current.runner.timeout,
         "sandbox": settings.sandbox, "sandbox_network": settings.sandbox_network,
-        "workspace_writable": False, "process_stdin": False,
+        "workspace_writable": settings.trusted_development, "process_stdin": False,
+        "execution_profile": settings.execution_profile,
         "readonly_code": settings.readonly_code_available,
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
         "approval_grace": settings.approval_unwatched_grace,
@@ -314,9 +315,8 @@ async def config(current: Current):
         "max_processes": settings.max_processes, "process_timeout": settings.process_timeout,
         "default_mode": settings.default_mode, "code_mode": settings.code_mode,
         "tools": tools,
-        # ``writes=off`` here is not a setting: it is what this entry point
-        # assembles, and the page should not have to guess it.
-        "behavior": describe_behavior(settings, policy, tokenizer, workspace_writes=False),
+        # Writes describe the code face; work remains read-only in the web.
+        "behavior": describe_behavior(settings, policy, tokenizer, workspace_writes=settings.trusted_development),
     }
 
 
@@ -814,11 +814,11 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
                                            code_mode=configured.code_mode,
-                                           # The browser has no approval gate for a file
-                                           # mutation and no undo, so this entry point keeps
-                                           # the model to reads. The CLI, which a human is
-                                           # watching line by line, gets the writes.
+                                           # Work stays read-only; only the explicit development
+                                           # code face gets writes. Approval policy is separate.
                                            allow_workspace_writes=False,
+                                           code_workspace_writes=configured.trusted_development,
+                                           process_stdin=False,
                                            timeout=selected.run_timeout, max_turns=configured.max_turns,
                                            max_tool_concurrency=configured.max_tool_concurrency,
                                            memory_worker_concurrency=configured.memory_worker_concurrency,
