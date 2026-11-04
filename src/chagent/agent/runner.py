@@ -1,6 +1,7 @@
 """Model/tool loop with commit-driven state, bounded batches and explicit endings."""
 
 import asyncio
+import logging
 import math
 from collections.abc import Callable
 from time import time_ns
@@ -27,6 +28,8 @@ from chagent.tools.executor import ToolExecutor
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
 from chagent.tools.scheduler import ToolScheduler
+
+logger = logging.getLogger(__name__)
 
 
 class RunFailedError(RuntimeError):
@@ -191,20 +194,22 @@ class AgentRunner:
                     # before its terminal state is written.
                     await self.processes.terminate_run(run_id)
                     processes_reaped = True
-                except BaseException:
-                    pass
+                except BaseException as error:
+                    # Keeping the run's outcome and terminal state matters more
+                    # than the failure here, but a leaked process group is worth
+                    # a line: nothing else will reap it.
+                    logger.warning("Could not terminate run processes (%s)", type(error).__name__)
             if self.sandbox is not None and processes_reaped:
                 try:
                     self.sandbox.release(run_id)
                 except OSError:
-                    import logging
-                    logging.getLogger(__name__).exception("Could not remove run scratch")
+                    logger.exception("Could not remove run scratch")
             try:
                 # Stops the flush task and commits or drops the tail. A cancelled
                 # run may raise here; it must never mask the run's own outcome.
                 await self.runs.close_events(run_id)
-            except BaseException:
-                pass
+            except BaseException as error:
+                logger.warning("Could not close the event batch (%s)", type(error).__name__)
             self.runs.database.run_owners.pop(run_id, None)
             self._tasks.pop(run_id, None)
             self._states.pop(run_id, None)
@@ -213,13 +218,15 @@ class AgentRunner:
             try:
                 # A pending question must not outlive its run.
                 await self.scheduler.cancel_approvals(run_id)
-            except BaseException:
-                pass
+            except BaseException as error:
+                logger.warning("Could not cancel pending approvals (%s)", type(error).__name__)
             try:
                 async with self.runs.database.connection() as connection:
                     await connection.execute("UPDATE file_outputs SET status='cancelled',payload=NULL WHERE run_id=%s AND status='pending' AND EXISTS (SELECT 1 FROM runs WHERE id=%s AND status='cancelled')", (run_id,run_id))
-            except Exception:
-                pass
+            except Exception as error:
+                # Pending outputs then stay pending until expiry; say so rather
+                # than leaving a row the user cannot explain.
+                logger.warning("Could not cancel pending file outputs (%s)", type(error).__name__)
             self.scheduler.release(run_id)
             if self.memory_service is not None:
                 self.memory_service.release(run_id)

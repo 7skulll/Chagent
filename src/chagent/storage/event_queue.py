@@ -13,9 +13,12 @@ replay is unchanged.
 """
 
 import asyncio
+import logging
 from collections import deque
 from collections.abc import Awaitable, Callable
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 EventItem = tuple[str, dict]
 EventWriter = Callable[[list[EventItem]], Awaitable[None]]
@@ -91,10 +94,10 @@ class EventStream:
         try:
             if flush:
                 await self.flush()
-        except Exception:
+        except Exception as error:
             # The run's own outcome is already decided; losing the tail of the
             # batch must not turn a completed run into a failed one.
-            pass
+            logger.warning("Dropped buffered run events on close (%s)", type(error).__name__)
         finally:
             self._closing = True
             self._wake.set()

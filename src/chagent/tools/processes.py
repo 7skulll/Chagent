@@ -27,6 +27,7 @@ import codecs
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
+import logging
 import os
 from pathlib import Path
 import signal as signals
@@ -36,6 +37,8 @@ from uuid import UUID, uuid4
 from chagent.domain.messages import JsonObject, TextContent
 from chagent.tools.base import AgentTool, AgentToolResult, AgentToolUpdateCallback
 from chagent.tools.context import ToolContext
+
+logger = logging.getLogger(__name__)
 
 
 #: Characters retained per process. Older output is dropped and counted.
@@ -199,8 +202,14 @@ class ProcessManager:
         try:
             while chunk := await record.process.stdout.read(4096):
                 record.feed(chunk)
-        except (asyncio.CancelledError, Exception):
-            pass
+        except asyncio.CancelledError:
+            # Cancellation is how a stopped process's reader is shut down; it
+            # must propagate, or the task silently outlives its owner.
+            raise
+        except Exception as error:
+            # A broken pipe ends the stream; the exit code still comes from
+            # _reap, and the report records the EOF either way.
+            logger.warning("Process reader stopped (%s)", type(error).__name__)
         finally:
             record.feed(b"", final=True)
             record.eof = True

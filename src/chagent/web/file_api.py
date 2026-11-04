@@ -10,7 +10,7 @@ from pydantic import Field, StrictStr
 
 from chagent.files import FileService, FileConflict
 from chagent.web.schemas import InputModel
-from chagent.web.app import Current
+from chagent.web.deps import Current
 
 router = APIRouter(prefix='/api', tags=['工作区文件'])
 
@@ -133,7 +133,7 @@ def choose_directory():
 
 @router.post('/workspace-picker')
 async def picker(current: Current):
-    from chagent.web.app import open_workspace
+    from chagent.web.deps import open_workspace
     from chagent.web.schemas import WorkspaceCreate
     path = await asyncio.to_thread(choose_directory)
     if not path:
