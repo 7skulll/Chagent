@@ -59,7 +59,8 @@ class RecordingClient(FakeModelClient):
             content = " "
         elif self.mode == "oversize":
             content = "huge" * 5000
-        message.content = [TextContent(content)]
+        message.content = ([ThinkingContent("private-summary-reasoning"), TextContent(content)]
+                           if self.mode == "thinking" else [TextContent(content)])
         if self.mode == "tool":
             message.content = [ToolCall("forbidden", "write_file", {"path": "no.txt", "content": "no"})]
             message.stop_reason = "toolUse"
@@ -141,6 +142,18 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         await restored.run(self.session, "after restart")
         latest = (await SessionManager(restored.conversations).contexts(self.session))[0]["snapshot"]
         self.assertEqual(latest["summary_id"], str(summary.id))
+
+    async def test_reasoning_model_summary_keeps_text_without_thinking(self):
+        await self.seed()
+        self.client.mode = "thinking"
+        result = await self.runner.run(self.session, "continue with reasoning model")
+        summary = await self.summaries.latest(self.session)
+        self.assertIsNotNone(summary)
+        self.assertIn("Goal: continue project", summary.content)
+        self.assertNotIn("private-summary-reasoning", summary.content)
+        self.assertIn("compaction_completed", [event["type"] for event in await self.runner.runs.events(result.run_id)])
+        calls = await self.calls(result.run_id)
+        self.assertTrue(calls and all(call["status"] == "completed" for call in calls))
 
     async def test_compaction_retains_the_newest_tool_output_verbatim(self):
         """Summarizing the evidence makes the model re-read it; carry it instead."""

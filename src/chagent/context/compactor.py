@@ -7,7 +7,7 @@ from time import monotonic_ns
 from uuid import UUID
 
 from chagent.context.builder import BasicContextBuilder
-from chagent.domain.messages import AssistantMessage, SystemMessage, TextContent, ToolCall, ToolResultMessage, UserMessage
+from chagent.domain.messages import AssistantMessage, SystemMessage, TextContent, ThinkingContent, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.runs import StoredMessage
 from chagent.domain.summaries import CompactionPolicy
 from chagent.domain.usage import Usage
@@ -142,9 +142,12 @@ class ContextCompactor:
                 response = None
                 try:
                     response = await self._response(client, request)
-                    if response.stop_reason != "stop" or any(not isinstance(block, TextContent) for block in response.content):
+                    if response.stop_reason != "stop" or any(
+                        not isinstance(block, (TextContent, ThinkingContent)) for block in response.content
+                    ):
                         raise CompactionError("Summary must be a completed text response without tools")
-                    content = "\n".join(block.text for block in response.content).strip()
+                    content = "\n".join(block.text for block in response.content
+                                        if isinstance(block, TextContent)).strip()
                     if not content:
                         raise CompactionError("Summary is empty")
                     retained = retained_outputs(turns, self.policy.retained_tool_results)
