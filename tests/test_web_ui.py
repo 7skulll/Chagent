@@ -89,7 +89,7 @@ class WebSurfaceTests(unittest.TestCase):
         # The original 50 controls plus six functional rail shortcuts and the
         # sidebar search disclosure. Every added button must still pass the
         # handler check above; this count only prevents accidental duplicates.
-        self.assertEqual(len(self.page.buttons), 57)
+        self.assertEqual(len(self.page.buttons), 55)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)

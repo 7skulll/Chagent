@@ -47,7 +47,8 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
     def runner(self, *, tool_name="exec_command", arguments=None, policy=None, remote=True,
                decider=None, allowlist=""):
         configured = policy or ApprovalPolicy.from_settings(Settings.from_env(
-            {"CHAGENT_APPROVAL": "untrusted", "CHAGENT_APPROVAL_ALLOWLIST": allowlist}))
+            {"CHAGENT_EXECUTION_PROFILE": "configured", "CHAGENT_APPROVAL": "untrusted",
+             "CHAGENT_APPROVAL_ALLOWLIST": allowlist}))
         runner = create_demo_runner(
             self.database, tool_name=tool_name, tool_arguments=arguments,
             allow_host_commands=True, sandbox=None, approval_policy=configured,
@@ -171,7 +172,8 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_allowlisted_command_runs_without_a_question(self):
         policy = ApprovalPolicy.from_settings(Settings.from_env(
-            {"CHAGENT_APPROVAL": "untrusted", "CHAGENT_APPROVAL_ALLOWLIST": "printf"}))
+            {"CHAGENT_EXECUTION_PROFILE": "configured", "CHAGENT_APPROVAL": "untrusted",
+             "CHAGENT_APPROVAL_ALLOWLIST": "printf"}))
         runner = self.runner(arguments={"cmd": "printf allow-marker"},
                              policy=policy, remote=False, decider=no_approver)
         session = await runner.conversations.create_session(self.workspace)

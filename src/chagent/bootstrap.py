@@ -36,8 +36,9 @@ def _tool_faces(
     code_workspace_writes: bool | None = None,
     process_stdin: bool = True,
     versioned_files: bool = False,
+    unified: bool = False,
 ) -> dict[str, ToolExecutor]:
-    """One executor per enabled mode, built once per runner.
+    """Build a unified executor or diagnostic mode-specific executors.
 
     Two layers, as the design requires: the registry omits the tools a mode may
     not use, and the executor is bound to that registry so a call naming an
@@ -50,11 +51,19 @@ def _tool_faces(
     ``single_face`` is for the deterministic harness only: it names a tool, so it
     keeps the code face and the runner never resolves by session mode.
     """
-    if code_mode and allow_host_commands and not single_face and (
+    if unified and not code_mode:
+        raise ValueError("Unified execution requires CHAGENT_CODE_MODE=on")
+    if unified and (not allow_host_commands or not allow_workspace_writes or process_stdin):
+        raise ValueError("Unified execution requires host commands, workspace writes, and process_stdin=False")
+    if unified and (sandbox is None or sandbox.settings.mode != "isolated" or not sandbox.settings.writable_workspace):
+        raise ValueError("Unified execution requires a writable isolated sandbox")
+    if code_mode and allow_host_commands and not single_face and not unified and (
         sandbox is None or sandbox.settings.mode != "isolated"
     ):
         raise ValueError("Model-driven code execution requires CHAGENT_SANDBOX=isolated")
-    if single_face:
+    if unified:
+        modes = ("work",)
+    elif single_face:
         modes = ("code",)
     else:
         modes = ("work", "code") if code_mode else ("work",)
@@ -62,6 +71,7 @@ def _tool_faces(
     for mode in modes:
         registry = create_builtin_registry(
             mode=mode, allow_host_commands=allow_host_commands,
+            unified=unified,
             allow_workspace_writes=(code_workspace_writes if mode == "code" and code_workspace_writes is not None
                                     else allow_workspace_writes),
             process_stdin=process_stdin, versioned_files=versioned_files,
@@ -69,6 +79,9 @@ def _tool_faces(
             processes=processes, web=web, include_echo=include_echo,
         )
         faces[mode] = ToolExecutor(registry, allow_host_commands=allow_host_commands)
+    if unified:
+        # Old session rows retain their mode for history, but share one executor.
+        faces["code"] = faces["work"]
     return faces
 
 
@@ -145,6 +158,7 @@ def create_runner(
     code_workspace_writes: bool | None = None,
     process_stdin: bool = True,
     versioned_files: bool = False,
+    unified: bool = False,
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -154,7 +168,8 @@ def create_runner(
     faces = _tool_faces(database, code_mode=code_mode, allow_host_commands=allow_host_commands,
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
                         single_face=single_face, allow_workspace_writes=allow_workspace_writes,
-                        code_workspace_writes=code_workspace_writes, process_stdin=process_stdin, versioned_files=versioned_files)
+                        code_workspace_writes=code_workspace_writes, process_stdin=process_stdin, versioned_files=versioned_files,
+                        unified=unified)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))
@@ -183,6 +198,7 @@ def create_runner(
     runner.scheduler.sandbox_mode = sandbox.settings.mode if sandbox is not None else "off"
     # Per-session mode resolution: a single face harness has nothing to resolve.
     runner.tool_faces = None if single_face else faces
+    runner.unified = unified
     # One worker per runner: it reads model/client at call time, so a replaced
     # client (test doubles, provider switch) applies to extraction as well.
     runner.sandbox = sandbox

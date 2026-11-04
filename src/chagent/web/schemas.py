@@ -31,7 +31,6 @@ class SessionCreate(InputModel):
     workspace: Annotated[StrictStr, Field(min_length=1, max_length=4096)] | None = None
     #: Absent means the build's default mode. ``code`` in a work-only build is
     #: refused with 409 rather than downgraded: the caller must know what it got.
-    mode: Literal["work", "code"] | None = None
 
 
 class SessionEdit(InputModel):
@@ -47,9 +46,8 @@ class SessionEdit(InputModel):
     archived: StrictBool | None = None
     #: Absent means "leave the mode alone". A build with no code face refuses
     #: code with 409 rather than silently downgrading it to work.
-    mode: Literal["work", "code"] | None = None
 
-    @field_validator("title", "archived", "mode", mode="before")
+    @field_validator("title", "archived", mode="before")
     @classmethod
     def not_null(cls, value):
         if value is None:
@@ -58,8 +56,8 @@ class SessionEdit(InputModel):
 
     @model_validator(mode="after")
     def nonempty(self):
-        if not self.model_fields_set.intersection({"title", "archived", "mode"}):
-            raise ValueError("Provide title, archived or mode to edit")
+        if not self.model_fields_set.intersection({"title", "archived"}):
+            raise ValueError("Provide title or archived to edit")
         return self
 
 
@@ -75,7 +73,6 @@ class RunCreate(InputModel):
     #: Accepted only to be refused when it disagrees with the session: a run
     #: inherits the mode, and switching it mid-conversation would make the tool
     #: declarations in the prompt differ from the face that executes.
-    mode: Literal["work", "code"] | None = None
     #: Regenerate the answer to the turn that produced this assistant message.
     regenerate_from: UUID | None = None
     #: Replace this user message with ``text`` and run from there.
@@ -155,6 +152,7 @@ class AppInfo(BaseModel):
     #: The tool face new sessions get, and whether ``code`` can be chosen at all.
     default_mode: Literal["work", "code"]
     code_mode: bool
+    programmable: bool = False
 
 
 class WorkspaceView(BaseModel):
@@ -208,6 +206,7 @@ class ConfigView(BaseModel):
     #: Resolved mode face: what new sessions get, and whether code exists here.
     default_mode: Literal["work", "code"]
     code_mode: bool
+    programmable: bool = False
     behavior: str
 
 

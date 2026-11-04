@@ -74,13 +74,15 @@ def reply(value, status=200, headers=None):
 
 class WebRuntime:
     def __init__(self, runner: AgentRunner, workspace: Path, settings: Settings | None = None,
-                 compaction: CompactionPolicy | None = None):
+                 compaction: CompactionPolicy | None = None, *, programmable: bool | None = None):
         self.runner = runner
         self.workspace = validate_workspace(workspace)
         # Resolved once: the mode gate below is a policy decision, and reading it
         # per request could let the environment change under a running server.
-        self.settings = settings or Settings.from_env()
-        validate_web_runner(self.settings, runner)
+        self.settings = settings or Settings()
+        self.programmable = (settings is not None) if programmable is None else programmable
+        if self.programmable:
+            validate_web_runner(self.settings, runner)
         self.compaction = compaction
         self.sessions = SessionManager(runner.conversations)
         self.approvals = ApprovalRepository(runner.runs.database, runner.runs)
@@ -154,13 +156,12 @@ class WebRuntime:
             raise SessionNotFoundError("Session workspace is no longer available") from None
         if session.workspace not in self.roots:
             raise SessionNotFoundError("Session belongs to a workspace that is not open")
-        if session.mode == "code":
-            await self.require_code(session.workspace)
+        await self.require_programming(session.workspace)
         return session
 
-    async def require_code(self, workspace: Path) -> None:
-        if not self.settings.code_mode:
-            raise HTTPException(409, "本构建未开启 code 模式（CHAGENT_CODE_MODE=off）")
+    async def require_programming(self, workspace: Path) -> None:
+        if not self.programmable:
+            return
         validate_web_runner(self.settings, self.runner)
         # Explicit preflight owner, separate from all conversation runs.
         support = await self.runner.sandbox.audit(workspace, owner="web-preflight")
@@ -255,9 +256,8 @@ api = APIRouter(prefix="/api", responses={code: {"model": ErrorResponse} for cod
 async def info(current: Current):
     return {"workspace": current.workspace, "provider": current.runner.model.provider,
             "model": current.runner.model.id,
-            # Whether ``code`` can be chosen is a build property, not a preference.
-            "default_mode": current.settings.default_mode,
-            "code_mode": current.settings.code_mode}
+            "default_mode": "work", "code_mode": False,
+            "programmable": current.programmable}
 
 
 @api.get("/workspaces", response_model=WorkspacePage, tags=["本地 Agent"])
@@ -297,26 +297,25 @@ async def config(current: Current):
     tokenizer = current.runner.context.counter.name
     # ``tools`` is the count of the face new sessions actually get: the demo
     # harness has one face, so the default-mode lookup falls back to it.
-    faces = current.runner.tool_faces or {}
-    tools = len((faces.get(settings.default_mode) or current.runner.tools).registry.definitions())
+    tools = len(current.runner.tools.registry.definitions())
     from chagent.tools.builtin import WRITE_TOOLS
-    work_writable = WRITE_TOOLS <= {tool.name for tool in (faces.get('work') or current.runner.tools).registry.definitions()}
+    work_writable = WRITE_TOOLS <= {tool.name for tool in current.runner.tools.registry.definitions()}
     return {
         "provider": current.runner.model.provider, "model": current.runner.model.id,
         "run_timeout": current.runner.timeout,
         "sandbox": settings.sandbox, "sandbox_network": settings.sandbox_network,
-        "workspace_writable": work_writable, "code_workspace_writable": settings.trusted_development, "process_stdin": False,
+        "workspace_writable": work_writable, "code_workspace_writable": work_writable, "process_stdin": False,
         "execution_profile": settings.execution_profile,
-        "readonly_code": settings.readonly_code_available,
+        "readonly_code": False,
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
         "approval_grace": settings.approval_unwatched_grace,
-        "host_commands": settings.allow_host_commands,
+        "host_commands": current.runner.tools.allow_host_commands,
         "web_access": settings.web_access,
         "web_key": "set" if settings.search_api_key.strip() else "missing",
         "compaction": policy.enabled, "tokenizer": tokenizer,
         "max_turns": settings.max_turns, "max_tool_concurrency": settings.max_tool_concurrency,
         "max_processes": settings.max_processes, "process_timeout": settings.process_timeout,
-        "default_mode": settings.default_mode, "code_mode": settings.code_mode,
+        "default_mode": "work", "code_mode": False, "programmable": current.programmable,
         "tools": tools,
         # Describe the actual work face; code capability is a separate field.
         "behavior": describe_behavior(settings, policy, tokenizer, workspace_writes=work_writable),
@@ -393,21 +392,13 @@ async def sessions(current: Current, limit: PageLimit = 50, before: UUID | None 
 
 @api.patch("/sessions/{session_id}", response_model=Session, tags=["会话"])
 async def edit_session(session_id: UUID, value: SessionEdit, current: Current):
-    """Rename, archive or switch mode; all three are session metadata.
-
-    Switching to code runs the same preflight a code session gets on every
-    access, so a broken sandbox is refused here instead of failing mid-run.
-    """
+    """Rename or archive a session; the legacy mode is immutable."""
     session = await current.session(session_id)
     if value.title is not None:
         session = await current.sessions.rename(session_id, value.title)
     if value.archived is not None:
         session = (await current.sessions.archive(session_id) if value.archived
                    else await current.sessions.restore(session_id))
-    if value.mode is not None and value.mode != session.mode:
-        if value.mode == "code":
-            await current.require_code(session.workspace)
-        session = await current.sessions.set_mode(session_id, value.mode)
     return session
 
 
@@ -427,11 +418,9 @@ async def usage(current: Current, days: Annotated[int, Query(ge=1, le=90)] = 7):
 
 @api.post("/sessions", response_model=Session, status_code=201, tags=["会话"])
 async def create_session(value: SessionCreate, current: Current):
-    """Mode may be given here; it can also be switched later through PATCH."""
-    mode = value.mode or current.settings.default_mode
-    if mode == "code":
-        await current.require_code(current.root(value.workspace))
-    return await current.sessions.create(current.root(value.workspace), value.title, mode=mode)
+    """Create a session with the unified programmable tool surface."""
+    await current.require_programming(current.root(value.workspace))
+    return await current.sessions.create(current.root(value.workspace), value.title, mode="work")
 
 
 @api.post("/uploads", status_code=201, tags=["会话"])
@@ -544,12 +533,6 @@ async def context_detail(session_id: UUID, current: Current):
 @api.post("/sessions/{session_id}/runs", response_model=RunAccepted, status_code=202, tags=["运行"])
 async def send(session_id: UUID, value: RunCreate, current: Current):
     session = await current.session(session_id)
-    # Two refusals that must not become a silent downgrade: a run inherits the
-    # session's mode, and a mode this build does not enable cannot be honoured.
-    if value.mode is not None and value.mode != session.mode:
-        raise HTTPException(409, "运行继承会话模式，不能按 run 切换")
-    if session.mode == "code" and not current.settings.code_mode:
-        raise HTTPException(409, "本构建未开启 code 模式（CHAGENT_CODE_MODE=off）")
     supersede_from = await _replacement_point(current, session_id, value)
     return {"run_id": await current.start(session_id, value.text or "", supersede_from=supersede_from),
             "session_id": session_id}
@@ -826,9 +809,8 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                 await injected_runtime.close()
             return
         configured = settings or Settings.from_env()
-        validate_web_settings(configured)
-        if demo and configured.code_mode:
-            raise ValueError("demo 只支持 work；只读 code 需要实际模型 runner")
+        if not demo:
+            validate_web_settings(configured)
         selected = None if demo else (model_settings or ModelSettings.from_env())
         approval = ApprovalPolicy.from_settings(configured)
         client = create_model_client(selected) if selected is not None else None
@@ -851,8 +833,8 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
                                            code_mode=configured.code_mode,
-                                           # File editing is shared; explicit read-only code
-                                           # still trims writes. Command policy is separate.
+                                           unified=True,
+                                           # One writable file and command surface for both legacy rows.
                                            allow_workspace_writes=True, versioned_files=True,
                                            code_workspace_writes=configured.trusted_development,
                                            process_stdin=False,
@@ -864,10 +846,11 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            approval_grace=configured.approval_unwatched_grace,
                                            process_wall_timeout=configured.process_timeout,
                                            max_processes=configured.max_processes, web=web)
-                app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env())
+                app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env(),
+                                               programmable=not demo)
                 try:
-                    if configured.code_mode:
-                        await app.state.runtime.require_code(app.state.runtime.workspace)
+                    if not demo:
+                        await app.state.runtime.require_programming(app.state.runtime.workspace)
                     app.state.runtime.start_worker()
                     yield
                 finally:

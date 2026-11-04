@@ -39,7 +39,8 @@ class ReadonlyPolicyTests(unittest.TestCase):
 
     def test_config_default_strict_and_transmission(self):
         self.assertTrue(Settings.from_env({}).sandbox_writable)
-        cfg = Settings.from_env({'CHAGENT_SANDBOX_WRITABLE': 'false'})
+        cfg = Settings.from_env({'CHAGENT_EXECUTION_PROFILE': 'configured',
+                                 'CHAGENT_SANDBOX_WRITABLE': 'false'})
         self.assertFalse(Sandbox.from_settings(cfg).settings.writable_workspace)
         for value in ('', '0', 'off', 'yes', 'typo'):
             with self.subTest(value=value), self.assertRaises(ValueError):

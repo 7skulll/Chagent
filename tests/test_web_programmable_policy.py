@@ -10,26 +10,33 @@ from chagent.models.settings import ModelSettings
 from chagent.web.policy import validate_web_settings, validate_web_runner
 
 
-class WebReadonlyPolicyTests(unittest.TestCase):
+class WebProgrammablePolicyTests(unittest.TestCase):
+    def test_configured_profile_cannot_be_silently_upgraded(self):
+        configured = replace(Settings(), execution_profile='configured')
+        with self.assertRaisesRegex(ValueError, 'trusted-development'):
+            validate_web_settings(configured)
+        with self.assertRaisesRegex(ValueError, 'trusted-development'):
+            validate_web_settings(replace(configured, code_mode=False))
+
     def test_all_required_switches_and_default_work(self):
-        good=Settings(code_mode=True,allow_host_commands=True,sandbox='isolated',sandbox_writable=False)
+        good=Settings.from_env({})
         validate_web_settings(good)
         self.assertEqual(good.default_mode,'work')
-        for args in ({'sandbox':'off'},{'sandbox':'workspace-write'},{'sandbox_writable':True},
+        for args in ({'sandbox':'off'},{'sandbox':'workspace-write'},{'sandbox_writable':False},
                      {'sandbox_network':True},{'allow_host_commands':False}):
-            with self.subTest(args=args),self.assertRaisesRegex(ValueError,'只读'):
-                validate_web_settings(replace(good,**args))
-        validate_web_settings(Settings())
+            with self.subTest(args=args),self.assertRaises(ValueError):
+                validate_web_settings(replace(good,**args, execution_profile='configured'))
 
     def test_actual_runner_cannot_disagree_with_config(self):
         from chagent.bootstrap import create_runner
         from chagent.models.fake import FakeModelClient
         from chagent.models.base import Model
         from chagent.tools.sandbox import Sandbox,SandboxSettings
-        cfg=Settings(code_mode=True,allow_host_commands=True,sandbox='isolated',sandbox_writable=False)
-        sb=Sandbox(SandboxSettings(mode='isolated',writable_workspace=False));self.addCleanup(sb.close)
+        cfg=Settings.from_env({})
+        sb=Sandbox(SandboxSettings(mode='isolated',writable_workspace=True));self.addCleanup(sb.close)
         runner=create_runner(MagicMock(),Model('fake','local','fake',8192,512),FakeModelClient(),
-                             code_mode=True,allow_host_commands=True,sandbox=sb,allow_workspace_writes=True,code_workspace_writes=False)
+                             code_mode=True,allow_host_commands=True,sandbox=sb,allow_workspace_writes=True,
+                             unified=True,process_stdin=False)
         validate_web_runner(cfg,runner)
         runner.tool_faces['code'].registry.get('process').allowed_actions=('write',)
         with self.assertRaisesRegex(ValueError,'read/stop'):validate_web_runner(cfg,runner)

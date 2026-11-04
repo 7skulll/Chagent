@@ -93,6 +93,8 @@ async def _run(
             runner = create_runner(database, model_settings.model(), client,
                                    allow_host_commands=host_commands,
                                    code_mode=settings.code_mode,
+                                   unified=True,
+                                   process_stdin=False,
                                    timeout=model_settings.run_timeout, max_turns=settings.max_turns,
                                    max_tool_concurrency=settings.max_tool_concurrency,
                                    memory_worker_concurrency=settings.memory_worker_concurrency,
@@ -103,7 +105,7 @@ async def _run(
                                    max_processes=settings.max_processes, web=web)
         if session_id is None:
             session = await SessionManager(runner.conversations).create(
-                workspace, title="新会话", mode=settings.default_mode)
+                workspace, title="新会话", mode="work")
             session_id = session.id
         # Printed before the run: a bad credential fails inside it, and this
         # line is the one that explains why.

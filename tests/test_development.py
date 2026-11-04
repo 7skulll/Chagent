@@ -27,10 +27,11 @@ class DevelopmentTests(unittest.TestCase):
         return create_runner(MagicMock(), Model('fake', 'local', 'fake', 8192, 512), FakeModelClient(),
                              code_mode=True, allow_host_commands=True, sandbox=sandbox,
                              allow_workspace_writes=True, code_workspace_writes=settings.trusted_development,
-                             process_stdin=False, approval_policy=ApprovalPolicy.from_settings(settings))
+                             process_stdin=False, approval_policy=ApprovalPolicy.from_settings(settings),
+                             unified=settings.sandbox_writable)
 
     def test_profile_is_explicit_and_env_parses_it(self):
-        self.assertFalse(Settings().trusted_development)
+        self.assertTrue(Settings().trusted_development)
         cfg = Settings.from_env({'CHAGENT_EXECUTION_PROFILE': 'trusted-development',
             'CHAGENT_CODE_MODE': 'on', 'CHAGENT_ALLOW_HOST_COMMANDS': 'true',
             'CHAGENT_SANDBOX': 'isolated', 'CHAGENT_SANDBOX_WRITABLE': 'true'})
@@ -49,19 +50,52 @@ class DevelopmentTests(unittest.TestCase):
                         {'code_mode':False}, {'allow_host_commands':False}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 replace(good, **changes)
-        self.assertEqual(Settings(approval='untrusted').approval, 'untrusted')
+        self.assertEqual(Settings(execution_profile='configured', approval='untrusted').approval, 'untrusted')
 
     def test_work_and_code_share_file_writes_without_stdin(self):
         cfg = development_settings()
         runner = self.runner(cfg)
         validate_web_runner(cfg, runner)
+        self.assertIs(runner.tool_faces['work'], runner.tool_faces['code'])
         names = lambda mode: {t.name for t in runner.tool_faces[mode].registry.definitions()}
         self.assertEqual(WRITE_TOOLS & names('code'), WRITE_TOOLS)
         self.assertEqual(WRITE_TOOLS & names('work'), WRITE_TOOLS)
         self.assertIn('create_file', names('work'))
         self.assertIn('create_file', names('code'))
+        self.assertIn('exec_command', names('work'))
+        self.assertIn('run_tests', names('work'))
         self.assertEqual(set(runner.tool_faces['code'].registry.get('process').allowed_actions), {'read','stop'})
         self.assertFalse(runner.scheduler.policy.requires_approval('exec_command', {'cmd':'echo test'}, sandbox='isolated'))
+
+    def test_prompt_claims_execution_only_for_explicit_unified_runner(self):
+        cfg = development_settings()
+        unified = self.runner(cfg)
+        self.assertEqual(unified.prompt_mode_for('work'), 'unified')
+        sandbox = unified.sandbox
+        work_only = create_runner(MagicMock(), Model('fake', 'local', 'fake', 8192, 512),
+                                  FakeModelClient(), sandbox=sandbox, code_mode=False)
+        self.assertEqual(work_only.prompt_mode_for('work'), 'work')
+        self.assertIsNone(work_only.executor_for('work').registry.get('exec_command'))
+
+    def test_unified_rejects_disabled_code_switch(self):
+        sandbox = Sandbox(SandboxSettings(mode='isolated'))
+        self.addCleanup(sandbox.close)
+        with self.assertRaisesRegex(ValueError, 'CHAGENT_CODE_MODE=on'):
+            create_runner(MagicMock(), Model('fake', 'local', 'fake', 8192, 512),
+                          FakeModelClient(), sandbox=sandbox, allow_host_commands=True,
+                          code_mode=False, unified=True)
+
+    def test_unified_cannot_claim_missing_execution_tools(self):
+        sandbox = Sandbox(SandboxSettings(mode='isolated'))
+        self.addCleanup(sandbox.close)
+        for changes in ({'allow_host_commands': False}, {'allow_workspace_writes': False},
+                        {'process_stdin': True}):
+            options = {'allow_host_commands': True, 'allow_workspace_writes': True,
+                       'process_stdin': False, **changes}
+            with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, 'Unified execution requires'):
+                create_runner(MagicMock(), Model('fake', 'local', 'fake', 8192, 512),
+                              FakeModelClient(), sandbox=sandbox, code_mode=True,
+                              unified=True, **options)
 
     def test_runner_mismatches_are_rejected(self):
         cfg = development_settings()

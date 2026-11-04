@@ -448,9 +448,10 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         for asset in ("app.js", "markdown.js", "style.css"):
             self.assertEqual((await self.client.get(f"/static/{asset}")).status_code, 200)
         info = (await self.client.get("/api/info")).json()
-        self.assertEqual(set(info), {"workspace", "provider", "model", "default_mode", "code_mode"})
+        self.assertEqual(set(info), {"workspace", "provider", "model", "default_mode", "code_mode", "programmable"})
         self.assertEqual(info["default_mode"], "work")
         self.assertFalse(info["code_mode"])
+        self.assertFalse(info["programmable"])
 
     async def test_provider_failure_is_displayable_and_next_turn_recovers(self):
         class ErrorClient:
@@ -677,68 +678,16 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         from dataclasses import replace
         self.runner = create_runner(self.database, replace(self.runner.model, context_window=65536), FakeModelClient(),
             code_mode=True, allow_host_commands=True, sandbox=sb,
-            allow_workspace_writes=True, code_workspace_writes=True, process_stdin=False)
+            allow_workspace_writes=True, code_workspace_writes=True, process_stdin=False, unified=True)
         self.runtime = WebRuntime(self.runner, self.workspace, cfg)
         self.app.state.runtime = self.runtime
         self.addAsyncCleanup(self.runtime.close)
 
-    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
-    async def test_mode_switches_inside_one_session_and_pins_per_run(self):
-        """The chat switch changes the next run's face, never the running one."""
-        await self.enable_development()
-        identity = await self.create_session()
-        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).json()["mode"], "work")
-        switched = await self.client.patch(f"/api/sessions/{identity}", json={"mode": "code"})
-        self.assertEqual(switched.status_code, 200, switched.text)
-        self.assertEqual(switched.json()["mode"], "code")
-        # The history keeps the work-face turn; nothing is rewritten on switch.
-        self.runner.client = FakeModelClient("exec_command", {"cmd": "echo switched"})
-        sent = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "run"})
-        self.assertEqual(sent.status_code, 202, sent.text)
-        result = await self.wait_run(sent.json()["run_id"])
-        self.assertEqual(result["status"], "completed", result)
-        self.assertIn("switched", json.dumps((await self.client.get(
-            f"/api/sessions/{identity}/messages")).json()))
-        back = await self.client.patch(f"/api/sessions/{identity}", json={"mode": "work"})
-        self.assertEqual(back.json()["mode"], "work")
-        # Switching back removes the command tool from the declared face, so the
-        # same call now fails as unknown instead of executing — the face really
-        # did change, it is not merely relabelled.
-        self.runner.client = FakeModelClient("exec_command", {"cmd": "echo again"})
-        sent = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "run"})
-        result = await self.wait_run(sent.json()["run_id"])
-        history = json.dumps((await self.client.get(f"/api/sessions/{identity}/messages")).json())
-        self.assertEqual(result["status"], "completed", result)
-        self.assertIn("Unknown tool: exec_command", history)
-        self.assertNotIn("again\n", history)
-
-    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
-    async def test_mode_cannot_switch_under_an_active_run(self):
-        await self.enable_development()
-        identity = await self.create_session()
-        gate, release = asyncio.Event(), asyncio.Event()
-
-        class Slow(FakeModelClient):
-            async def stream(self, request):
-                gate.set()
-                await release.wait()
-                async for event in super().stream(request):
-                    yield event
-
-        self.runner.client = Slow("read_file", {"path": "x"})
-        sent = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "slow"})
-        await asyncio.wait_for(gate.wait(), 5)
-        refused = await self.client.patch(f"/api/sessions/{identity}", json={"mode": "code"})
-        self.assertEqual(refused.status_code, 409, refused.text)
-        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).json()["mode"], "work")
-        release.set()
-        await self.wait_run(sent.json()["run_id"])
-
-    async def test_mode_switch_to_code_is_refused_by_a_work_only_build(self):
+    async def test_mode_switch_parameter_is_removed(self):
         identity = await self.create_session()
         refused = await self.client.patch(f"/api/sessions/{identity}", json={"mode": "code"})
-        self.assertEqual(refused.status_code, 409, refused.text)
-        self.assertIn("code", refused.text)
+        self.assertEqual(refused.status_code, 400, refused.text)
+        self.assertIn("mode", refused.text)
         self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).json()["mode"], "work")
 
     async def test_session_edit_still_rejects_an_empty_body(self):
@@ -750,10 +699,13 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         await self.enable_development()
         cfg = (await self.client.get("/api/config")).json()
         self.assertEqual(cfg["execution_profile"], "trusted-development")
+        self.assertTrue(cfg["programmable"])
+        self.assertFalse(cfg["code_mode"])
+        self.assertTrue(cfg["host_commands"])
         self.assertTrue(cfg["workspace_writable"])
         self.assertFalse(cfg["readonly_code"])
         self.assertFalse(cfg["process_stdin"])
-        response = await self.client.post("/api/sessions", json={"mode":"code"})
+        response = await self.client.post("/api/sessions", json={})
         self.assertEqual(response.status_code, 201, response.text)
         identity = response.json()["id"]
         async def invoke(name, arguments):
@@ -790,79 +742,20 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         await self.enable_development()
         from chagent.tools.sandbox import SeatbeltBackend
         self.runner.sandbox.backend = SeatbeltBackend('/missing/chagent-seatbelt')
-        response = await self.client.post("/api/sessions", json={"mode":"code"})
+        response = await self.client.post("/api/sessions", json={})
         self.assertEqual(response.status_code, 503, response.text)
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT count(*) AS n FROM model_calls")
             self.assertEqual((await cursor.fetchone())["n"], 0)
 
-    async def enable_readonly(self):
-        from chagent.bootstrap import create_runner
-        from chagent.tools.sandbox import Sandbox, SandboxSettings
-        cfg=Settings(code_mode=True,allow_host_commands=True,sandbox="isolated",sandbox_writable=False)
-        sb=Sandbox(SandboxSettings(mode="isolated",writable_workspace=False))
-        self.addCleanup(sb.close)
-        runner=create_runner(self.database,self.runner.model,FakeModelClient("exec_command", {"cmd":"printf readonly-ok"}),
-                             code_mode=True,allow_host_commands=True,sandbox=sb,allow_workspace_writes=True,code_workspace_writes=False)
-        self.runner=runner
-        self.runtime=WebRuntime(runner,self.workspace,cfg)
-        self.app.state.runtime=self.runtime
-        self.addAsyncCleanup(self.runtime.close)
-
-    # These two start a real sandboxed child, so they skip where seatbelt cannot
-    # be applied (CI containers, hardened runners) instead of failing as if the
-    # readonly gate had regressed. The API's refusal in that case is fail-closed
-    # and is covered by test_readonly_missing_backend_refuses_api_before_model_call.
-    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
-    async def test_readonly_code_api_runs_and_reports_actual_capabilities(self):
-        await self.enable_readonly()
-        cfg=(await self.client.get("/api/config")).json()
-        self.assertTrue(cfg["readonly_code"])
-        self.assertTrue(cfg["workspace_writable"])
-        self.assertFalse(cfg["code_workspace_writable"])
-        self.assertFalse(cfg["process_stdin"])
-        self.assertIn("isolated(ro)",cfg["behavior"])
-        response=await self.client.post("/api/sessions",json={"mode":"code"})
-        self.assertEqual(response.status_code,201,response.text)
-        identity=response.json()["id"]
-        sent=await self.client.post(f"/api/sessions/{identity}/runs",json={"text":"read only"})
-        self.assertEqual(sent.status_code,202,sent.text)
-        run=await self.wait_run(sent.json()["run_id"])
-        self.assertEqual(run["status"],"completed",run)
-        messages=(await self.client.get(f"/api/sessions/{identity}/messages")).json()
-        self.assertIn("readonly-ok",json.dumps(messages))
-        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).status_code,200)
-        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",json={"text":"switch","mode":"work"})).status_code,409)
-
-    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
-    async def test_readonly_code_rechecks_actual_runner_and_old_sessions(self):
-        await self.enable_readonly()
-        response=await self.client.post("/api/sessions",json={"mode":"code"})
-        identity=response.json()["id"]
-        from dataclasses import replace
-        self.runner.sandbox.settings=replace(self.runner.sandbox.settings,writable_workspace=True)
-        denied=await self.client.post(f"/api/sessions/{identity}/runs",json={"text":"must refuse"})
-        self.assertEqual(denied.status_code,400,denied.text)
-        self.assertEqual((await self.client.post("/api/sessions",json={"mode":"code"})).status_code,400)
-
-    async def test_readonly_missing_backend_refuses_api_before_model_call(self):
-        await self.enable_readonly()
-        from chagent.tools.sandbox import SeatbeltBackend
-        self.runner.sandbox.backend=SeatbeltBackend('/missing/chagent-seatbelt')
-        response=await self.client.post("/api/sessions",json={"mode":"code"})
-        self.assertEqual(response.status_code,503,response.text)
-        async with self.database.connection() as connection:
-            cursor=await connection.execute("SELECT count(*) AS n FROM model_calls")
-            self.assertEqual((await cursor.fetchone())["n"],0)
-
-    async def test_code_old_session_is_rejected_when_feature_is_off(self):
+    async def test_old_code_session_remains_accessible(self):
         identity=await self.runner.conversations.create_session(self.workspace,mode="code")
-        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).status_code,409)
-        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",json={"text":"deny"})).status_code,409)
+        self.assertEqual((await self.client.get(f"/api/sessions/{identity}")).status_code,200)
+        self.assertEqual((await self.client.post(f"/api/sessions/{identity}/runs",json={"text":"continue"})).status_code,202)
 
-    async def test_code_mode_cannot_be_enabled_for_web(self):
+    async def test_nonprogrammable_runner_cannot_be_used_for_web(self):
         from dataclasses import replace
-        with self.assertRaisesRegex(ValueError, "code"):
+        with self.assertRaisesRegex(ValueError, "实际 runner"):
             WebRuntime(self.runner, self.workspace, replace(self.runtime.settings, code_mode=True))
 
     async def test_source_workspace_and_ancestor_are_rejected(self):
@@ -1089,7 +982,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         value = (await self.client.get("/api/config")).json()
         self.assertEqual(value["provider"], "local-test")
         self.assertGreaterEqual(value["tools"], 8)
-        self.assertIn(value["sandbox"], {"off", "workspace-write"})
+        self.assertIn(value["sandbox"], {"off", "workspace-write", "isolated"})
         self.assertIn(value["approval"], {"never", "on-request", "untrusted"})
         self.assertEqual(value["web_key"], "missing")
         self.assertIn("sandbox=", value["behavior"])
@@ -1101,15 +994,14 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("postgres", json.dumps(value))
         self.assertNotIn("api_key", json.dumps(value))
 
-    async def test_work_mode_is_the_only_face_this_build_serves(self):
-        """The mode is refused, not downgraded, and a run inherits it."""
+    async def test_mode_parameter_is_not_part_of_new_api(self):
         config = (await self.client.get("/api/config")).json()
         self.assertEqual(config["default_mode"], "work")
         self.assertFalse(config["code_mode"])
 
         refused = await self.client.post("/api/sessions", json={"title": "要写文件", "mode": "code"})
-        self.assertEqual(refused.status_code, 409, refused.text)
-        self.assertIn("CHAGENT_CODE_MODE", refused.text)
+        self.assertEqual(refused.status_code, 400, refused.text)
+        self.assertIn("mode", refused.text)
         unknown = await self.client.post("/api/sessions", json={"title": "x", "mode": "admin"})
         self.assertEqual(unknown.status_code, 400, unknown.text)
 
@@ -1119,18 +1011,16 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         # A run may not switch the face its session was created with.
         mismatch = await self.client.post(f"/api/sessions/{identity}/runs",
                                           json={"text": "写", "mode": "code"})
-        self.assertEqual(mismatch.status_code, 409, mismatch.text)
-        agree = await self.client.post(f"/api/sessions/{identity}/runs",
-                                       json={"text": "读", "mode": "work"})
+        self.assertEqual(mismatch.status_code, 400, mismatch.text)
+        agree = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "读"})
         self.assertEqual(agree.status_code, 202, agree.text)
         await self.wait_run(agree.json()["run_id"])
 
-    async def test_a_code_session_is_refused_when_the_build_switch_is_off(self):
-        """A row written by a code-enabled build must not keep working here."""
+    async def test_old_code_session_can_continue(self):
         identity = await self.runner.conversations.create_session(self.workspace, mode="code")
         response = await self.client.post(f"/api/sessions/{identity}/runs", json={"text": "继续"})
-        self.assertEqual(response.status_code, 409, response.text)
-        self.assertEqual(await self.runner.runs.latest(identity), None)
+        self.assertEqual(response.status_code, 202, response.text)
+        await self.wait_run(response.json()["run_id"])
 
     # -- WK2: 改得动 ------------------------------------------------------
 

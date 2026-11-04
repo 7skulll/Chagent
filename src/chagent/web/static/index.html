@@ -49,10 +49,6 @@
     <label for="session-search" class="sr-only">搜索会话</label>
     <input id="session-search" class="session-search" type="search" placeholder="搜索会话标题" maxlength="200" autocomplete="off" hidden>
 
-    <div id="mode-picker" class="mode-picker" hidden>
-      <label for="new-mode">新会话类型</label>
-      <select id="new-mode"><option value="work">资料处理</option><option id="code-mode-option" value="code">只读代码分析</option></select>
-    </div>
     <button id="new-session" class="new-chat" title="开始一段新对话">
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 16.4 10-10a2.1 2.1 0 0 1 3 3l-10 10-4 1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
       新聊天
@@ -81,11 +77,6 @@
         <button class="ghost-icon" id="toggle-sidebar" title="折叠/展开侧栏" aria-label="折叠或展开侧栏" aria-controls="session-sidebar"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 4.5v15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
       </div>
       <div class="tabbar-title" id="session-title">聊天</div>
-      <!-- 会话模式开关：两种模式的工具面完全不同，切换只影响之后的 run。 -->
-      <div class="mode-switch" id="mode-switch" role="group" aria-label="会话模式" hidden>
-        <button type="button" data-mode="work" aria-pressed="true" title="读文档、改工作区文件，不执行命令">资料处理</button>
-        <button type="button" data-mode="code" id="mode-switch-code" aria-pressed="false" title="可执行命令与测试（隔离断网）">代码开发</button>
-      </div>
       <div class="tabbar-right">
         <button class="usage-pill" id="usage-pill" title="本会话 token 用量" hidden>用量</button>
         <button class="ghost-icon" id="toggle-tools" title="折叠/展开工具面板" aria-label="折叠或展开工具面板" aria-controls="conversation-tools"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M14.5 4.5v15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
@@ -110,7 +101,6 @@
     </section>
 
     <footer class="dock">
-      <p id="mode-note" class="mode-note" hidden></p>
       <div class="status-line"><span id="status" role="status">就绪</span><button id="stop" class="stop-btn" hidden>■ 停止生成</button></div>
       <div id="uploads" class="uploads" aria-live="polite"></div>
       <form id="composer" class="composer">

@@ -8,7 +8,8 @@ from chagent.tools.policy import ApprovalPolicy, fingerprint, subject
 
 def policy(mode, allowlist=""):
     return ApprovalPolicy.from_settings(Settings.from_env(
-        {"CHAGENT_APPROVAL": mode, "CHAGENT_APPROVAL_ALLOWLIST": allowlist}))
+        {"CHAGENT_EXECUTION_PROFILE": "configured", "CHAGENT_APPROVAL": mode,
+         "CHAGENT_APPROVAL_ALLOWLIST": allowlist}))
 
 
 class ApprovalPolicyTests(unittest.TestCase):

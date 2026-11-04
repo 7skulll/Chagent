@@ -42,6 +42,7 @@ EXECUTION_TOOLS = frozenset({"exec_command", "run_tests", "process"})
 
 def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
                             allow_workspace_writes: bool = True,
+                            unified: bool = False,
                             artifacts: ArtifactRepository | None = None,
                             sandbox: Sandbox | None = None,
                             processes: ProcessManager | None = None,
@@ -56,6 +57,11 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
     unknown tool even if it arrived through some other route.
     """
     mode = validate_mode(mode)
+    if unified and (sandbox is None or sandbox.settings.mode != "isolated"
+                    or not sandbox.settings.writable_workspace):
+        raise ValueError("Unified tools require a writable isolated sandbox")
+    if unified and (not allow_host_commands or not allow_workspace_writes or process_stdin):
+        raise ValueError("Unified tools require host commands, workspace writes, and process_stdin=False")
     registry = ToolRegistry()
     # Reads exist in both modes: they are what every session is for.
     tools = [ListDirTool(), ReadFileTool(), GlobTool(), GrepTool()]
@@ -82,7 +88,7 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
                 if tool.name == "apply_patch":
                     tool.parameters["properties"]["versions"] = {"type":"object", "additionalProperties":{"type":"string","pattern":"^[0-9a-f]{64}$"}}
         registry.register(tool)
-    if mode == "code" and allow_host_commands:
+    if (mode == "code" or unified) and allow_host_commands:
         # Both run host processes; the executor enforces the same switch.
         registry.register(ExecCommandTool(sandbox, processes, process_stdin=process_stdin))
         registry.register(RunTestsTool(sandbox))

@@ -7,6 +7,13 @@ from chagent.config import Settings
 
 
 class SettingsTests(unittest.TestCase):
+    def test_single_legacy_key_does_not_change_execution_profile(self):
+        settings = Settings.from_env({"CHAGENT_SANDBOX": "isolated"})
+        self.assertEqual(settings.execution_profile, "trusted-development")
+        self.assertEqual(settings, Settings())
+        configured = Settings.from_env({"CHAGENT_EXECUTION_PROFILE": "configured"})
+        self.assertEqual(configured.execution_profile, "configured")
+
     def test_environment_overrides(self):
         settings = Settings.from_env({
             "CHAGENT_DATABASE_URL": "postgresql:///custom_db",
@@ -70,7 +77,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(Settings.from_env({"CHAGENT_APPROVAL_UNWATCHED_GRACE": "2.5"}).approval_unwatched_grace, 2.5)
 
     def test_host_commands_require_explicit_boolean_setting(self):
-        self.assertFalse(Settings.from_env({}).allow_host_commands)
+        self.assertTrue(Settings.from_env({}).allow_host_commands)
         self.assertTrue(Settings.from_env({"CHAGENT_ALLOW_HOST_COMMANDS": "true"}).allow_host_commands)
         with self.assertRaises(ValueError):
             Settings.from_env({"CHAGENT_ALLOW_HOST_COMMANDS": "maybe"})
@@ -111,7 +118,7 @@ class ResolvedConfigurationTests(unittest.TestCase):
         from chagent.config import Settings
         from chagent.diagnostics.behavior import describe
         from chagent.domain.summaries import CompactionPolicy
-        line = describe(Settings(sandbox="workspace-write", sandbox_network=False, allow_host_commands=True),
+        line = describe(Settings(execution_profile="configured", sandbox="workspace-write", sandbox_network=False, allow_host_commands=True),
                         CompactionPolicy(enabled=False))
         self.assertIn("sandbox=workspace-write/no-network", line)
         self.assertIn("host_commands=on", line)
@@ -123,7 +130,8 @@ class ResolvedConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / ".env"
             path.write_text("CHAGENT_PROVIDER=deepseek\nDEEPSEEK_API_KEY=file-secret\n"
-                            "CHAGENT_MODEL=file-model\nCHAGENT_SANDBOX=workspace-write\n",
+                            "CHAGENT_MODEL=file-model\nCHAGENT_SANDBOX=workspace-write\n"
+                            "CHAGENT_EXECUTION_PROFILE=configured\n",
                             encoding="utf-8")
             file_env = dotenv.read(path)
             # The environment wins, exactly as `uv run --env-file` behaves.

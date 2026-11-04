@@ -103,10 +103,10 @@ class ToolFaceTests(unittest.TestCase):
 
 
 class ModeSettingsTests(unittest.TestCase):
-    def test_code_mode_is_off_unless_asked(self):
-        self.assertFalse(Settings().code_mode)
-        self.assertEqual(Settings().enabled_modes, ("work",))
-        self.assertEqual(Settings.from_env({"CHAGENT_CODE_MODE": "on"}).enabled_modes, ("work", "code"))
+    def test_default_configuration_is_programmable(self):
+        self.assertTrue(Settings().code_mode)
+        self.assertTrue(Settings().trusted_development)
+        self.assertEqual(Settings(), Settings.from_env({}))
 
     def test_unknown_switch_values_are_rejected(self):
         for value in ("true", "yes", "1"):
@@ -117,22 +117,17 @@ class ModeSettingsTests(unittest.TestCase):
 
     def test_a_default_the_build_cannot_serve_is_a_startup_error(self):
         with self.assertRaises(ValueError) as caught:
-            Settings(default_mode="code")
+            Settings(execution_profile="configured", code_mode=False, default_mode="code")
         self.assertIn("CHAGENT_CODE_MODE", str(caught.exception))
         self.assertEqual(Settings(code_mode=True, default_mode="code").default_mode, "code")
 
     def test_the_behavior_line_names_the_mode_and_inert_switches_are_reported(self):
         line = describe(Settings.from_env({"CHAGENT_CODE_MODE": "on", "CHAGENT_DEFAULT_MODE": "code"}))
-        self.assertIn("mode=code code=on", line)
-        self.assertIn("mode=work code=off", describe(Settings()))
+        self.assertIn("programmable=on", line)
+        self.assertIn("programmable=on", describe(Settings()))
         self.assertEqual(describe_warnings(Settings()), [])
-        warnings = describe_warnings(Settings(allow_host_commands=True, sandbox="workspace-write",
-                                              approval="untrusted"))
-        self.assertEqual(len(warnings), 3)
-        self.assertTrue(all("inert" in item for item in warnings))
-        # The same switches are exactly what the code face is for.
-        self.assertEqual(describe_warnings(Settings(code_mode=True, allow_host_commands=True,
-                                                   sandbox="workspace-write", approval="untrusted")), [])
+        old = Settings(execution_profile="configured", code_mode=False)
+        self.assertIn("disables unified web startup", describe_warnings(old)[0])
 
 
 @unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")

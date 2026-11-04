@@ -31,12 +31,12 @@ class Settings:
     db_pool_min_size: int = 1
     db_pool_max_size: int = 4
     db_timeout: float = 5.0
-    allow_host_commands: bool = False
+    allow_host_commands: bool = True
     max_turns: int = 32
     max_tool_concurrency: int = 4
     memory_worker_concurrency: int = 1
     # Host-command confinement. ``off`` keeps the pre-sandbox behaviour exactly.
-    sandbox: str = "off"
+    sandbox: str = "isolated"
     sandbox_network: bool = False
     sandbox_deny_read: str = ""
     sandbox_writable_tmp: bool = True
@@ -67,16 +67,15 @@ class Settings:
     #: only — ``Settings.from_env`` is the single place that resolves precedence,
     #: so diagnostics do not have to re-derive it and get it wrong.
     search_api_key_source: str = ""
-    #: Build-level switch for the write/execute face. ``off`` means no session can
-    #: select ``code`` and the code face is never constructed at all: the model
-    #: cannot call a tool that was not registered.
-    code_mode: bool = False
-    #: Mode new sessions get. A build that cannot honour it refuses to start
-    #: rather than silently creating work sessions.
+    #: Legacy build switch retained for diagnostic runners. Production unified
+    #: startup requires it on; setting it off rejects startup.
+    code_mode: bool = True
+    #: Legacy diagnostic default. Production web creates a work-valued row and
+    #: maps old work/code rows to the same executor.
     default_mode: str = "work"
     # configured preserves existing approval policy; trusted-development is an
     # explicit writable web capability, never an automatic approval override.
-    execution_profile: str = "configured"
+    execution_profile: str = "trusted-development"
 
     def __post_init__(self) -> None:
         if self.execution_profile not in {"configured", "trusted-development"}:
@@ -174,10 +173,10 @@ class Settings:
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
         values = os.environ if env is None else env
-        allow_commands = values.get("CHAGENT_ALLOW_HOST_COMMANDS", "false").lower()
+        allow_commands = values.get("CHAGENT_ALLOW_HOST_COMMANDS", "true").lower()
         if allow_commands not in {"true", "false"}:
             raise ValueError("CHAGENT_ALLOW_HOST_COMMANDS must be true or false")
-        code_mode = values.get("CHAGENT_CODE_MODE", "off").strip().lower()
+        code_mode = values.get("CHAGENT_CODE_MODE", "on").strip().lower()
         if code_mode not in {"on", "off"}:
             raise ValueError("CHAGENT_CODE_MODE must be on or off")
         sandbox_network = values.get("CHAGENT_SANDBOX_NETWORK", "false").lower()
@@ -190,7 +189,7 @@ class Settings:
         if sandbox_writable not in {"true", "false"}:
             raise ValueError("CHAGENT_SANDBOX_WRITABLE must be true or false")
         return cls(
-            execution_profile=values.get("CHAGENT_EXECUTION_PROFILE", "configured").strip().lower(),
+            execution_profile=values.get("CHAGENT_EXECUTION_PROFILE", "trusted-development").strip().lower(),
             sandbox_writable=sandbox_writable == "true",
             database_url=values.get("CHAGENT_DATABASE_URL", "postgresql:///chagent"),
             db_pool_min_size=int(values.get("CHAGENT_DB_POOL_MIN_SIZE", "1")),
@@ -200,7 +199,7 @@ class Settings:
             max_turns=int(values.get("CHAGENT_MAX_TURNS", "32")),
             max_tool_concurrency=int(values.get("CHAGENT_MAX_TOOL_CONCURRENCY", "4")),
             memory_worker_concurrency=int(values.get("CHAGENT_MEMORY_WORKER_CONCURRENCY", "1")),
-            sandbox=values.get("CHAGENT_SANDBOX", "off").strip().lower(),
+            sandbox=values.get("CHAGENT_SANDBOX", "isolated").strip().lower(),
             sandbox_network=sandbox_network == "true",
             sandbox_deny_read=values.get("CHAGENT_SANDBOX_DENY_READ", ""),
             sandbox_writable_tmp=sandbox_tmp == "true",

@@ -73,9 +73,8 @@ class AgentRunner:
         self.memory_service = memory_service
         self.memory_worker = memory_worker
         self.tools = tools
-        #: One executor per enabled mode. The runner resolves the face once per
-        #: run from the session row, so two concurrent runs in different modes
-        #: cannot see each other's tools.
+        #: Legacy mode mapping. Unified production runners map both values to
+        #: the same executor; diagnostic runners can keep separate faces.
         self.tool_faces: dict[str, ToolExecutor] | None = None
         self.conversations = conversations
         self.runs = runs
@@ -255,6 +254,11 @@ class AgentRunner:
             raise ValueError("Session mode is disabled")
         return faces[mode or "work"]
 
+    def prompt_mode_for(self, mode: str | None) -> str | None:
+        if getattr(self, "unified", False):
+            return "unified"
+        return mode if self.tool_faces is not None else None
+
     async def _load_state(self, run_id: UUID, session_id: UUID) -> RunState:
         session = await self.conversations.get_session(session_id)
         root = validate_workspace(session.workspace)
@@ -308,14 +312,10 @@ class AgentRunner:
 
     async def _loop(self, state: RunState, budget=None) -> RunResult:
         run_id, session_id = state.run_id, state.session.id
-        # Resolved once per run: the mode can be switched between runs, so a run
-        # that started in one face finishes in it. Switching mid-run is refused
-        # by the idle lock, which is what keeps the declared tools and the
-        # executing face in agreement for the whole run.
+        # Legacy session mode still selects its stored face in diagnostic builds.
+        # Production unified runners map both legacy values to one executor.
         executor = self.executor_for(state.session.mode)
-        # Only a build with per-mode faces can speak about modes truthfully; the
-        # single-face harness resolves code tools whatever the session row says.
-        prompt_mode = state.session.mode if self.tool_faces is not None else None
+        prompt_mode = self.prompt_mode_for(state.session.mode)
         tool_context = ToolContext(
             workspace=state.session.workspace, session_id=session_id, run_id=run_id,
             workspace_identity=state.workspace_identity,
