@@ -13,7 +13,8 @@ from chagent.domain.runs import StoredMessage
 from chagent.storage.repositories import RunRepository
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
-from chagent.tools.approvals import STALE, UNAVAILABLE, ApprovalBroker
+from chagent.tools.approvals import STALE, ApprovalBroker
+from chagent.tools.gate import HumanGate, ToolGate
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.policy import ApprovalPolicy
 from chagent.tools.progress import ProgressGuard, Decision
@@ -72,7 +73,7 @@ class ToolScheduler:
                  progress: ProgressGuard | None = None,
                  policy: ApprovalPolicy | None = None,
                  approvals: ApprovalBroker | None = None,
-                 sandbox_mode: str = "off"):
+                 sandbox_mode: str = "off", gates: tuple[ToolGate, ...] | None = None):
         if isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or not 1 <= max_concurrency <= 32:
             raise ValueError("Tool concurrency must be an integer between 1 and 32")
         self.runs, self.max_concurrency = runs, max_concurrency
@@ -81,6 +82,7 @@ class ToolScheduler:
         self.policy = policy if policy is not None else ApprovalPolicy()
         self.approvals = approvals
         self.sandbox_mode = sandbox_mode
+        self.gates = gates
         # Shared across concurrent sessions owned by this runner.
         self._slots = asyncio.Semaphore(max_concurrency)
         self._gates: dict[Path, _WorkspaceGate] = {}
@@ -287,23 +289,32 @@ class ToolScheduler:
                                [committed[i].message for i in range(len(calls))], stalled)
 
     async def _ask(self, calls, indices, context, executor, identities, signal, budget):
-        """Decide which calls need a human, and wait for those decisions."""
+        """Run optional gates before taking execution resources."""
         refused: dict[int, object] = {}
         grants: dict[int, UUID] = {}
+        gates = self.gates if self.gates is not None else (
+            (HumanGate(self.policy, self.approvals, self.sandbox_mode),)
+            if self.policy.mode != "never" else ())
         for index in indices:
             call = calls[index]
-            if not self.policy.requires_approval(call.name, call.arguments, sandbox=self.sandbox_mode):
-                continue
-            if self.approvals is None:
-                refused[index] = approval_result(UNAVAILABLE, None, "unavailable")
-                continue
-            outcome = await self.approvals.request(
-                run_id=context.run_id, tool_record_id=identities[index], tool_name=call.name,
-                arguments=call.arguments, cwd=str(context.workspace), signal=signal, budget=budget)
-            if outcome.approved and outcome.approval_id is not None:
-                grants[index] = outcome.approval_id
-            else:
-                refused[index] = approval_result(outcome.message, outcome.approval_id, outcome.reason)
+            for gate in gates:
+                try:
+                    decision = await gate.check(call, context=context, tool_record_id=identities[index],
+                                                signal=signal, budget=budget)
+                except Exception as error:
+                    refused[index] = approval_result("Tool gate is unavailable; the tool was not executed.",
+                                                     None, "unavailable")
+                    await self.runs.event(context.run_id, "tool_call_refused", {
+                        "tool_call_id": call.id, "name": call.name,
+                        "gate": gate.name, "reason": "unavailable",
+                        "error_type": type(error).__name__,
+                    })
+                    break
+                if not decision.allow:
+                    refused[index] = approval_result(decision.reason, decision.approval_id, decision.code)
+                    break
+                if decision.approval_id is not None:
+                    grants[index] = decision.approval_id
         return refused, grants
 
 

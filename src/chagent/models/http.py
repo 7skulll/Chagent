@@ -92,11 +92,22 @@ def event_object(event: SSEEvent) -> dict:
 
 
 def finalize_arguments(raw: str) -> tuple[dict, str | None]:
+    def contains_nul(value):
+        if isinstance(value, str):
+            return "\x00" in value
+        if isinstance(value, dict):
+            return any(contains_nul(key) or contains_nul(item) for key, item in value.items())
+        if isinstance(value, list):
+            return any(contains_nul(item) for item in value)
+        return False
+
     try:
         def reject_constant(value):
             raise ValueError("Non-finite JSON constant")
         arguments = json.loads(raw, parse_constant=reject_constant)
         if isinstance(arguments, dict):
+            if contains_nul(arguments):
+                return {}, "Tool arguments contain a NUL character; use a textual escape and reissue the call"
             return arguments, None
     except (ValueError, TypeError):
         pass

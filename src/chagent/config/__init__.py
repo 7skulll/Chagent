@@ -76,10 +76,25 @@ class Settings:
     # configured preserves existing approval policy; trusted-development is an
     # explicit writable web capability, never an automatic approval override.
     execution_profile: str = "trusted-development"
+    container_declared: bool = False
+    boundary_setting: str = ""
+
+    @property
+    def boundary(self) -> str:
+        return self.boundary_setting or ("container" if self.execution_profile == "containerized" else self.sandbox)
 
     def __post_init__(self) -> None:
-        if self.execution_profile not in {"configured", "trusted-development"}:
-            raise ValueError("CHAGENT_EXECUTION_PROFILE must be configured or trusted-development")
+        if self.execution_profile not in {"configured", "trusted-development", "containerized"}:
+            raise ValueError("CHAGENT_EXECUTION_PROFILE must be configured, trusted-development or containerized")
+        expected_boundary = "container" if self.execution_profile == "containerized" else self.sandbox
+        if self.boundary_setting and self.boundary_setting != expected_boundary:
+            raise ValueError("CHAGENT_BOUNDARY conflicts with execution profile or sandbox")
+        if self.execution_profile == "containerized" and not (
+            self.container_declared and self.code_mode and self.allow_host_commands
+            and self.sandbox == "off" and self.sandbox_writable and self.approval == "never"
+        ):
+            raise ValueError("containerized requires an explicit container declaration, code=on, host commands, "
+                             "sandbox=off, writable=true and approval=never")
         if self.trusted_development and not (
             self.code_mode and self.allow_host_commands and self.sandbox == "isolated"
             and self.sandbox_writable and not self.sandbox_network and self.approval == "never"
@@ -188,8 +203,13 @@ class Settings:
         sandbox_writable = values.get("CHAGENT_SANDBOX_WRITABLE", "true").lower()
         if sandbox_writable not in {"true", "false"}:
             raise ValueError("CHAGENT_SANDBOX_WRITABLE must be true or false")
+        container_declared = values.get("CHAGENT_CONTAINER_DECLARED", "false").lower()
+        if container_declared not in {"true", "false"}:
+            raise ValueError("CHAGENT_CONTAINER_DECLARED must be true or false")
         return cls(
             execution_profile=values.get("CHAGENT_EXECUTION_PROFILE", "trusted-development").strip().lower(),
+            container_declared=container_declared == "true",
+            boundary_setting=values.get("CHAGENT_BOUNDARY", "").strip().lower(),
             sandbox_writable=sandbox_writable == "true",
             database_url=values.get("CHAGENT_DATABASE_URL", "postgresql:///chagent"),
             db_pool_min_size=int(values.get("CHAGENT_DB_POOL_MIN_SIZE", "1")),

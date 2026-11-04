@@ -12,6 +12,8 @@
 
 ## 启动
 
+容器执行路径正在按[执行能力改造总方案](docs/执行能力改造总方案.md)实施。当前已加入镜像、Compose 与容器声明校验；真实 Spring Boot 链路和移除旧 seatbelt 尚未验收，不应将该路径视为已交付。试运行前设置 `CHAGENT_WORKSPACES` 为已有工作区的绝对路径，并在 `.env` 中配置模型密钥，然后运行 `docker compose up --build`。容器内工作区位于 `/workspaces`，网页与项目服务分别映射到本机 `127.0.0.1:8765`、`127.0.0.1:8080`。
+
 需要 Python 3.11+、uv、本机 PostgreSQL 和已创建的 `chagent` 数据库。
 
 ```sh

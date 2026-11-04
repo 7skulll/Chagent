@@ -1,0 +1,47 @@
+services:
+  db:
+    image: public.ecr.aws/docker/library/postgres:17
+    environment:
+      POSTGRES_DB: chagent
+      POSTGRES_USER: chagent
+      POSTGRES_PASSWORD: chagent-local
+    volumes:
+      - chagent-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chagent -d chagent"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  chagent:
+    image: chagent:local
+    build: .
+    env_file:
+      - .env
+    environment:
+      CHAGENT_DATABASE_URL: postgresql://chagent:chagent-local@db/chagent
+      CHAGENT_EXECUTION_PROFILE: containerized
+      CHAGENT_BOUNDARY: container
+      CHAGENT_CONTAINER_DECLARED: "true"
+      CHAGENT_WORKSPACE_ROOT: /workspaces
+      CHAGENT_SANDBOX: "off"
+      CHAGENT_SANDBOX_NETWORK: "true"
+      CHAGENT_SANDBOX_WRITABLE: "true"
+      CHAGENT_CODE_MODE: "on"
+      CHAGENT_ALLOW_HOST_COMMANDS: "true"
+      CHAGENT_APPROVAL: never
+    volumes:
+      - type: bind
+        source: ${CHAGENT_WORKSPACES:?Set CHAGENT_WORKSPACES to an existing absolute directory}
+        target: /workspaces
+      - chagent-maven:/tmp/.m2
+    ports:
+      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  chagent-db:
+  chagent-maven:

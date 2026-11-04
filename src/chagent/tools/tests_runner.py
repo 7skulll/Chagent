@@ -41,6 +41,10 @@ def detect_suite(workspace: Path) -> str:
                 pass
     if (workspace / "go.mod").is_file():
         return "go"
+    if (workspace / "pom.xml").is_file():
+        return "maven"
+    if (workspace / "gradlew").is_file() or (workspace / "build.gradle").is_file() or (workspace / "build.gradle.kts").is_file():
+        return "gradle"
     if (workspace / "Cargo.toml").is_file():
         return "cargo"
     package = workspace / "package.json"
@@ -83,6 +87,11 @@ def build_command(suite: str, workspace: Path, selection: str | None) -> list[st
         return command + (["-k", selection] if selection else [])
     if suite == "npm":
         return ["npm", "test", "--silent"] + ([selection] if selection else [])
+    if suite == "maven":
+        return ["mvn", "-B", "-ntp", "test"] + ([f"-Dtest={selection}"] if selection else [])
+    if suite == "gradle":
+        executable = "./gradlew" if (workspace / "gradlew").is_file() else "gradle"
+        return [executable, "test", "--console=plain"] + (["--tests", selection] if selection else [])
     if suite == "go":
         return ["go", "test", "./..."] + (["-run", selection] if selection else [])
     if suite == "cargo":
@@ -133,11 +142,11 @@ class RunTestsTool(AgentTool):
         super().__init__(
             name="run_tests", label="Run tests",
             description="Run the project's test suite once and return a compact digest: counts plus the first "
-                        "failures with file and assertion message. Detects pytest, unittest, npm, go or cargo. "
+                        "failures with file and assertion message. Detects pytest, unittest, Maven, Gradle, npm, go or cargo. "
                         "Prefer this over repeating shell commands: one call per verification, not one per rerun.",
             parameters={
                 "type": "object", "properties": {
-                    "suite": {"type": "string", "enum": ["auto", "pytest", "unittest", "npm", "go", "cargo"]},
+                    "suite": {"type": "string", "enum": ["auto", "pytest", "unittest", "maven", "gradle", "npm", "go", "cargo"]},
                     "selection": {"type": "string", "minLength": 1, "maxLength": 256},
                     "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 300_000},
                     "max_failures": {"type": "integer", "minimum": 1, "maximum": 20},
@@ -146,7 +155,8 @@ class RunTestsTool(AgentTool):
         )
 
     def execution_timeout(self, params: JsonObject) -> float:
-        return params.get("timeout_ms", 120_000) / 1000 + 10
+        default = 300_000 if params.get("suite", "auto") in {"auto", "maven", "gradle"} else 120_000
+        return params.get("timeout_ms", default) / 1000 + 10
 
     async def execute(
         self, tool_call_id: str, params: JsonObject, signal: asyncio.Event | None = None,
@@ -173,7 +183,7 @@ class RunTestsTool(AgentTool):
                        "PYTHONDONTWRITEBYTECODE=1",
                        f"PYTHONPYCACHEPREFIX={Path(child_env['TMPDIR']) / ('pycache-' + uuid4().hex)}",
                        *command]
-        timeout = params.get("timeout_ms", 120_000) / 1000
+        timeout = params.get("timeout_ms", 300_000 if suite in {"maven", "gradle"} else 120_000) / 1000
         argv, sandbox_record = ["/bin/sh", "-c", " ".join(_quote(part) for part in command)], {}
         if self.sandbox is not None:
             argv, sandbox_record = await self.sandbox.wrap(argv, workspace, owner=context.run_id)
@@ -219,7 +229,7 @@ class RunTestsTool(AgentTool):
         counts, failures = (summarize_unittest(output) if suite == "unittest"
                             else summarize_pytest(output) if suite == "pytest"
                             else ({}, []))
-        if not counts and not failures:
+        if not counts and not failures and (process.returncode != 0 or timed_out):
             # Unknown runner output: keep the tail, which holds the summary line.
             tail = [line for line in output.strip().splitlines() if line.strip()][-8:]
             failures = [{"name": "output", "message": line[:MAX_MESSAGE_CHARS]} for line in tail[-3:]]

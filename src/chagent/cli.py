@@ -94,6 +94,7 @@ async def _run(
                                    allow_host_commands=host_commands,
                                    code_mode=settings.code_mode,
                                    unified=True,
+                                   containerized=settings.execution_profile == "containerized",
                                    process_stdin=False,
                                    timeout=model_settings.run_timeout, max_turns=settings.max_turns,
                                    max_tool_concurrency=settings.max_tool_concurrency,

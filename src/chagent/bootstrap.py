@@ -37,6 +37,7 @@ def _tool_faces(
     process_stdin: bool = True,
     versioned_files: bool = False,
     unified: bool = False,
+    containerized: bool = False,
 ) -> dict[str, ToolExecutor]:
     """Build a unified executor or diagnostic mode-specific executors.
 
@@ -55,8 +56,9 @@ def _tool_faces(
         raise ValueError("Unified execution requires CHAGENT_CODE_MODE=on")
     if unified and (not allow_host_commands or not allow_workspace_writes or process_stdin):
         raise ValueError("Unified execution requires host commands, workspace writes, and process_stdin=False")
-    if unified and (sandbox is None or sandbox.settings.mode != "isolated" or not sandbox.settings.writable_workspace):
-        raise ValueError("Unified execution requires a writable isolated sandbox")
+    if unified and (sandbox is None or not sandbox.settings.writable_workspace
+                    or (sandbox.settings.mode != "isolated" and not (containerized and sandbox.settings.mode == "off"))):
+        raise ValueError("Unified execution requires a writable execution boundary")
     if code_mode and allow_host_commands and not single_face and not unified and (
         sandbox is None or sandbox.settings.mode != "isolated"
     ):
@@ -72,6 +74,7 @@ def _tool_faces(
         registry = create_builtin_registry(
             mode=mode, allow_host_commands=allow_host_commands,
             unified=unified,
+            containerized=containerized,
             allow_workspace_writes=(code_workspace_writes if mode == "code" and code_workspace_writes is not None
                                     else allow_workspace_writes),
             process_stdin=process_stdin, versioned_files=versioned_files,
@@ -159,6 +162,7 @@ def create_runner(
     process_stdin: bool = True,
     versioned_files: bool = False,
     unified: bool = False,
+    containerized: bool = False,
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -169,7 +173,7 @@ def create_runner(
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
                         single_face=single_face, allow_workspace_writes=allow_workspace_writes,
                         code_workspace_writes=code_workspace_writes, process_stdin=process_stdin, versioned_files=versioned_files,
-                        unified=unified)
+                        unified=unified, containerized=containerized)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))

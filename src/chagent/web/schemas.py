@@ -153,6 +153,7 @@ class AppInfo(BaseModel):
     default_mode: Literal["work", "code"]
     code_mode: bool
     programmable: bool = False
+    boundary: str = "none"
 
 
 class WorkspaceView(BaseModel):
@@ -184,6 +185,7 @@ class ConfigView(BaseModel):
     model: str
     run_timeout: float
     sandbox: str
+    boundary: str = "none"
     sandbox_network: bool
     workspace_writable: bool
     code_workspace_writable: bool = False

@@ -47,6 +47,7 @@ class SandboxSettings:
     deny_read: tuple[Path, ...] | None = None
     writable_tmp: bool = True
     writable_workspace: bool = True
+    containerized: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.writable_workspace, bool):
@@ -224,6 +225,7 @@ class Sandbox:
             deny_read=configured or None,
             writable_tmp=settings.sandbox_writable_tmp,
             writable_workspace=settings.sandbox_writable,
+            containerized=settings.execution_profile == "containerized",
         ))
 
     def policy(self, workspace: Path, *, owner=None) -> SandboxPolicy:
@@ -263,6 +265,10 @@ class Sandbox:
             self._support = {p: result for p, result in self._support.items() if p.scratch != scratch}
 
     def environment(self, workspace: Path, *, owner=None) -> dict[str, str] | None:
+        if self.settings.containerized:
+            # Project commands need toolchains, not the agent's API keys or DB URL.
+            return {"PATH": "/app/.venv/bin:/usr/local/bin:/usr/bin:/bin",
+                    "HOME": "/tmp", "TMPDIR": "/tmp", "LANG": "C.UTF-8"}
         if self.settings.mode == "isolated":
             return isolated_environment(self.policy(workspace, owner=owner))
         if not self.settings.writable_workspace and self.enabled:

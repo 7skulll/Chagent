@@ -1,0 +1,12 @@
+.git
+.env*
+.venv
+docs
+tests
+scripts
+nanobot-main
+pi-main1.4.0
+uploads
+.DS_Store
+**/__pycache__
+**/*.pyc

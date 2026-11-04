@@ -17,6 +17,11 @@ def protected_source() -> Path:
 
 def validate_workspace(path: Path) -> Path:
     target = path.expanduser().resolve(strict=True)
+    root_setting = os.environ.get("CHAGENT_WORKSPACE_ROOT")
+    if root_setting:
+        root = Path(root_setting).expanduser().resolve(strict=True)
+        if target != root and not target.is_relative_to(root):
+            raise ValueError("Workspace must be inside CHAGENT_WORKSPACE_ROOT")
     if not target.is_dir():
         raise ValueError("工作区必须是目录")
     if not os.access(target, os.R_OK | os.X_OK):

@@ -93,6 +93,7 @@ def main():
     parser = argparse.ArgumentParser(prog="chagent", description="Chagent 本地网页（默认入口）")
     parser.add_argument("--workspace", type=Path, default=None, help="起始工作区，默认 ~/Chagent Workspace")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--host", default=HOST, help="监听地址；容器内可用 0.0.0.0")
     parser.add_argument("--demo", action="store_true", help="Use the deterministic offline model")
     parser.add_argument("--provider", choices=("openai", "deepseek", "anthropic", "qwen", "custom"))
     parser.add_argument("--model")
@@ -143,11 +144,12 @@ def main():
     print(f"Behavior: {describe_behavior(settings, compaction, workspace_writes=True)}", flush=True)
     for warning in describe_warnings(settings):
         print(f"Warning: {warning}", flush=True)
+    print(f"Boundary: {settings.boundary}", flush=True)
     print(f"Chagent 网页：{url}（工作区 {Path(args.workspace).expanduser().resolve()}）", flush=True)
     if not args.no_open:
         open_later(url)
     # Bound the wait for open SSE responses before lifespan cancels agent tasks.
-    uvicorn.run(app, host=HOST, port=port, workers=1, timeout_graceful_shutdown=3)
+    uvicorn.run(app, host=args.host, port=port, workers=1, timeout_graceful_shutdown=3)
 
 
 if __name__ == "__main__":

@@ -81,8 +81,9 @@ TOOLS_SECTION = (
 MODE_SECTIONS = {
     "unified": (
         "This session can read and edit workspace files, execute commands, run tests, and read or stop "
-        "long-running processes. Commands use an isolated workspace sandbox without network or "
-        "interactive stdin. Use the tools when the task requires them and report actual results."
+        "long-running processes. The Boundary section states where commands run and whether network "
+        "is available. Interactive stdin is unavailable. Use the tools when the task requires them "
+        "and report actual results."
     ),
     "work": (
         "This session is work mode: it reads documents and edits workspace files, but host "

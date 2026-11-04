@@ -73,7 +73,7 @@ async def info(current: Current):
     return {"workspace": current.workspace, "provider": current.runner.model.provider,
             "model": current.runner.model.id,
             "default_mode": "work", "code_mode": False,
-            "programmable": current.programmable}
+            "programmable": current.programmable, "boundary": current.settings.boundary}
 
 
 @api.get("/config", response_model=ConfigView, tags=["本地 Agent"])
@@ -90,7 +90,8 @@ async def config(current: Current):
     return {
         "provider": current.runner.model.provider, "model": current.runner.model.id,
         "run_timeout": current.runner.timeout,
-        "sandbox": settings.sandbox, "sandbox_network": settings.sandbox_network,
+        "sandbox": settings.sandbox, "boundary": settings.boundary,
+        "sandbox_network": settings.sandbox_network,
         "workspace_writable": work_writable, "code_workspace_writable": work_writable, "process_stdin": False,
         "execution_profile": settings.execution_profile,
         "readonly_code": False,
@@ -568,6 +569,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            allow_host_commands=configured.allow_host_commands,
                                            code_mode=configured.code_mode,
                                            unified=True,
+                                           containerized=configured.execution_profile == "containerized",
                                            # One writable file and command surface for both legacy rows.
                                            allow_workspace_writes=True, versioned_files=True,
                                            code_workspace_writes=configured.trusted_development,

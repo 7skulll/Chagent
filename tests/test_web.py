@@ -448,7 +448,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         for asset in ("app.js", "markdown.js", "style.css"):
             self.assertEqual((await self.client.get(f"/static/{asset}")).status_code, 200)
         info = (await self.client.get("/api/info")).json()
-        self.assertEqual(set(info), {"workspace", "provider", "model", "default_mode", "code_mode", "programmable"})
+        self.assertEqual(set(info), {"workspace", "provider", "model", "default_mode", "code_mode", "programmable", "boundary"})
         self.assertEqual(info["default_mode"], "work")
         self.assertFalse(info["code_mode"])
         self.assertFalse(info["programmable"])
