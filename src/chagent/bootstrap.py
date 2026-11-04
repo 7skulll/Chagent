@@ -52,8 +52,8 @@ def _tool_faces(
     """
     if unified and not code_mode:
         raise ValueError("Unified execution requires CHAGENT_CODE_MODE=on")
-    if unified and (not allow_host_commands or not allow_workspace_writes or process_stdin):
-        raise ValueError("Unified execution requires host commands, workspace writes, and process_stdin=False")
+    if unified and (not allow_host_commands or not allow_workspace_writes):
+        raise ValueError("Unified execution requires host commands and workspace writes")
     if unified and (sandbox is None or not containerized or not sandbox.settings.allows_execution):
         raise ValueError("Unified execution requires a writable container boundary")
     if code_mode and allow_host_commands and not single_face and not unified:

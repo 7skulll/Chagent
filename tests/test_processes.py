@@ -127,6 +127,9 @@ class ProcessSessionTests(unittest.IsolatedAsyncioTestCase):
                                             "chars": "late"}, context=context)
         self.assertTrue(refused.is_error)
         self.assertIn("already exited", refused.content[0].text)
+        again = await tool.execute("w4", {"action": "write", "process_id": process_id,
+                                          "close_stdin": True}, context=context)
+        self.assertTrue(again.is_error)
         await manager.terminate_run(context.run_id)
 
     async def test_stop_kills_the_process_group(self):
@@ -161,10 +164,11 @@ class ProcessSessionTests(unittest.IsolatedAsyncioTestCase):
         manager = ProcessManager(wall_timeout=20)
         mine, other = self.context(), self.context()
         result = await self.start(manager, mine, "sleep 30", yield_time_ms=100)
-        for action in ("read", "stop"):
+        for action in ("read", "write", "stop"):
             with self.assertRaises(LookupError) as error:
                 await self.process_tool(manager).execute(
-                    action, {"action": action, "process_id": result.details["process_id"]},
+                    action, {"action": action, "process_id": result.details["process_id"],
+                             **({"chars": "secret"} if action == "write" else {})},
                     context=other)
             # The message must not confirm that the id exists elsewhere.
             self.assertIn("known: none", str(error.exception))

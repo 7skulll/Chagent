@@ -81,8 +81,9 @@ TOOLS_SECTION = (
 MODE_SECTIONS = {
     "unified": (
         "This session can read and edit workspace files, execute commands, run tests, and read or stop "
-        "long-running processes. The Boundary section states where commands run and whether network "
-        "is available. Interactive stdin is unavailable. Use the tools when the task requires them "
+        "long-running processes. Use process(action=write) to send bounded stdin or EOF to a process "
+        "started with yield_time_ms. The Boundary section states where commands run and whether network "
+        "is available. Use the tools when the task requires them "
         "and report actual results."
     ),
     "work": (

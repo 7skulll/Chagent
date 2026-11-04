@@ -90,6 +90,7 @@ class ManagedProcess:
     reader: asyncio.Task | None = None
     waiter: asyncio.Task | None = None
     deadline: asyncio.Task | None = None
+    stdin_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @property
     def running(self) -> bool:
@@ -429,19 +430,25 @@ class ProcessTool(AgentTool):
         chars, close = params.get("chars", ""), bool(params.get("close_stdin", False))
         if not chars and not close:
             raise ValueError("write needs 'chars' or close_stdin=true")
-        if not record.running:
-            return AgentToolResult(
-                content=[TextContent(f"Process {record.id} already exited with code {record.exit_code}; "
-                                     "stdin is closed. Read its remaining output instead.")],
-                details={**record.snapshot(), "written": 0}, is_error=True)
-        stdin = record.process.stdin
-        if stdin is None:
-            raise ValueError("This process has no stdin")
-        if chars:
-            stdin.write(chars.encode("utf-8"))
-            await stdin.drain()
-        if close and not stdin.is_closing():
-            stdin.close()
+        async with record.stdin_lock:
+            stdin = record.process.stdin
+            if not record.running or stdin is None or stdin.is_closing():
+                reason = (f"already exited with code {record.exit_code}" if not record.running
+                          else "stdin is closed")
+                return AgentToolResult(
+                    content=[TextContent(f"Process {record.id} {reason}; read its remaining output instead.")],
+                    details={**record.snapshot(), "written": 0}, is_error=True)
+            if chars:
+                try:
+                    stdin.write(chars.encode("utf-8"))
+                    async with asyncio.timeout(5):
+                        await stdin.drain()
+                except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                    return AgentToolResult(
+                        content=[TextContent(f"Could not finish writing to {record.id}; check process output and status.")],
+                        details={**record.snapshot(), "written": 0}, is_error=True)
+            if close and not stdin.is_closing():
+                stdin.close()
         return AgentToolResult(
             content=[TextContent(f"Wrote {len(chars)} character(s) to {record.id}"
                                  + (" and closed stdin" if close else "")

@@ -30,7 +30,7 @@ def describe(settings: Settings, compaction: CompactionPolicy | None = None,
             # A session process is the one path that outlives its tool call, so
             # its two limits belong on this line too.
             f" processes={settings.max_processes}/{settings.process_timeout:g}s"
-            f"{' process_stdin=off' if axes.boundary == 'container' else ''}"
+            f"{' process_stdin=on' if axes.programmable else ''}"
             f" max_turns={settings.max_turns}")
     # Which counter is authoritative decides when compaction triggers, so it is
     # part of the behaviour, not an implementation detail.

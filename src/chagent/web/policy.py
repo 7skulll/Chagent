@@ -32,10 +32,10 @@ def validate_web_runner(settings: Settings, runner) -> None:
     if runner.scheduler.policy.mode != "never":
         raise ValueError("实际审批策略必须是 never")
     process = face.registry.get("process")
-    if process is None or set(process.allowed_actions) != {"read", "stop"}:
-        raise ValueError("process 只能 read/stop")
+    if process is None or set(process.allowed_actions) != {"list", "read", "write", "stop"}:
+        raise ValueError("process 必须支持 list/read/write/stop")
     command = face.registry.get("exec_command")
     tests = face.registry.get("run_tests")
     if (command is None or tests is None or command.sandbox is not sandbox
-            or tests.sandbox is not sandbox or command.process_stdin):
-        raise ValueError("网页命令工具必须共用实际沙箱并禁用交互输入")
+            or tests.sandbox is not sandbox or not command.process_stdin):
+        raise ValueError("网页命令工具必须共用实际沙箱并支持交互输入")

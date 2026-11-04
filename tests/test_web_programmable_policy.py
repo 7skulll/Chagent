@@ -39,12 +39,12 @@ class WebProgrammablePolicyTests(unittest.TestCase):
         sb=Sandbox(SandboxSettings(mode='off', network=True, writable_workspace=True, containerized=True));self.addCleanup(sb.close)
         runner=create_runner(MagicMock(),Model('fake','local','fake',8192,512),FakeModelClient(),
                              code_mode=True,allow_host_commands=True,sandbox=sb,allow_workspace_writes=True,
-                             unified=True,containerized=True,process_stdin=False)
+                             unified=True,containerized=True,process_stdin=True)
         with patch('chagent.web.policy.Path.exists', return_value=True):
             validate_web_runner(cfg,runner)
-        runner.tool_faces['code'].registry.get('process').allowed_actions=('write',)
+        runner.tool_faces['code'].registry.get('process').allowed_actions=('read', 'stop')
         with patch('chagent.web.policy.Path.exists', return_value=True):
-            with self.assertRaisesRegex(ValueError,'read/stop'):validate_web_runner(cfg,runner)
+            with self.assertRaisesRegex(ValueError,'list/read/write/stop'):validate_web_runner(cfg,runner)
 
     def test_dotenv_missing_only_and_provider_selection(self):
         with tempfile.TemporaryDirectory() as tmp:

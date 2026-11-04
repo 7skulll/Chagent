@@ -680,7 +680,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         from dataclasses import replace
         self.runner = create_runner(self.database, replace(self.runner.model, context_window=65536), FakeModelClient(),
             code_mode=True, allow_host_commands=True, sandbox=sb,
-            allow_workspace_writes=True, process_stdin=False,
+            allow_workspace_writes=True, process_stdin=True,
             unified=True, containerized=True)
         self.runtime = WebRuntime(self.runner, self.workspace, cfg)
         self.app.state.runtime = self.runtime
@@ -705,7 +705,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(cfg["code_mode"])
         self.assertTrue(cfg["host_commands"])
         self.assertTrue(cfg["workspace_writable"])
-        self.assertFalse(cfg["process_stdin"])
+        self.assertTrue(cfg["process_stdin"])
         response = await self.client.post("/api/sessions", json={})
         self.assertEqual(response.status_code, 201, response.text)
         identity = response.json()["id"]

@@ -60,8 +60,8 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
     mode = validate_mode(mode)
     if unified and (sandbox is None or not containerized or not sandbox.settings.allows_execution):
         raise ValueError("Unified tools require a writable container boundary")
-    if unified and (not allow_host_commands or not allow_workspace_writes or process_stdin):
-        raise ValueError("Unified tools require host commands, workspace writes, and process_stdin=False")
+    if unified and (not allow_host_commands or not allow_workspace_writes):
+        raise ValueError("Unified tools require host commands and workspace writes")
     registry = ToolRegistry()
     # Reads exist in both modes: they are what every session is for.
     tools = [ListDirTool(), ReadFileTool(), GlobTool(), GrepTool()]

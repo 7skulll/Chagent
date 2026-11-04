@@ -2,7 +2,7 @@
 
 本地单用户 Agent：在网页对话，Python 进程调用模型和工具，PostgreSQL 保存可检查的历史、请求、工具结果与事件。
 
-容器入口使用统一的可编程 Agent：同一会话可读写工作区文件、执行命令、运行测试并读取或停止长进程，无需切换 work/code。命令在容器内运行，可以联网安装依赖。交互输入尚未开放。右侧文件面板支持文本多标签编辑、手动保存、版本冲突、回收恢复，以及 PDF 分页/图片缩放预览。旧会话的 mode 字段仅作为历史数据保留，运行时使用相同工具面。
+容器入口使用统一的可编程 Agent：同一会话可读写工作区文件、执行命令、运行测试并读取、输入或停止长进程，无需切换 work/code。命令在容器内运行，可以联网安装依赖。长进程可通过 `process(action=write)` 输入文字或关闭 stdin；没有 PTY。右侧文件面板支持文本多标签编辑、手动保存、版本冲突、回收恢复，以及 PDF 分页/图片缩放预览。旧会话的 mode 字段仅作为历史数据保留，运行时使用相同工具面。
 
 新安装请通过 `compose.yaml` 启动；它设置可执行的容器档。已有 `.env` 的 `trusted-development`、`isolated` 或 `workspace-write` 执行配置不能用于本机命令执行，启动时会明确拒绝。
 
@@ -67,7 +67,7 @@ CHAGENT_WEB_ACCESS=deepseek
 
 本机不执行命令：`configured` 档只读写文件、联网查资料，`CHAGENT_ALLOW_HOST_COMMANDS=true` 会被拒绝（没有容器边界就没有可执行能力）。容器入口使用 `CHAGENT_EXECUTION_PROFILE=containerized`、`CHAGENT_BOUNDARY=container` 和 `CHAGENT_SANDBOX=off`；启动时核对容器标记与显式声明，命令可联网。执行行为由三轴描述：`boundary`（进程跑在哪）、`capability`（能否执行命令）、`gate`（是否逐次审批）；容器并非强安全边界，取消 run 不回滚文件或外部副作用。详见[当前执行契约](docs/统一可编程执行契约.md)与[容器验收](docs/容器执行验收-2026-11-04.md)。
 
-命令/测试和长进程已有底层实现；长进程只属于本 run，正常结束、失败、取消与超时回收进程组，没有 PTY 或重启接管。网页 `process` 仅允许 read/stop，交互输入与 EOF 尚未开放。
+命令/测试和长进程已有底层实现；长进程只属于本 run，正常结束、失败、取消与超时回收进程组，没有 PTY 或重启接管。网页 `process` 支持 list/read/write/stop；write 每次最多 8192 字符，可用 `close_stdin=true` 发送 EOF。一次性命令仍从 `/dev/null` 读取输入。
 
 ## 验证与维护
 
