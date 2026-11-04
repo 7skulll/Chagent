@@ -288,14 +288,12 @@ class AgentRunner:
         state = RunState(run_id, session, history, task_state, summary, recovery=note, workspace_identity=identity)
         if self.sandbox is not None:
             settings = self.sandbox.settings
-            state.environment = (
-                "Boundary: container. Commands run inside the container, can access the network, "
-                "and see only mounted workspaces. Maven, Java and Node are installed. "
-                "Use process(action='read' or 'stop') for long-running commands; do not use nohup."
-                if settings.containerized else
-                "Boundary: isolated. Commands run in a writable workspace sandbox with network disabled."
-                if settings.mode == "isolated" else None
-            )
+            if settings.containerized:
+                state.environment = (
+                    "Boundary: container. Commands run inside the container, can access the network, "
+                    "and see only mounted workspaces. Maven, Java and Node are installed. "
+                    "Use process(action='read' or 'stop') for long-running commands; do not use nohup."
+                )
         if self.memory_service is not None and self.memory_service.explicit_command(state) is not None:
             # The command is answered without a model, so nothing reads the
             # workspace: skipping the scan keeps it out of large trees' way.
@@ -303,7 +301,7 @@ class AgentRunner:
         if self.sandbox is not None:
             # Run-static, like the environment snapshot: the probe is cached per
             # policy, so this costs one subprocess sweep per process, not per run.
-            await self.runs.event(run_id, "sandbox_applied", await self.sandbox.audit(session.workspace, owner=run_id))
+            await self.runs.event(run_id, "boundary_applied", await self.sandbox.audit(session.workspace, owner=run_id))
         return state
 
     async def _explicit_memory(self, state: RunState, proposal: MemoryProposal) -> RunResult:

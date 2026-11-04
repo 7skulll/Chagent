@@ -171,18 +171,10 @@ class RunTestsTool(AgentTool):
         suite = params.get("suite", "auto")
         suite = detect_suite(workspace) if suite == "auto" else suite
         command = build_command(suite, workspace, params.get("selection"))
-        if self.sandbox is not None and self.sandbox.settings.mode == "isolated" and command[0] == sys.executable:
-            command[0] = str(Path(sys.executable).resolve())
         child_env = self.sandbox.environment(workspace, owner=context.run_id) if self.sandbox is not None else None
-        if child_env is not None and self.sandbox.settings.mode == "isolated" and suite in {"unittest", "pytest"}:
-            # Sandbox.wrap clears the spawn environment again inside seatbelt.
-            # Set only explicit test variables after that reset. Project imports
-            # are intentional; never inherit the host PYTHONPATH. A private fresh
-            # cache path also prevents stale bytecode after rapid same-size edits.
-            command = ["/usr/bin/env", f"PYTHONPATH={workspace}",
-                       "PYTHONDONTWRITEBYTECODE=1",
-                       f"PYTHONPYCACHEPREFIX={Path(child_env['TMPDIR']) / ('pycache-' + uuid4().hex)}",
-                       *command]
+        if child_env is not None and suite in {"unittest", "pytest"}:
+            child_env = {**child_env, "PYTHONPATH": str(workspace), "PYTHONDONTWRITEBYTECODE": "1",
+                         "PYTHONPYCACHEPREFIX": str(Path(child_env["TMPDIR"]) / ("pycache-" + uuid4().hex))}
         timeout = params.get("timeout_ms", 300_000 if suite in {"maven", "gradle"} else 120_000) / 1000
         argv, sandbox_record = ["/bin/sh", "-c", " ".join(_quote(part) for part in command)], {}
         if self.sandbox is not None:
@@ -250,7 +242,7 @@ class RunTestsTool(AgentTool):
             details={"suite": suite, "command": command, "exit_code": process.returncode,
                      "duration_ms": round(duration, 1), "counts": counts,
                      "failures": failures[:20], "timed_out": timed_out,
-                     **({"sandbox": sandbox_record} if sandbox_record else {}),
+                     **({"boundary": sandbox_record} if sandbox_record else {}),
                      "output": output[-MAX_CAPTURE_BYTES:]},
         )
 

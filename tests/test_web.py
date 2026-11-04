@@ -24,10 +24,6 @@ from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
 from chagent.tools.echo import EchoTool
 from chagent.web.app import WebRuntime, create_app
-try:  # `discover -s tests` puts tests/ itself on the path and imports flat names.
-    from test_sandbox import SEATBELT_READY, SKIP_REASON
-except ImportError:  # `-m unittest tests.test_web` imports from the package root.
-    from tests.test_sandbox import SEATBELT_READY, SKIP_REASON
 
 
 @unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")
@@ -448,8 +444,9 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         for asset in ("app.js", "markdown.js", "style.css"):
             self.assertEqual((await self.client.get(f"/static/{asset}")).status_code, 200)
         info = (await self.client.get("/api/info")).json()
-        self.assertEqual(set(info), {"workspace", "provider", "model", "default_mode", "code_mode", "programmable", "boundary"})
-        self.assertEqual(info["default_mode"], "work")
+        self.assertEqual(set(info), {"workspace", "provider", "model", "code_mode", "programmable",
+                                     "boundary", "capability", "gate"})
+        self.assertEqual((info["boundary"], info["capability"], info["gate"]), ("none", "read-only", "none"))
         self.assertFalse(info["code_mode"])
         self.assertFalse(info["programmable"])
 
@@ -671,14 +668,20 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
     async def enable_development(self):
         from chagent.bootstrap import create_runner
         from chagent.tools.sandbox import Sandbox, SandboxSettings
-        cfg = Settings(code_mode=True, allow_host_commands=True, sandbox="isolated",
-                       execution_profile="trusted-development")
-        sb = Sandbox(SandboxSettings(mode="isolated"))
+        from unittest.mock import patch
+        marker = patch('chagent.web.policy.validate_web_settings')
+        marker.start()
+        self.addCleanup(marker.stop)
+        cfg = Settings(code_mode=True, allow_host_commands=True, sandbox="off",
+                       sandbox_network=True, container_declared=True,
+                       execution_profile="containerized")
+        sb = Sandbox(SandboxSettings(mode="off", network=True, containerized=True))
         self.addCleanup(sb.close)
         from dataclasses import replace
         self.runner = create_runner(self.database, replace(self.runner.model, context_window=65536), FakeModelClient(),
             code_mode=True, allow_host_commands=True, sandbox=sb,
-            allow_workspace_writes=True, code_workspace_writes=True, process_stdin=False, unified=True)
+            allow_workspace_writes=True, process_stdin=False,
+            unified=True, containerized=True)
         self.runtime = WebRuntime(self.runner, self.workspace, cfg)
         self.app.state.runtime = self.runtime
         self.addAsyncCleanup(self.runtime.close)
@@ -694,16 +697,14 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         identity = await self.create_session()
         self.assertEqual((await self.client.patch(f"/api/sessions/{identity}", json={})).status_code, 400)
 
-    @unittest.skipUnless(SEATBELT_READY, SKIP_REASON)
     async def test_development_and_work_write_files_without_command_approvals(self):
         await self.enable_development()
         cfg = (await self.client.get("/api/config")).json()
-        self.assertEqual(cfg["execution_profile"], "trusted-development")
+        self.assertEqual((cfg["boundary"], cfg["capability"], cfg["gate"]), ("container", "full", "none"))
         self.assertTrue(cfg["programmable"])
         self.assertFalse(cfg["code_mode"])
         self.assertTrue(cfg["host_commands"])
         self.assertTrue(cfg["workspace_writable"])
-        self.assertFalse(cfg["readonly_code"])
         self.assertFalse(cfg["process_stdin"])
         response = await self.client.post("/api/sessions", json={})
         self.assertEqual(response.status_code, 201, response.text)
@@ -738,12 +739,11 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
             cursor = await connection.execute("SELECT count(*) AS n FROM approval_requests")
             self.assertEqual((await cursor.fetchone())["n"], 0)
 
-    async def test_development_missing_backend_refuses_before_model(self):
+    async def test_development_missing_boundary_refuses_before_model(self):
         await self.enable_development()
-        from chagent.tools.sandbox import SeatbeltBackend
-        self.runner.sandbox.backend = SeatbeltBackend('/missing/chagent-seatbelt')
+        self.runner.sandbox.settings = type(self.runner.sandbox.settings)(mode="off", containerized=False)
         response = await self.client.post("/api/sessions", json={})
-        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.status_code, 400, response.text)
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT count(*) AS n FROM model_calls")
             self.assertEqual((await cursor.fetchone())["n"], 0)
@@ -755,7 +755,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_nonprogrammable_runner_cannot_be_used_for_web(self):
         from dataclasses import replace
-        with self.assertRaisesRegex(ValueError, "实际 runner"):
+        with self.assertRaisesRegex(ValueError, "实际容器"):
             WebRuntime(self.runner, self.workspace, replace(self.runtime.settings, code_mode=True))
 
     async def test_source_workspace_and_ancestor_are_rejected(self):
@@ -982,10 +982,10 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         value = (await self.client.get("/api/config")).json()
         self.assertEqual(value["provider"], "local-test")
         self.assertGreaterEqual(value["tools"], 8)
-        self.assertIn(value["sandbox"], {"off", "workspace-write", "isolated"})
+        self.assertEqual((value["boundary"], value["capability"], value["gate"]), ("none", "read-only", "none"))
         self.assertIn(value["approval"], {"never", "on-request", "untrusted"})
         self.assertEqual(value["web_key"], "missing")
-        self.assertIn("sandbox=", value["behavior"])
+        self.assertIn("boundary=", value["behavior"])
         self.assertIn("max_turns=", value["behavior"])
         # This entry point assembles ``work`` without the write tools, because
         # no approval gate exists yet for a file mutation made on its behalf.
@@ -996,7 +996,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_mode_parameter_is_not_part_of_new_api(self):
         config = (await self.client.get("/api/config")).json()
-        self.assertEqual(config["default_mode"], "work")
+        self.assertNotIn("default_mode", config)
         self.assertFalse(config["code_mode"])
 
         refused = await self.client.post("/api/sessions", json={"title": "要写文件", "mode": "code"})

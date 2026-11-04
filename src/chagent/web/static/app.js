@@ -1581,18 +1581,20 @@ $("workspace-form").addEventListener("submit", async event => {
 // Runtime configuration: the same facts the CLI prints as `Behavior:`.
 const configLabels = [
   ["provider", "供应商"], ["model", "模型"], ["tools", "工具数"],
-  ["run_timeout", "单次运行上限"], ["sandbox", "沙箱"], ["approval", "审批"],
-  ["execution_profile", "执行配置"], ["host_commands", "宿主命令"], ["workspace_writable", "工作区写入"], ["process_stdin", "交互输入"], ["web_access", "网页搜索"], ["compaction", "上下文压缩"],
+  ["run_timeout", "单次运行上限"], ["boundary", "执行边界"], ["capability", "执行能力"], ["gate", "门禁"], ["approval", "审批"],
+  ["host_commands", "命令执行"], ["workspace_writable", "工作区写入"], ["process_stdin", "交互输入"], ["web_access", "网页搜索"], ["compaction", "上下文压缩"],
   ["tokenizer", "token 计数"], ["max_turns", "最大轮数"], ["max_processes", "会话进程"],
 ];
 function configValue(key, c) {
   switch (key) {
     case "tools": return `${c.tools} 个`;
     case "run_timeout": return `${Math.round(c.run_timeout)} 秒`;
-    case "sandbox": return c.sandbox === "off" ? "关闭" : `${c.sandbox}${c.readonly_code ? "（只读）" : ""}，${c.sandbox_network ? "允许出网" : "禁止出网"}`;
+    case "boundary": return c.boundary === "container" ? "容器（命令可联网）" : "无命令边界";
+    case "capability": return c.capability === "full" ? "可执行命令" : "只读，不执行命令";
+    case "gate": return c.gate === "approval" ? "逐次审批" : "无需审批";
     case "approval": return `${c.approval}，等待 ${Math.round(c.approval_timeout)} 秒，` +
       (c.approval_grace ? `无人查看 ${Math.round(c.approval_grace)} 秒后放弃` : "无人查看也等到超时");
-    case "workspace_writable": return `work ${c.workspace_writable ? "允许" : "关闭"}；code ${c.code_workspace_writable ? "允许" : c.readonly_code ? "显式只读" : "未开启"}`;
+    case "workspace_writable": return c.workspace_writable ? "允许" : "关闭";
     case "process_stdin": return c.process_stdin ? "允许" : "关闭";
     case "host_commands": return c.host_commands ? "开启" : "关闭";
     case "web_access": return c.web_access === "off" ? "关闭" : `${c.web_access}，密钥${c.web_key === "set" ? "已配置" : "缺失"}`;

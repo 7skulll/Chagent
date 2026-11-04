@@ -70,16 +70,20 @@ api = APIRouter(prefix="/api", responses={code: {"model": ErrorResponse} for cod
 
 @api.get("/info", response_model=AppInfo, tags=["本地 Agent"])
 async def info(current: Current):
+    axes = current.settings.axes
     return {"workspace": current.workspace, "provider": current.runner.model.provider,
             "model": current.runner.model.id,
-            "default_mode": "work", "code_mode": False,
-            "programmable": current.programmable, "boundary": current.settings.boundary}
+            "programmable": current.programmable,
+            "boundary": axes.boundary, "capability": axes.capability, "gate": axes.gate,
+            # Compatibility for the pre-unified page: there is no mode to pick.
+            "code_mode": False}
 
 
 @api.get("/config", response_model=ConfigView, tags=["本地 Agent"])
 async def config(current: Current):
     """The resolved switches, so the browser is not blind to what the CLI prints."""
     settings = current.settings
+    axes = settings.axes
     policy = current.compaction or CompactionPolicy.from_env()
     tokenizer = current.runner.context.counter.name
     # ``tools`` is the count of the face new sessions actually get: the demo
@@ -90,11 +94,9 @@ async def config(current: Current):
     return {
         "provider": current.runner.model.provider, "model": current.runner.model.id,
         "run_timeout": current.runner.timeout,
-        "sandbox": settings.sandbox, "boundary": settings.boundary,
+        "boundary": axes.boundary, "capability": axes.capability, "gate": axes.gate,
         "sandbox_network": settings.sandbox_network,
-        "workspace_writable": work_writable, "code_workspace_writable": work_writable, "process_stdin": False,
-        "execution_profile": settings.execution_profile,
-        "readonly_code": False,
+        "workspace_writable": work_writable, "process_stdin": False,
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
         "approval_grace": settings.approval_unwatched_grace,
         "host_commands": current.runner.tools.allow_host_commands,
@@ -103,7 +105,7 @@ async def config(current: Current):
         "compaction": policy.enabled, "tokenizer": tokenizer,
         "max_turns": settings.max_turns, "max_tool_concurrency": settings.max_tool_concurrency,
         "max_processes": settings.max_processes, "process_timeout": settings.process_timeout,
-        "default_mode": "work", "code_mode": False, "programmable": current.programmable,
+        "code_mode": False, "programmable": current.programmable,
         "tools": tools,
         # Describe the actual work face; code capability is a separate field.
         "behavior": describe_behavior(settings, policy, tokenizer, workspace_writes=work_writable),
@@ -569,10 +571,9 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            allow_host_commands=configured.allow_host_commands,
                                            code_mode=configured.code_mode,
                                            unified=True,
-                                           containerized=configured.execution_profile == "containerized",
+                                           containerized=configured.axes.boundary == "container",
                                            # One writable file and command surface for both legacy rows.
                                            allow_workspace_writes=True, versioned_files=True,
-                                           code_workspace_writes=configured.trusted_development,
                                            process_stdin=False,
                                            timeout=selected.run_timeout, max_turns=configured.max_turns,
                                            max_tool_concurrency=configured.max_tool_concurrency,

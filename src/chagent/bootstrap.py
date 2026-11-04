@@ -33,7 +33,6 @@ def _tool_faces(
     sandbox: Sandbox | None, processes: ProcessManager, web: WebAccess | None,
     include_echo: bool, single_face: bool = False,
     allow_workspace_writes: bool = True,
-    code_workspace_writes: bool | None = None,
     process_stdin: bool = True,
     versioned_files: bool = False,
     unified: bool = False,
@@ -46,8 +45,7 @@ def _tool_faces(
     absent tool is an unknown tool rather than a permission decision.
 
     Reads and workspace writes are in both faces; ``allow_workspace_writes=False``
-    keeps a face read-only. code_workspace_writes can explicitly grant code
-    writes without expanding work; process_stdin is independent of both.
+    keeps a face read-only. ``process_stdin`` is independent of both.
 
     ``single_face`` is for the deterministic harness only: it names a tool, so it
     keeps the code face and the runner never resolves by session mode.
@@ -56,13 +54,10 @@ def _tool_faces(
         raise ValueError("Unified execution requires CHAGENT_CODE_MODE=on")
     if unified and (not allow_host_commands or not allow_workspace_writes or process_stdin):
         raise ValueError("Unified execution requires host commands, workspace writes, and process_stdin=False")
-    if unified and (sandbox is None or not sandbox.settings.writable_workspace
-                    or (sandbox.settings.mode != "isolated" and not (containerized and sandbox.settings.mode == "off"))):
-        raise ValueError("Unified execution requires a writable execution boundary")
-    if code_mode and allow_host_commands and not single_face and not unified and (
-        sandbox is None or sandbox.settings.mode != "isolated"
-    ):
-        raise ValueError("Model-driven code execution requires CHAGENT_SANDBOX=isolated")
+    if unified and (sandbox is None or not containerized or not sandbox.settings.allows_execution):
+        raise ValueError("Unified execution requires a writable container boundary")
+    if code_mode and allow_host_commands and not single_face and not unified:
+        raise ValueError("Model-driven code execution requires the unified container boundary")
     if unified:
         modes = ("work",)
     elif single_face:
@@ -75,8 +70,7 @@ def _tool_faces(
             mode=mode, allow_host_commands=allow_host_commands,
             unified=unified,
             containerized=containerized,
-            allow_workspace_writes=(code_workspace_writes if mode == "code" and code_workspace_writes is not None
-                                    else allow_workspace_writes),
+            allow_workspace_writes=allow_workspace_writes,
             process_stdin=process_stdin, versioned_files=versioned_files,
             artifacts=ArtifactRepository(database), sandbox=sandbox,
             processes=processes, web=web, include_echo=include_echo,
@@ -158,7 +152,6 @@ def create_runner(
     code_mode: bool = False,
     allow_workspace_writes: bool = True,
     single_face: bool = False,
-    code_workspace_writes: bool | None = None,
     process_stdin: bool = True,
     versioned_files: bool = False,
     unified: bool = False,
@@ -172,7 +165,7 @@ def create_runner(
     faces = _tool_faces(database, code_mode=code_mode, allow_host_commands=allow_host_commands,
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
                         single_face=single_face, allow_workspace_writes=allow_workspace_writes,
-                        code_workspace_writes=code_workspace_writes, process_stdin=process_stdin, versioned_files=versioned_files,
+                        process_stdin=process_stdin, versioned_files=versioned_files,
                         unified=unified, containerized=containerized)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.

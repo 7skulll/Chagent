@@ -46,9 +46,13 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
 
     def runner(self, *, tool_name="exec_command", arguments=None, policy=None, remote=True,
                decider=None, allowlist=""):
-        configured = policy or ApprovalPolicy.from_settings(Settings.from_env(
-            {"CHAGENT_EXECUTION_PROFILE": "configured", "CHAGENT_APPROVAL": "untrusted",
-             "CHAGENT_APPROVAL_ALLOWLIST": allowlist}))
+        # An approval gate is only meaningful where commands exist, so the
+        # settings that own the policy describe the container shape it belongs
+        # to; the harness itself is built without a boundary below.
+        configured = policy or ApprovalPolicy.from_settings(Settings(
+            execution_profile="containerized", container_declared=True,
+            allow_host_commands=True, sandbox_network=True,
+            approval="untrusted", approval_allowlist=allowlist))
         runner = create_demo_runner(
             self.database, tool_name=tool_name, tool_arguments=arguments,
             allow_host_commands=True, sandbox=None, approval_policy=configured,
@@ -171,9 +175,10 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(marker.exists())
 
     async def test_an_allowlisted_command_runs_without_a_question(self):
-        policy = ApprovalPolicy.from_settings(Settings.from_env(
-            {"CHAGENT_EXECUTION_PROFILE": "configured", "CHAGENT_APPROVAL": "untrusted",
-             "CHAGENT_APPROVAL_ALLOWLIST": "printf"}))
+        policy = ApprovalPolicy.from_settings(Settings(
+            execution_profile="containerized", container_declared=True,
+            allow_host_commands=True, sandbox_network=True,
+            approval="untrusted", approval_allowlist="printf"))
         runner = self.runner(arguments={"cmd": "printf allow-marker"},
                              policy=policy, remote=False, decider=no_approver)
         session = await runner.conversations.create_session(self.workspace)

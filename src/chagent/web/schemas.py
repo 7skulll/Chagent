@@ -149,11 +149,12 @@ class AppInfo(BaseModel):
     workspace: Path
     provider: str
     model: str
-    #: The tool face new sessions get, and whether ``code`` can be chosen at all.
-    default_mode: Literal["work", "code"]
     code_mode: bool
     programmable: bool = False
+    #: The three execution axes; see ``chagent.execution``.
     boundary: str = "none"
+    capability: str = "read-only"
+    gate: str = "none"
 
 
 class WorkspaceView(BaseModel):
@@ -184,14 +185,12 @@ class ConfigView(BaseModel):
     provider: str
     model: str
     run_timeout: float
-    sandbox: str
     boundary: str = "none"
+    capability: str = "read-only"
+    gate: str = "none"
     sandbox_network: bool
     workspace_writable: bool
-    code_workspace_writable: bool = False
     process_stdin: bool
-    readonly_code: bool
-    execution_profile: str
     approval: str
     approval_timeout: float
     approval_grace: float
@@ -205,8 +204,6 @@ class ConfigView(BaseModel):
     max_processes: int
     process_timeout: float
     tools: int
-    #: Resolved mode face: what new sessions get, and whether code exists here.
-    default_mode: Literal["work", "code"]
     code_mode: bool
     programmable: bool = False
     behavior: str

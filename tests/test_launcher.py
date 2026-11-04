@@ -89,9 +89,11 @@ class LauncherConfigTests(unittest.TestCase):
         from chagent.web.__main__ import main
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'.env'
-            path.write_text('DEEPSEEK_API_KEY=synthetic-secret\nCHAGENT_DATABASE_URL=postgresql:///custom\n')
+            path.write_text('DEEPSEEK_API_KEY=synthetic-secret\nCHAGENT_DATABASE_URL=postgresql:///custom\n'
+                            'CHAGENT_EXECUTION_PROFILE=containerized\nCHAGENT_CONTAINER_DECLARED=true\n'
+                            'CHAGENT_ALLOW_HOST_COMMANDS=true\nCHAGENT_SANDBOX_NETWORK=true\n')
             captured=io.StringIO()
-            with patch.dict(os.environ,{},clear=True),patch('sys.argv',['chagent','--env-file',str(path),'--workspace',tmp,'--no-open']),patch('chagent.web.__main__.resolve_port',return_value=(8765,False)),patch('chagent.web.__main__.create_app') as create,patch('chagent.web.__main__.uvicorn.run'),contextlib.redirect_stdout(captured):
+            with patch.dict(os.environ,{},clear=True),patch('sys.argv',['chagent','--env-file',str(path),'--workspace',tmp,'--no-open']),patch('chagent.web.policy.Path.exists',return_value=True),patch('chagent.web.__main__.resolve_port',return_value=(8765,False)),patch('chagent.web.__main__.create_app') as create,patch('chagent.web.__main__.uvicorn.run'),contextlib.redirect_stdout(captured):
                 main()
             self.assertEqual(create.call_args.kwargs['settings'].database_url,'postgresql:///custom')
             self.assertEqual(create.call_args.kwargs['model_settings'].provider,'deepseek')

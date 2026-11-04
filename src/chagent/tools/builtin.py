@@ -58,9 +58,8 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
     unknown tool even if it arrived through some other route.
     """
     mode = validate_mode(mode)
-    if unified and (sandbox is None or not sandbox.settings.writable_workspace
-                    or (sandbox.settings.mode != "isolated" and not (containerized and sandbox.settings.mode == "off"))):
-        raise ValueError("Unified tools require a writable execution boundary")
+    if unified and (sandbox is None or not containerized or not sandbox.settings.allows_execution):
+        raise ValueError("Unified tools require a writable container boundary")
     if unified and (not allow_host_commands or not allow_workspace_writes or process_stdin):
         raise ValueError("Unified tools require host commands, workspace writes, and process_stdin=False")
     registry = ToolRegistry()

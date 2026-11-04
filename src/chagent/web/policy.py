@@ -5,30 +5,23 @@ from chagent.tools.builtin import WRITE_TOOLS, EXECUTION_TOOLS
 
 
 def validate_web_settings(settings: Settings) -> None:
-    if settings.execution_profile == "containerized":
-        in_container = Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
-        if not (settings.container_declared and in_container
-                and settings.code_mode and settings.allow_host_commands
-                and settings.sandbox == "off" and settings.sandbox_writable
-                and settings.approval == "never"):
-            raise ValueError("containerized 网页执行要求实际容器、显式声明、可写工作区和无逐次审批")
-        return
-    if not (settings.trusted_development and settings.code_mode
-            and settings.allow_host_commands and settings.sandbox == "isolated"
-            and settings.sandbox_writable and not settings.sandbox_network
-            and settings.approval == "never"):
-        raise ValueError("网页编程需要 trusted-development、code=on、可写 isolated 沙箱、宿主命令开启、命令断网且无需逐次审批")
+    """The page offers exactly one shape: container + full + no approval.
+
+    Everything else about the switches is already settled by
+    ``Settings.axes``; what remains here is the fact a configuration cannot
+    know — whether this process is actually inside a container.
+    """
+    axes = settings.axes
+    in_container = Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
+    if not axes.programmable or not in_container or not settings.container_declared:
+        raise ValueError("网页执行要求实际容器、containerized 显式声明、可写工作区和无逐次审批")
 
 
 def validate_web_runner(settings: Settings, runner) -> None:
     validate_web_settings(settings)
     sandbox = runner.sandbox
-    if settings.execution_profile == "containerized":
-        if sandbox is None or sandbox.settings.mode != "off" or not sandbox.settings.writable_workspace:
-            raise ValueError("实际 runner 必须在容器内使用可写工作区")
-    elif (sandbox is None or not sandbox.enabled or sandbox.settings.mode != "isolated"
-          or not sandbox.settings.writable_workspace or sandbox.settings.network):
-        raise ValueError("实际 runner 必须使用可写 isolated 断网沙箱")
+    if sandbox is None or not sandbox.settings.allows_execution or not sandbox.settings.network:
+        raise ValueError("实际 runner 必须在容器内使用可写工作区")
     faces = runner.tool_faces or {}
     face = faces.get("work")
     if not getattr(runner, "unified", False) or face is None or faces.get("code") is not face or not face.allow_host_commands:

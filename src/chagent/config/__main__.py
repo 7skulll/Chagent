@@ -23,7 +23,6 @@ from chagent.context.tokens import select_counter
 from chagent.diagnostics.behavior import describe as describe_behavior
 from chagent.domain.summaries import CompactionPolicy
 from chagent.models.settings import ModelConfigurationError, ModelSettings
-from chagent.tools.sandbox import DEFAULT_DENY_READ
 
 
 def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tuple[dict, list[str]]:
@@ -52,15 +51,14 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
     except ModelConfigurationError as error:
         problems.append(f"model: {error}")
     if settings is not None:
-        configured = [item for item in settings.sandbox_deny_read.split(":") if item.strip()]
         sections["behavior"] = (describe_behavior(settings, compaction) if compaction is not None
                                else "unavailable")
-        sections["execution"] = (f"profile={settings.execution_profile} "
-                                 f"programmable={str(settings.trusted_development and settings.code_mode).lower()} "
+        sections["execution"] = (f"profile={settings.execution_profile} {settings.axes.describe()} "
+                                 f"programmable={str(settings.axes.programmable).lower()} "
                                  f"legacy_code_switch={str(settings.code_mode).lower()}")
-        sections["sandbox"] = (f"mode={settings.sandbox} network={str(settings.sandbox_network).lower()} "
-                               f"deny_read={len(configured) or len(DEFAULT_DENY_READ)} "
-                               f"writable_tmp={str(settings.sandbox_writable_tmp).lower()}")
+        sections["sandbox"] = (f"network={str(settings.sandbox_network).lower()} "
+                               f"workspace_writable={str(settings.sandbox_writable).lower()} "
+                               f"container_declared={str(settings.container_declared).lower()}")
         sections["memory"] = f"worker_concurrency={settings.memory_worker_concurrency}"
         sections["processes"] = (f"max_per_run={settings.max_processes} "
                                  f"wall_timeout={settings.process_timeout:g}s")

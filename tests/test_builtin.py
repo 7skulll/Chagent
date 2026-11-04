@@ -105,26 +105,25 @@ class ToolFaceTests(unittest.TestCase):
 class ModeSettingsTests(unittest.TestCase):
     def test_default_configuration_is_programmable(self):
         self.assertTrue(Settings().code_mode)
-        self.assertTrue(Settings().trusted_development)
+        self.assertEqual(Settings().boundary, "none")
         self.assertEqual(Settings(), Settings.from_env({}))
 
     def test_unknown_switch_values_are_rejected(self):
         for value in ("true", "yes", "1"):
             with self.assertRaises(ValueError):
                 Settings.from_env({"CHAGENT_CODE_MODE": value})
-        with self.assertRaises(ValueError):
-            Settings.from_env({"CHAGENT_DEFAULT_MODE": "auto"})
 
-    def test_a_default_the_build_cannot_serve_is_a_startup_error(self):
-        with self.assertRaises(ValueError) as caught:
-            Settings(execution_profile="configured", code_mode=False, default_mode="code")
-        self.assertIn("CHAGENT_CODE_MODE", str(caught.exception))
-        self.assertEqual(Settings(code_mode=True, default_mode="code").default_mode, "code")
+    def test_removed_mode_switch_is_a_startup_error(self):
+        # The setting no longer selects anything: a session has one tool face.
+        # Reading it silently would leave an old .env appearing to work.
+        with self.assertRaisesRegex(ValueError, "CHAGENT_DEFAULT_MODE has been removed"):
+            Settings.from_env({"CHAGENT_DEFAULT_MODE": "code"})
 
-    def test_the_behavior_line_names_the_mode_and_inert_switches_are_reported(self):
-        line = describe(Settings.from_env({"CHAGENT_CODE_MODE": "on", "CHAGENT_DEFAULT_MODE": "code"}))
-        self.assertIn("programmable=on", line)
-        self.assertIn("programmable=on", describe(Settings()))
+    def test_the_behavior_line_names_the_axes_and_inert_switches_are_reported(self):
+        line = describe(Settings.from_env({"CHAGENT_CODE_MODE": "off"}))
+        self.assertIn("capability=read-only", line)
+        self.assertIn("programmable=off", line)
+        self.assertIn("boundary=none", describe(Settings()))
         self.assertEqual(describe_warnings(Settings()), [])
         old = Settings(execution_profile="configured", code_mode=False)
         self.assertIn("disables unified web startup", describe_warnings(old)[0])

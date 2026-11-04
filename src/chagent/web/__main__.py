@@ -140,11 +140,12 @@ def main():
     # Ambient variables win over --env-file, so name the resolved pair once.
     if selected is not None:
         print(f"Resolved: {selected.describe()}", flush=True)
-    # Report the web code capability; work remains read-only.
+    # One line for the three execution axes; the behaviour line carries the
+    # switches that are not part of them.
+    print(f"Execution: {settings.axes.describe()}", flush=True)
     print(f"Behavior: {describe_behavior(settings, compaction, workspace_writes=True)}", flush=True)
     for warning in describe_warnings(settings):
         print(f"Warning: {warning}", flush=True)
-    print(f"Boundary: {settings.boundary}", flush=True)
     print(f"Chagent 网页：{url}（工作区 {Path(args.workspace).expanduser().resolve()}）", flush=True)
     if not args.no_open:
         open_later(url)

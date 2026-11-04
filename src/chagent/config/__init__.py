@@ -7,6 +7,8 @@ import os
 
 from psycopg.conninfo import conninfo_to_dict
 
+from chagent.execution import ExecutionAxes, resolve
+
 
 def _search_api_key(values: Mapping[str, str]) -> dict[str, str]:
     """Resolve the outbound key and name the variable that won.
@@ -31,15 +33,13 @@ class Settings:
     db_pool_min_size: int = 1
     db_pool_max_size: int = 4
     db_timeout: float = 5.0
-    allow_host_commands: bool = True
+    allow_host_commands: bool = False
     max_turns: int = 32
     max_tool_concurrency: int = 4
     memory_worker_concurrency: int = 1
-    # Host-command confinement. ``off`` keeps the pre-sandbox behaviour exactly.
-    sandbox: str = "isolated"
+    # Legacy setting accepted only as "off"; the deployment supplies the boundary.
+    sandbox: str = "off"
     sandbox_network: bool = False
-    sandbox_deny_read: str = ""
-    sandbox_writable_tmp: bool = True
     sandbox_writable: bool = True
     # Human approval for host commands. ``never`` keeps the pre-approval
     # behaviour exactly; ``on-failure`` is intentionally unsupported.
@@ -70,38 +70,40 @@ class Settings:
     #: Legacy build switch retained for diagnostic runners. Production unified
     #: startup requires it on; setting it off rejects startup.
     code_mode: bool = True
-    #: Legacy diagnostic default. Production web creates a work-valued row and
-    #: maps old work/code rows to the same executor.
-    default_mode: str = "work"
-    # configured preserves existing approval policy; trusted-development is an
-    # explicit writable web capability, never an automatic approval override.
-    execution_profile: str = "trusted-development"
+    #: Where the process runs. ``configured`` is the in-host diagnostic profile;
+    #: only ``containerized`` can carry command execution.
+    execution_profile: str = "configured"
     container_declared: bool = False
     boundary_setting: str = ""
 
     @property
+    def axes(self) -> ExecutionAxes:
+        """The resolved boundary/capability/gate, derived in one place."""
+        return resolve(
+            execution_profile=self.execution_profile, boundary=self.boundary_setting,
+            code_mode=self.code_mode, allow_host_commands=self.allow_host_commands,
+            approval=self.approval, sandbox=self.sandbox,
+            container_declared=self.container_declared,
+            workspace_writable=self.sandbox_writable, network=self.sandbox_network,
+        )
+
+    @property
     def boundary(self) -> str:
-        return self.boundary_setting or ("container" if self.execution_profile == "containerized" else self.sandbox)
+        return self.axes.boundary
+
+    @property
+    def capability(self) -> str:
+        return self.axes.capability
+
+    @property
+    def gate(self) -> str:
+        return self.axes.gate
 
     def __post_init__(self) -> None:
-        if self.execution_profile not in {"configured", "trusted-development", "containerized"}:
-            raise ValueError("CHAGENT_EXECUTION_PROFILE must be configured, trusted-development or containerized")
-        expected_boundary = "container" if self.execution_profile == "containerized" else self.sandbox
-        if self.boundary_setting and self.boundary_setting != expected_boundary:
-            raise ValueError("CHAGENT_BOUNDARY conflicts with execution profile or sandbox")
-        if self.execution_profile == "containerized" and not (
-            self.container_declared and self.code_mode and self.allow_host_commands
-            and self.sandbox == "off" and self.sandbox_writable and self.approval == "never"
-        ):
-            raise ValueError("containerized requires an explicit container declaration, code=on, host commands, "
-                             "sandbox=off, writable=true and approval=never")
-        if self.trusted_development and not (
-            self.code_mode and self.allow_host_commands and self.sandbox == "isolated"
-            and self.sandbox_writable and not self.sandbox_network and self.approval == "never"
-        ):
-            raise ValueError("trusted-development requires code=on, host commands, isolated, "
-                             "writable=true, network=false and CHAGENT_APPROVAL=never; "
-                             "existing approval settings are never overridden")
+        # One validation for the execution axes; the individual switches are
+        # inputs to it, not a second copy of the rules. Touch it first so an
+        # unusable profile fails before the unrelated connection checks.
+        self.axes
         if not self.database_url.strip():
             raise ValueError("CHAGENT_DATABASE_URL must not be empty")
         try:
@@ -125,12 +127,6 @@ class Settings:
             raise ValueError("CHAGENT_MEMORY_WORKER_CONCURRENCY must be an integer between 1 and 4")
         if not isinstance(self.sandbox_writable, bool):
             raise ValueError("CHAGENT_SANDBOX_WRITABLE must be true or false")
-        if self.sandbox not in {"off", "workspace-write", "isolated"}:
-            raise ValueError("CHAGENT_SANDBOX must be off, workspace-write or isolated")
-        if self.approval == "on-failure":
-            raise ValueError("CHAGENT_APPROVAL=on-failure is not supported yet")
-        if self.approval not in {"never", "on-request", "untrusted"}:
-            raise ValueError("CHAGENT_APPROVAL must be never, on-request or untrusted")
         if not math.isfinite(self.approval_timeout) or self.approval_timeout <= 0:
             raise ValueError("CHAGENT_APPROVAL_TIMEOUT must be finite and positive")
         if not math.isfinite(self.approval_unwatched_grace) or self.approval_unwatched_grace < 0:
@@ -149,12 +145,6 @@ class Settings:
                 "Search/Fetch API); set CHAGENT_WEB_ACCESS=deepseek")
         if self.web_access not in {"off", "deepseek"}:
             raise ValueError("CHAGENT_WEB_ACCESS must be off or deepseek")
-        if self.default_mode not in {"work", "code"}:
-            raise ValueError("CHAGENT_DEFAULT_MODE must be work or code")
-        if self.default_mode == "code" and not self.code_mode:
-            # Honouring it would mean registering the code face, which the build
-            # switch forbids; degrading it would make the setting a lie.
-            raise ValueError("CHAGENT_DEFAULT_MODE=code requires CHAGENT_CODE_MODE=on")
         # Fail loudly here rather than registering a tool that fails on its
         # first call: an enabled-but-keyless switch is a configuration mistake.
         if self.web_access == "deepseek" and not self.search_api_key.strip():
@@ -170,25 +160,15 @@ class Settings:
                 "CHAGENT_MEMORY_WORKER_CONCURRENCY must leave one connection for runs "
                 "(at most CHAGENT_DB_POOL_MAX_SIZE - 1)")
 
-    @property
-    def enabled_modes(self) -> tuple[str, ...]:
-        """Modes this process can actually serve, default first."""
-        return ("work", "code") if self.code_mode else ("work",)
-
-    @property
-    def trusted_development(self) -> bool:
-        return self.execution_profile == "trusted-development"
-
-    @property
-    def readonly_code_available(self) -> bool:
-        """Configured read-only web capability, before backend preflight."""
-        return (self.code_mode and self.allow_host_commands and self.sandbox == "isolated"
-                and not self.sandbox_writable and not self.sandbox_network)
-
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
         values = os.environ if env is None else env
-        allow_commands = values.get("CHAGENT_ALLOW_HOST_COMMANDS", "true").lower()
+        # A removed switch that silently keeps being read is a lie about what
+        # the process will do. Every retired name fails here by design.
+        for name in ("CHAGENT_DEFAULT_MODE",):
+            if values.get(name):
+                raise ValueError(f"{name} has been removed; sessions no longer choose a tool face")
+        allow_commands = values.get("CHAGENT_ALLOW_HOST_COMMANDS", "false").lower()
         if allow_commands not in {"true", "false"}:
             raise ValueError("CHAGENT_ALLOW_HOST_COMMANDS must be true or false")
         code_mode = values.get("CHAGENT_CODE_MODE", "on").strip().lower()
@@ -197,9 +177,6 @@ class Settings:
         sandbox_network = values.get("CHAGENT_SANDBOX_NETWORK", "false").lower()
         if sandbox_network not in {"true", "false"}:
             raise ValueError("CHAGENT_SANDBOX_NETWORK must be true or false")
-        sandbox_tmp = values.get("CHAGENT_SANDBOX_WRITABLE_TMP", "true").lower()
-        if sandbox_tmp not in {"true", "false"}:
-            raise ValueError("CHAGENT_SANDBOX_WRITABLE_TMP must be true or false")
         sandbox_writable = values.get("CHAGENT_SANDBOX_WRITABLE", "true").lower()
         if sandbox_writable not in {"true", "false"}:
             raise ValueError("CHAGENT_SANDBOX_WRITABLE must be true or false")
@@ -207,7 +184,7 @@ class Settings:
         if container_declared not in {"true", "false"}:
             raise ValueError("CHAGENT_CONTAINER_DECLARED must be true or false")
         return cls(
-            execution_profile=values.get("CHAGENT_EXECUTION_PROFILE", "trusted-development").strip().lower(),
+            execution_profile=values.get("CHAGENT_EXECUTION_PROFILE", "configured").strip().lower(),
             container_declared=container_declared == "true",
             boundary_setting=values.get("CHAGENT_BOUNDARY", "").strip().lower(),
             sandbox_writable=sandbox_writable == "true",
@@ -219,10 +196,8 @@ class Settings:
             max_turns=int(values.get("CHAGENT_MAX_TURNS", "32")),
             max_tool_concurrency=int(values.get("CHAGENT_MAX_TOOL_CONCURRENCY", "4")),
             memory_worker_concurrency=int(values.get("CHAGENT_MEMORY_WORKER_CONCURRENCY", "1")),
-            sandbox=values.get("CHAGENT_SANDBOX", "isolated").strip().lower(),
+            sandbox=values.get("CHAGENT_SANDBOX", "off").strip().lower(),
             sandbox_network=sandbox_network == "true",
-            sandbox_deny_read=values.get("CHAGENT_SANDBOX_DENY_READ", ""),
-            sandbox_writable_tmp=sandbox_tmp == "true",
             approval=values.get("CHAGENT_APPROVAL", "never").strip().lower(),
             approval_allowlist=values.get("CHAGENT_APPROVAL_ALLOWLIST", ""),
             approval_timeout=float(values.get("CHAGENT_APPROVAL_TIMEOUT", "300")),
@@ -232,5 +207,4 @@ class Settings:
             web_access=values.get("CHAGENT_WEB_ACCESS", "off").strip().lower(),
             **_search_api_key(values),
             code_mode=code_mode == "on",
-            default_mode=values.get("CHAGENT_DEFAULT_MODE", "work").strip().lower(),
         )

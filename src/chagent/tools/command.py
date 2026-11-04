@@ -28,16 +28,12 @@ class ExecCommandTool(AgentTool):
         super().__init__(
             name="exec_command", label="Run command",
             description=(
-                "Run one /bin/sh command on the host inside the platform sandbox: writes stay in the "
-                "workspace and the user's temp directory, network is off unless the host allowed it, and "
-                "configured credential paths are unreadable. In isolated mode, reads are restricted to "
-                "the workspace and declared runtime, HOME/tmp are private and the environment is cleared. Output is bounded and exit status is "
-                "reported. Pass yield_time_ms to keep a longer command alive: the call then returns a "
-                "process_id and the output so far, and process() manages it within host policy."
+                "Run one /bin/sh command inside the Chagent container. The command can access the "
+                "container's network and mounted workspace; API keys and database credentials are "
+                "not inherited. Output and exit status are reported. Pass yield_time_ms for a "
+                "long-running process; process() reads or stops it within this run."
                 if confined else
-                "Run one /bin/sh command on the host. This is not sandboxed. Output is bounded and exit "
-                "status is reported. Pass yield_time_ms to keep a longer command alive: the call then "
-                "returns a process_id and the output so far, and process() reads, feeds or stops it."
+                "Run one /bin/sh command only when the container boundary is available."
             ),
             parameters={
                 "type": "object", "properties": {
@@ -51,21 +47,11 @@ class ExecCommandTool(AgentTool):
                 }, "required": ["cmd"], "additionalProperties": False,
             }, requires_workspace=True, requires_host_execution=True,
         )
-        if readonly:
-            self.description = (
-                "Run a command with a read-only workspace under the platform sandbox. "
-                "Private scratch may be written. Commands cannot modify workspace files. "
-                "In isolated mode, reads are allowlisted and command network is off. "
-                "Use yield_time_ms for a long command; process() only reads output or stops it. "
-                "Interactive stdin/EOF is disabled. Configure tool caches explicitly in scratch."
-            )
-
         if not self.process_stdin and not readonly:
             self.description = (
-                "Run a command in the writable workspace under the platform sandbox. "
-                "In isolated mode reads are allowlisted, HOME/tmp are private and command network is off. "
+                "Run a command in the container with access to the mounted workspace and network. "
                 "Use yield_time_ms for a long command; process only reads output or stops it. "
-                "Interactive stdin/EOF is disabled. Python uses PYTHONSAFEPATH=1; for project imports set PYTHONPATH=. explicitly or use run_tests. Inspect output and exit status before reporting success."
+                "Interactive stdin/EOF is disabled. Inspect output and exit status before reporting success."
             )
 
     def execution_timeout(self, params: JsonObject) -> float:
@@ -170,7 +156,7 @@ class ExecCommandTool(AgentTool):
             "output": text, "exit_code": process.returncode,
             "wall_time_seconds": monotonic() - started, "workdir": str(cwd),
             "truncated": truncated, "timed_out": timed_out,
-            **({"sandbox": sandbox_record} if sandbox_record else {}),
+            **({"boundary": sandbox_record} if sandbox_record else {}),
         }
         return AgentToolResult(
             content=[TextContent(f"Exit code: {process.returncode}\n{text}")], details=details,
@@ -204,7 +190,7 @@ class ExecCommandTool(AgentTool):
         details = {
             **record.snapshot(), "output": shown, "truncated": truncated,
             "wall_time_seconds": monotonic() - started, "workdir": str(cwd),
-            **({"sandbox": sandbox_record} if sandbox_record else {}),
+            **({"boundary": sandbox_record} if sandbox_record else {}),
         }
         gap = f"[Output before cursor {missed} was dropped]\n" if missed is not None else ""
         if record.running:

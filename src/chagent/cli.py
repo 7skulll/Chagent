@@ -68,12 +68,17 @@ async def _run(
     from chagent.boundaries import validate_workspace
     if session_id is None:
         workspace = validate_workspace(workspace)
+    host_commands = allow_commands or settings.allow_host_commands
+    if host_commands:
+        # The CLI flag must not bypass the container requirement enforced by
+        # the web entry point. This also covers deterministic tool probes.
+        from chagent.web.policy import validate_web_settings
+        validate_web_settings(settings)
     async with Database(settings) as database:
         await migrate(database)
         if session_id is not None:
             session = await SessionManager(ConversationRepository(database)).get(session_id)
             validate_workspace(session.workspace)
-        host_commands = allow_commands or settings.allow_host_commands
         sandbox = Sandbox.from_settings(settings)
         approval = ApprovalPolicy.from_settings(settings)
         # Outbound access is its own decision, independent of host commands.
@@ -94,7 +99,7 @@ async def _run(
                                    allow_host_commands=host_commands,
                                    code_mode=settings.code_mode,
                                    unified=True,
-                                   containerized=settings.execution_profile == "containerized",
+                                   containerized=settings.axes.boundary == "container",
                                    process_stdin=False,
                                    timeout=model_settings.run_timeout, max_turns=settings.max_turns,
                                    max_tool_concurrency=settings.max_tool_concurrency,
@@ -112,8 +117,7 @@ async def _run(
         # line is the one that explains why.
         if model_settings is not None:
             print(f"Resolved: {model_settings.describe()}", flush=True)
-        # The CLI flag can enable host commands on its own; the line must show
-        # what the run will actually do, not only what the environment said.
+        # Report the actual command switch after the container check.
         print(f"Behavior: {describe_behavior(replace(settings, allow_host_commands=host_commands), CompactionPolicy.from_env(), runner.context.counter.name)}", flush=True)
         for warning in describe_warnings(settings):
             print(f"Warning: {warning}", flush=True)

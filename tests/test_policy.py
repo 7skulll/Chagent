@@ -7,9 +7,12 @@ from chagent.tools.policy import ApprovalPolicy, fingerprint, subject
 
 
 def policy(mode, allowlist=""):
-    return ApprovalPolicy.from_settings(Settings.from_env(
-        {"CHAGENT_EXECUTION_PROFILE": "configured", "CHAGENT_APPROVAL": mode,
-         "CHAGENT_APPROVAL_ALLOWLIST": allowlist}))
+    # A gate belongs to a shape that can run commands; this helper only derives
+    # the policy, the command face itself is asserted in the tool tests.
+    return ApprovalPolicy.from_settings(Settings(
+        execution_profile="containerized", container_declared=True,
+        allow_host_commands=True, sandbox_network=True,
+        approval=mode, approval_allowlist=allowlist))
 
 
 class ApprovalPolicyTests(unittest.TestCase):

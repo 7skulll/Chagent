@@ -7,8 +7,8 @@ from uuid import UUID
 
 from chagent.domain.runs import StoredMessage
 
-#: The two tool faces a session can be created with. Only ``work`` is enabled in
-#: this build; see ``Settings.enabled_modes`` for the build-level switch.
+#: The legacy values a session row may still hold. New sessions get one tool
+#: face regardless; see ``execution`` for what the process may actually do.
 SESSION_MODES = ("work", "code")
 
 
