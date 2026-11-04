@@ -46,6 +46,31 @@ class ContainerBoundaryTests(unittest.TestCase):
                 asyncio.run(_run("probe", Path(directory), None, "exec_command", {"cmd": "true"},
                                  True, Settings(), None, None))
 
+    def test_host_profile_still_builds_a_runner_without_command_tools(self):
+        # The CLI used to ask for a unified face unconditionally, which the
+        # assembly rejects when there is no command capability. The host
+        # profile is combination C: files and search, no shell.
+        from chagent.bootstrap import create_runner
+        from chagent.models.base import Model
+        from chagent.models.fake import FakeModelClient
+        from chagent.storage.database import Database
+
+        settings = Settings()
+        self.assertFalse(settings.axes.executable)
+        runner = create_runner(
+            Database(settings),
+            Model(id="probe", provider="local-test", api="fake", context_window=8192, max_tokens=512),
+            FakeModelClient("read_file", {}),
+            allow_host_commands=settings.allow_host_commands, code_mode=settings.code_mode,
+            unified=settings.axes.executable,
+            containerized=settings.axes.boundary == "container",
+            process_stdin=False, sandbox=Sandbox.from_settings(settings),
+        )
+        self.assertFalse(runner.unified)
+        face = runner.executor_for("work")
+        self.assertIsNotNone(face.registry.get("read_file"))
+        self.assertIsNone(face.registry.get("exec_command"))
+
     def test_maven_project_uses_maven_runner(self):
         with TemporaryDirectory() as directory:
             workspace = Path(directory)

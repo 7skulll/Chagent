@@ -98,7 +98,10 @@ async def _run(
             runner = create_runner(database, model_settings.model(), client,
                                    allow_host_commands=host_commands,
                                    code_mode=settings.code_mode,
-                                   unified=True,
+                                   # A unified face needs a command capability to unify;
+                                   # the host profile is read-only, so it keeps the
+                                   # diagnostic faces instead of failing to build.
+                                   unified=settings.axes.executable,
                                    containerized=settings.axes.boundary == "container",
                                    process_stdin=False,
                                    timeout=model_settings.run_timeout, max_turns=settings.max_turns,
