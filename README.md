@@ -63,7 +63,7 @@ CHAGENT_WEB_ACCESS=deepseek
 
 搜索/抓取由 DeepSeek 的独立 API 提供，与模型选用的供应商无关。搜索最多 8 条；抓取每次正文最多 20,000 字符，支持 find/offset，全文在工具实例中缓存 5 分钟、最多 16 页。请求可能产生供应商费用；不在文档中承诺固定价格。
 
-网页工具运行在 agent 进程中，命令沙箱的断网不覆盖它。私有地址拒绝由供应商执行，本机不能审计完整名单。
+网页工具运行在 agent 进程中，命令的容器边界不覆盖它。私有地址拒绝由供应商执行，本机不能审计完整名单。
 
 本机不执行命令：`configured` 档只读写文件、联网查资料，`CHAGENT_ALLOW_HOST_COMMANDS=true` 会被拒绝（没有容器边界就没有可执行能力）。容器入口使用 `CHAGENT_EXECUTION_PROFILE=containerized`、`CHAGENT_BOUNDARY=container` 和 `CHAGENT_SANDBOX=off`；启动时核对容器标记与显式声明，命令可联网。执行行为由三轴描述：`boundary`（进程跑在哪）、`capability`（能否执行命令）、`gate`（是否逐次审批）；容器并非强安全边界，取消 run 不回滚文件或外部副作用。详见[当前执行契约](docs/统一可编程执行契约.md)与[容器验收](docs/容器执行验收-2026-11-04.md)。
 
@@ -79,7 +79,7 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
 
 数据库测试用独立临时 schema，不读写业务表。未设置测试数据库时集成测试跳过，跳过不是通过。若宿主注入了 `NODE_OPTIONS`（node 代理 shim），前端相关用例会假失败，用 `env -u NODE_OPTIONS ...` 复跑。
 
-最近的完整回归（2026-11-04，移除旧 seatbelt 与三轴收敛之后）**563 项通过、0 跳过、65.686 秒**；此前一次为 548 项。容器内真实 `run_tests` 对 Spring Boot 项目返回 `Suite: maven`、`Result: passed (exit 0)`；容器真实模型链路与宿主 HTTP 200 的证据见[容器阶段验收](docs/容器执行验收-2026-11-04.md)。历史只读与 work 验收分别见[只读验收记录](docs/只读code验收-2026-11-02.md)和[浏览器验收记录](docs/work模式真实验收-2026-11-02.md)；它们不代表当前产品模式。
+最近的完整回归（2026-11-04，移除旧 seatbelt、三轴收敛并修复本机 CLI 装配之后）**564 项通过、0 跳过、60.5 秒**；此前两次为 548 与 563 项。容器内真实 `run_tests` 对 Spring Boot 项目返回 `Suite: maven`、`Result: passed (exit 0)`；容器真实模型链路与宿主 HTTP 200 的证据见[容器阶段验收](docs/容器执行验收-2026-11-04.md)。历史只读与 work 验收分别见[只读验收记录](docs/只读code验收-2026-11-02.md)和[浏览器验收记录](docs/work模式真实验收-2026-11-02.md)；它们不代表当前产品模式。
 
 CLI 保留一次性运行与确定性 `--tool` 诊断，不再扩张为第二套产品入口。从源码启动 CLI 时需显式指定已存在的安全工作区，例如 `--workspace /你的资料目录`；继续会话沿用保存的工作区。
 
