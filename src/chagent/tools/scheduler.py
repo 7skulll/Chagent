@@ -211,7 +211,8 @@ class ToolScheduler:
                             granted = grants.get(index)
                             if granted is not None:
                                 spent = await self.approvals.consume(
-                                    granted, run_id=context.run_id, tool_name=call.name,
+                                    granted, run_id=context.run_id, tool_record_id=identities[index],
+                                    tool_name=call.name,
                                     arguments=call.arguments, cwd=str(context.workspace))
                                 if not spent:
                                     outcomes[index] = refused_outcome(

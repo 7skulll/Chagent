@@ -39,8 +39,8 @@ UNAVAILABLE = "No approver is available for this command, so it was not executed
 UNWATCHED = ("No browser page was waiting for this command, so it was not executed. This is not a "
              "decision about the command itself: the user was not there to answer. Do not retry it "
              "with different arguments; ask the user whether they still want it run.")
-STALE = ("The approval was no longer valid when the command was about to start (expired, already "
-         "used, or the arguments changed); it was not executed.")
+STALE = ("The approval was no longer valid when the tool was about to start (expired, already "
+         "used, or the invocation changed); it was not executed.")
 
 ApprovalDecider = Callable[[ApprovalRequest], Awaitable[bool | None]]
 
@@ -136,8 +136,9 @@ class ApprovalBroker:
     async def cancel(self, run_id: UUID, note: str = "run_ended") -> int:
         return await self.approvals.cancel_pending(run_id, note)
 
-    async def consume(self, approval_id: UUID, *, run_id: UUID, tool_name: str,
+    async def consume(self, approval_id: UUID, *, run_id: UUID, tool_record_id: UUID, tool_name: str,
                       arguments: dict, cwd: str) -> bool:
         return await self.approvals.consume(
-            approval_id, run_id=run_id, fingerprint=fingerprint(tool_name, arguments, cwd))
+            approval_id, run_id=run_id, tool_record_id=tool_record_id,
+            fingerprint=fingerprint(tool_name, arguments, cwd))
 

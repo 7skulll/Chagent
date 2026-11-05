@@ -77,12 +77,11 @@ class AxesResolutionTests(unittest.TestCase):
             with self.subTest(sandbox=mode), self.assertRaises(ValueError):
                 Settings(sandbox=mode)
 
-    def test_approval_gate_is_reserved_but_not_offered(self):
+    def test_approval_gate_is_published_for_writable_container(self):
         axes = container_settings(approval="on-request").axes
         self.assertEqual(axes.gate, GATE_APPROVAL)
-        # The broker exists; no entry point wires it up yet, so the shape is
-        # not published to a model.
-        self.assertFalse(axes.published)
+        self.assertTrue(axes.published)
+        self.assertTrue(axes.programmable)
 
     def test_approval_without_commands_is_not_a_combination(self):
         with self.assertRaisesRegex(ValueError, "unsupported execution combination"):
@@ -90,9 +89,10 @@ class AxesResolutionTests(unittest.TestCase):
                     allow_host_commands=False, approval="on-request",
                     container_declared=True)
 
-    def test_published_shapes_are_exactly_three(self):
+    def test_published_shapes_are_exactly_four(self):
         self.assertEqual(set(PUBLISHED), {
-            (CONTAINER, FULL, GATE_NONE), (CONTAINER, READ_ONLY, GATE_NONE), (NONE, READ_ONLY, GATE_NONE),
+            (CONTAINER, FULL, GATE_NONE), (CONTAINER, READ_ONLY, GATE_NONE),
+            (NONE, READ_ONLY, GATE_NONE), (CONTAINER, FULL, GATE_APPROVAL),
         })
         for axes in (ExecutionAxes(NONE, FULL, GATE_NONE), ExecutionAxes(NONE, READ_ONLY, GATE_APPROVAL)):
             self.assertFalse(axes.executable)
@@ -103,10 +103,12 @@ class AxesResolutionTests(unittest.TestCase):
 
 
 class EntryPointTests(unittest.TestCase):
-    def test_web_entry_accepts_only_container_full_without_approval(self):
+    def test_web_entry_accepts_writable_container_with_or_without_approval(self):
         with patch("chagent.web.policy.Path.exists", return_value=True):
             validate_web_settings(container_settings())
-            for overrides in ({"allow_host_commands": False}, {"approval": "on-request"}):
+            validate_web_settings(container_settings(approval="on-request"))
+            validate_web_settings(container_settings(approval="untrusted"))
+            for overrides in ({"allow_host_commands": False},):
                 with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, "实际容器"):
                     validate_web_settings(container_settings(**overrides))
             with self.assertRaisesRegex(ValueError, "实际容器"):

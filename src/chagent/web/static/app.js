@@ -724,7 +724,7 @@ function showRunStatus(run) {
     run_timeout: "已达到运行时间上限",
     context_budget_exhausted: "上下文预算不足",
     output_limit: "模型输出达到上限", model_aborted: "模型已停止生成",
-    unwatched: "无人查看审批，命令未执行"};
+    unwatched: "无人查看审批，操作未执行"};
   $("status").textContent = state.readonly ? ARCHIVED_HINT : (reasons[run.end_reason] || labels[run.status] || run.status);
   if (run.error && run.status !== "cancelled") showError(new Error(run.error));
 }
@@ -837,7 +837,7 @@ function connectRun(runId, version) {
     if (type === "compaction_completed") {
       $("live").append(textNode("div", `历史已压缩，摘要第 ${payload.revision} 版，${payload.tokens_before} → ${payload.tokens_after} 估算 token`, "tool-status"));
     }
-    if (type === "approval_requested") { showApproval(runId).catch(showError); $("status").textContent = "等待确认命令…"; }
+    if (type === "approval_requested") { showApproval(runId).catch(showError); $("status").textContent = "等待确认操作…"; }
     if (["approval_decided", "approval_expired", "approval_cancelled"].includes(type)) hideApproval();
     if (type === "compaction_failed") {
       $("live").append(textNode("div", "压缩未完成，继续使用原有摘要和近期完整轮次。", "tool-status failed"));

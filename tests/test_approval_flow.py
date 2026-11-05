@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -17,6 +18,9 @@ from chagent.storage.approvals import ApprovalRepository
 from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
 from chagent.tools.policy import ApprovalPolicy
+from chagent.tools.context import ToolContext
+from chagent.domain.messages import ToolCall, UserMessage
+from psycopg.types.json import Jsonb
 
 
 async def no_approver(request):
@@ -302,9 +306,120 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         await repository.decide(request.id, approve=True)
         broker = runner.scheduler.approvals
         self.assertFalse(await broker.consume(
-            request.id, run_id=run_id, tool_name="exec_command",
+            request.id, run_id=run_id, tool_record_id=record, tool_name="exec_command",
             arguments={"cmd": f"printf x > {marker.name}"}, cwd=str(self.workspace)))
         self.assertFalse(marker.exists())
+        await runner.runs.finish(run_id, "completed")
+
+    async def process_attempt(self, *, timeout=10.0):
+        """A live stdin consumer plus a persisted tool call for its write."""
+        runner = self.runner()
+        runner.scheduler.approvals.timeout = timeout
+        session = await runner.conversations.create_session(self.workspace)
+        run_id = await runner.runs.begin(session, UserMessage("feed stdin", 0))
+        marker = self.workspace / f"stdin-{uuid4().hex}.txt"
+        script = "import sys; from pathlib import Path; Path(sys.argv[1]).write_bytes(sys.stdin.buffer.read())"
+        process = await runner.processes.start(
+            run_id=run_id, command="stdin consumer", cwd=self.workspace,
+            argv=[sys.executable, "-c", script, str(marker)])
+        model_call = uuid4()
+        async with self.database.transaction() as connection:
+            await connection.execute(
+                "INSERT INTO model_calls (id, run_id, iteration, request, context_snapshot) "
+                "VALUES (%s, %s, 0, %s, %s)", (model_call, run_id, Jsonb({}), Jsonb({})))
+        args = {"action": "write", "process_id": process.id, "chars": "你\n", "close_stdin": True}
+        record = (await runner.runs.queue_tool_calls(
+            run_id, model_call, [ToolCall("feed", "process", args)]))[0]
+        self.addAsyncCleanup(runner.processes.terminate_run, run_id)
+        return runner, run_id, process, marker, args, record
+
+    async def test_process_stdin_approval_binds_run_call_process_bytes_and_eof(self):
+        runner, run_id, process, marker, args, record = await self.process_attempt()
+        broker = runner.scheduler.approvals
+        waiting = asyncio.create_task(broker.request(
+            run_id=run_id, tool_record_id=record, tool_name="process", arguments=args,
+            cwd=str(self.workspace)))
+        request = await self.wait_pending(runner, run_id)
+        self.assertIn(process.id, request.subject)
+        self.assertIn("4 UTF-8 bytes", request.subject)
+        self.assertFalse(marker.exists())
+        await self.approvals(runner).decide(request.id, approve=True)
+        self.assertTrue((await waiting).approved)
+        for changed in ({**args, "process_id": "other"}, {**args, "chars": "no"},
+                        {**args, "close_stdin": False}):
+            self.assertFalse(await broker.consume(request.id, run_id=run_id, tool_record_id=record,
+                                                  tool_name="process", arguments=changed,
+                                                  cwd=str(self.workspace)))
+        self.assertFalse(await broker.consume(request.id, run_id=uuid4(), tool_record_id=record,
+                                              tool_name="process", arguments=args, cwd=str(self.workspace)))
+        self.assertFalse(await broker.consume(request.id, run_id=run_id, tool_record_id=uuid4(),
+                                              tool_name="process", arguments=args, cwd=str(self.workspace)))
+        self.assertTrue(await broker.consume(request.id, run_id=run_id, tool_record_id=record,
+                                             tool_name="process", arguments=args, cwd=str(self.workspace)))
+        self.assertFalse(await broker.consume(request.id, run_id=run_id, tool_record_id=record,
+                                              tool_name="process", arguments=args, cwd=str(self.workspace)))
+        tool = runner.tools.registry.get("process")
+        result = await tool.execute("feed", args, context=ToolContext(self.workspace, session_id=uuid4(), run_id=run_id))
+        self.assertFalse(result.is_error)
+        await asyncio.wait_for(process.finished.wait(), timeout=5)
+        self.assertEqual(marker.read_bytes(), "你\n".encode())
+        await runner.runs.finish(run_id, "completed")
+
+    async def test_denied_or_expired_process_input_never_reaches_stdin(self):
+        for decision in (False, None):
+            runner, run_id, process, marker, args, record = await self.process_attempt(
+                timeout=0.3 if decision is None else 10.0)
+            broker = runner.scheduler.approvals
+            waiting = asyncio.create_task(broker.request(
+                run_id=run_id, tool_record_id=record, tool_name="process", arguments=args,
+                cwd=str(self.workspace)))
+            request = await self.wait_pending(runner, run_id)
+            if decision is False:
+                await self.approvals(runner).decide(request.id, approve=False)
+            outcome = await asyncio.wait_for(waiting, timeout=5)
+            self.assertFalse(outcome.approved)
+            self.assertEqual(outcome.reason, "denied" if decision is False else "expired")
+            self.assertFalse(await broker.consume(request.id, run_id=run_id, tool_record_id=record,
+                                                  tool_name="process", arguments=args,
+                                                  cwd=str(self.workspace)))
+            self.assertFalse(marker.exists())
+            await runner.processes.stop(process)
+            await runner.runs.finish(run_id, "completed")
+
+    async def test_process_exit_while_waiting_cannot_receive_approved_input(self):
+        runner, run_id, process, marker, args, record = await self.process_attempt()
+        broker = runner.scheduler.approvals
+        waiting = asyncio.create_task(broker.request(
+            run_id=run_id, tool_record_id=record, tool_name="process", arguments=args,
+            cwd=str(self.workspace)))
+        request = await self.wait_pending(runner, run_id)
+        await runner.processes.stop(process)
+        await self.approvals(runner).decide(request.id, approve=True)
+        self.assertTrue((await waiting).approved)
+        self.assertTrue(await broker.consume(request.id, run_id=run_id, tool_record_id=record,
+                                             tool_name="process", arguments=args, cwd=str(self.workspace)))
+        result = await runner.tools.registry.get("process").execute(
+            "feed", args, context=ToolContext(self.workspace, session_id=uuid4(), run_id=run_id))
+        self.assertTrue(result.is_error)
+        self.assertEqual(result.details["written"], 0)
+        self.assertFalse(marker.exists())
+        await runner.runs.finish(run_id, "completed")
+
+    async def test_cancelling_wait_for_process_input_never_writes(self):
+        runner, run_id, process, marker, args, record = await self.process_attempt()
+        broker = runner.scheduler.approvals
+        signal = asyncio.Event()
+        waiting = asyncio.create_task(broker.request(
+            run_id=run_id, tool_record_id=record, tool_name="process", arguments=args,
+            cwd=str(self.workspace), signal=signal))
+        request = await self.wait_pending(runner, run_id)
+        signal.set()
+        outcome = await asyncio.wait_for(waiting, timeout=5)
+        self.assertEqual(outcome.reason, "cancelled")
+        self.assertEqual((await self.approvals(runner).get(request.id)).status, "cancelled")
+        self.assertEqual(await self.approvals(runner).decide(request.id, approve=True), "conflict")
+        self.assertFalse(marker.exists())
+        await runner.processes.stop(process)
         await runner.runs.finish(run_id, "completed")
 
 

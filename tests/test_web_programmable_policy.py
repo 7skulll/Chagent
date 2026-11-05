@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from chagent.config import Settings
 from chagent.config.dotenv import load_missing
 from chagent.models.settings import ModelSettings
+from chagent.tools.policy import ApprovalPolicy
 from chagent.web.policy import validate_web_settings, validate_web_runner
 
 
@@ -23,6 +24,7 @@ class WebProgrammablePolicyTests(unittest.TestCase):
                       allow_host_commands=True, sandbox_network=True)
         with patch('chagent.web.policy.Path.exists', return_value=True):
             validate_web_settings(good)
+            validate_web_settings(replace(good, approval='untrusted'))
         self.assertEqual(good.axes.combination, ("container", "full", "none"))
         for args in ({'sandbox':'workspace-write'},{'sandbox_writable':False},
                      {'sandbox_network':False},{'allow_host_commands':False}):
@@ -42,6 +44,17 @@ class WebProgrammablePolicyTests(unittest.TestCase):
                              unified=True,containerized=True,process_stdin=True)
         with patch('chagent.web.policy.Path.exists', return_value=True):
             validate_web_runner(cfg,runner)
+            gated = replace(cfg, approval='untrusted')
+            with self.assertRaisesRegex(ValueError, '审批策略与配置不一致'):
+                validate_web_runner(gated, runner)
+            runner.scheduler.policy = ApprovalPolicy('untrusted')
+            broker = runner.scheduler.approvals
+            runner.scheduler.approvals = None
+            with self.assertRaisesRegex(ValueError, '审批 broker'):
+                validate_web_runner(gated, runner)
+            runner.scheduler.approvals = broker
+            validate_web_runner(gated, runner)
+            runner.scheduler.policy = ApprovalPolicy()
         runner.tool_faces['code'].registry.get('process').allowed_actions=('read', 'stop')
         with patch('chagent.web.policy.Path.exists', return_value=True):
             with self.assertRaisesRegex(ValueError,'list/read/write/stop'):validate_web_runner(cfg,runner)

@@ -16,10 +16,8 @@ entry, the CLI and the tool assembly all read its result, so a start-up banner,
 ``/api/info`` and the actual tool face cannot disagree about what this process
 will do.
 
-The published shapes are three. A fourth (``container`` + ``full`` +
-``approval``) is defined but reserved: the approval broker exists and the axis
-is real, yet no entry point wires it up, so it is not offered as a product
-combination until the C3 batch.
+The published shapes are the three ungated combinations and the writable
+container with approval. The web entry requires the actual container boundary.
 """
 
 from dataclasses import dataclass
@@ -43,10 +41,9 @@ PUBLISHED = (
     (CONTAINER, FULL, GATE_NONE),
     (CONTAINER, READ_ONLY, GATE_NONE),
     (NONE, READ_ONLY, GATE_NONE),
+    (CONTAINER, FULL, GATE_APPROVAL),
 )
-#: Accepted by configuration, never by a web entry point: nothing to approve
-#: until the gate is wired to the scheduler.
-RESERVED = ((CONTAINER, FULL, GATE_APPROVAL),)
+RESERVED = ()
 
 PROFILES = frozenset({"configured", "containerized"})
 PROFILE_BOUNDARY = {"configured": NONE, "containerized": CONTAINER}
@@ -76,8 +73,8 @@ class ExecutionAxes:
 
     @property
     def programmable(self) -> bool:
-        """The one shape the web entry accepts, and what ``programmable`` means."""
-        return self.combination == (CONTAINER, FULL, GATE_NONE)
+        """A writable container tool surface is available to the web entry."""
+        return self.executable
 
     def describe(self) -> str:
         return f"boundary={self.boundary} capability={self.capability} gate={self.gate}"

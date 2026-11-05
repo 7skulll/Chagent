@@ -144,7 +144,8 @@ class ApprovalRepository:
         self.runs.notifications.notify(row["run_id"])
         return status
 
-    async def consume(self, approval_id: UUID, *, run_id: UUID, fingerprint: str) -> bool:
+    async def consume(self, approval_id: UUID, *, run_id: UUID, tool_record_id: UUID,
+                      fingerprint: str) -> bool:
         """Claim an approved grant exactly once, for the invocation it was issued for."""
         await self.runs.flush_events(run_id)
         async with self.database.transaction() as connection:
@@ -154,9 +155,9 @@ class ApprovalRepository:
                 return False
             cursor = await connection.execute(
                 "UPDATE approval_requests SET consumed_at = clock_timestamp() "
-                "WHERE id = %s AND run_id = %s AND fingerprint = %s AND status = 'approved' "
+                "WHERE id = %s AND run_id = %s AND tool_record_id = %s AND fingerprint = %s AND status = 'approved' "
                 "AND consumed_at IS NULL AND expires_at > clock_timestamp() RETURNING id",
-                (approval_id, run_id, fingerprint))
+                (approval_id, run_id, tool_record_id, fingerprint))
             if await cursor.fetchone() is None:
                 return False
             await self.runs._event(connection, run_id, "approval_consumed",

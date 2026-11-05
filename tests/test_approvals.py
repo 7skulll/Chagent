@@ -78,9 +78,14 @@ class ApprovalRepositoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_consuming_a_grant_is_single_use_and_bound_to_the_call(self):
         request = await self.create(fingerprint="fp-1")
         await self.approvals.decide(request.id, approve=True)
-        self.assertFalse(await self.approvals.consume(request.id, run_id=self.run_id, fingerprint="other"))
-        self.assertTrue(await self.approvals.consume(request.id, run_id=self.run_id, fingerprint="fp-1"))
-        self.assertFalse(await self.approvals.consume(request.id, run_id=self.run_id, fingerprint="fp-1"))
+        self.assertFalse(await self.approvals.consume(request.id, run_id=self.run_id,
+                                                      tool_record_id=uuid4(), fingerprint="fp-1"))
+        self.assertFalse(await self.approvals.consume(request.id, run_id=self.run_id,
+                                                      tool_record_id=self.tool_id, fingerprint="other"))
+        self.assertTrue(await self.approvals.consume(request.id, run_id=self.run_id,
+                                                     tool_record_id=self.tool_id, fingerprint="fp-1"))
+        self.assertFalse(await self.approvals.consume(request.id, run_id=self.run_id,
+                                                      tool_record_id=self.tool_id, fingerprint="fp-1"))
 
     async def test_a_finished_run_cannot_be_approved(self):
         request = await self.create()
@@ -98,7 +103,8 @@ class ApprovalRepositoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_decisions_and_consumption_are_audited(self):
         request = await self.create()
         await self.approvals.decide(request.id, approve=True, note="test")
-        await self.approvals.consume(request.id, run_id=self.run_id, fingerprint="fp")
+        await self.approvals.consume(request.id, run_id=self.run_id,
+                                     tool_record_id=self.tool_id, fingerprint="fp")
         kinds = [event["type"] for event in await self.runner.runs.events(self.run_id)]
         for expected in ("approval_requested", "approval_decided", "approval_consumed"):
             self.assertIn(expected, kinds)

@@ -1,9 +1,8 @@
 """Which host command needs a human decision. Pure, no I/O, no shell parsing.
 
-The first slice covers the tools that run a model-chosen command on the host:
-``exec_command`` takes any string, and ``run_tests`` runs project code through a
-host-shaped command. Everything else stays governed by the workspace boundary
-and the existing switches.
+The gate covers tools that run a model-chosen command on the host and each
+subsequent write to a session process. A command grant does not grant future
+stdin bytes or EOF.
 
 Modes, following the execution-boundary design:
 
@@ -16,6 +15,7 @@ Modes, following the execution-boundary design:
     configured. Sandboxed execution is inside it and runs without asking.
 ``untrusted``
     Ask for every host command, sandboxed or not, unless it is allowlisted.
+    ``process(write)`` always asks in either approval mode.
 
 The allowlist is a convenience for known-safe commands, not a security parser:
 any shell control character disqualifies a command from it, because a prefix
@@ -41,6 +41,12 @@ def subject(tool_name: str, arguments: dict) -> str:
         suite = arguments.get("suite", "auto")
         selection = arguments.get("selection")
         return f"run_tests {suite}" + (f" {selection}" if selection else "")
+    if tool_name == "process" and arguments.get("action") == "write":
+        chars = arguments.get("chars", "")
+        return (f"process {arguments.get('process_id', '<missing>')} stdin "
+                f"{json.dumps(chars, ensure_ascii=False)} "
+                f"({len(str(chars).encode('utf-8'))} UTF-8 bytes); "
+                f"close_stdin={arguments.get('close_stdin', False) is True}")
     return tool_name
 
 
@@ -70,7 +76,7 @@ class ApprovalPolicy:
 
     def covers(self, tool_name: str, arguments: dict) -> bool:
         """Only host-executing tools are subject to approval."""
-        return tool_name in HOST_TOOLS
+        return tool_name in HOST_TOOLS or (tool_name == "process" and arguments.get("action") == "write")
 
     def allowlisted(self, command: str) -> bool:
         if not command.strip() or any(character in command for character in SHELL_CONTROL):
@@ -81,6 +87,9 @@ class ApprovalPolicy:
     def requires_approval(self, tool_name: str, arguments: dict, *, sandbox: str) -> bool:
         if self.mode == "never" or not self.covers(tool_name, arguments):
             return False
+        # A command allowlist says nothing about bytes later sent to its stdin.
+        if tool_name == "process":
+            return True
         if self.allowlisted(subject(tool_name, arguments)):
             return False
         if self.mode == "untrusted":

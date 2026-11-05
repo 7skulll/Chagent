@@ -56,6 +56,19 @@ class ApprovalPolicyTests(unittest.TestCase):
         self.assertTrue(untrusted.requires_approval("run_tests", {"suite": "unittest"}, sandbox="workspace-write"))
         self.assertEqual(subject("run_tests", {"suite": "unittest"}), "run_tests unittest")
 
+    def test_process_stdin_always_needs_its_own_approval(self):
+        for mode in ("on-request", "untrusted"):
+            gated = policy(mode, "process:python")
+            args = {"action": "write", "process_id": "p1", "chars": "你\n", "close_stdin": True}
+            self.assertTrue(gated.requires_approval("process", args, sandbox="workspace-write"))
+            self.assertFalse(gated.requires_approval("process", {"action": "read", "process_id": "p1"}, sandbox="off"))
+            self.assertIn("4 UTF-8 bytes", subject("process", args))
+            self.assertIn("close_stdin=True", subject("process", args))
+            for changed in ({**args, "process_id": "p2"}, {**args, "chars": "你"},
+                            {**args, "close_stdin": False}):
+                self.assertNotEqual(fingerprint("process", args, "/w"),
+                                    fingerprint("process", changed, "/w"))
+
     def test_a_grant_is_bound_to_arguments_and_directory(self):
         base = fingerprint("exec_command", {"cmd": "ls"}, "/w")
         self.assertEqual(base, fingerprint("exec_command", {"cmd": "ls"}, "/w"))

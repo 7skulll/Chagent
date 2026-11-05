@@ -5,7 +5,7 @@ from chagent.tools.builtin import WRITE_TOOLS, EXECUTION_TOOLS
 
 
 def validate_web_settings(settings: Settings) -> None:
-    """The page offers exactly one shape: container + full + no approval.
+    """The page offers a writable container, with or without approval.
 
     Everything else about the switches is already settled by
     ``Settings.axes``; what remains here is the fact a configuration cannot
@@ -14,7 +14,7 @@ def validate_web_settings(settings: Settings) -> None:
     axes = settings.axes
     in_container = Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
     if not axes.programmable or not in_container or not settings.container_declared:
-        raise ValueError("网页执行要求实际容器、containerized 显式声明、可写工作区和无逐次审批")
+        raise ValueError("网页执行要求实际容器、containerized 显式声明和可写工作区")
 
 
 def validate_web_runner(settings: Settings, runner) -> None:
@@ -29,8 +29,10 @@ def validate_web_runner(settings: Settings, runner) -> None:
     required = WRITE_TOOLS | EXECUTION_TOOLS | {"create_file"}
     if not required <= {tool.name for tool in face.registry.definitions()}:
         raise ValueError("统一工具面缺少文件或执行工具")
-    if runner.scheduler.policy.mode != "never":
-        raise ValueError("实际审批策略必须是 never")
+    if runner.scheduler.policy.mode != settings.approval:
+        raise ValueError("实际审批策略与配置不一致")
+    if settings.approval != "never" and runner.scheduler.approvals is None:
+        raise ValueError("审批配置必须连接审批 broker")
     process = face.registry.get("process")
     if process is None or set(process.allowed_actions) != {"list", "read", "write", "stop"}:
         raise ValueError("process 必须支持 list/read/write/stop")
