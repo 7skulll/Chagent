@@ -61,6 +61,20 @@ WRITE_REFUSALS = {
 
 ApprovalDecider = Callable[[ApprovalRequest], Awaitable[bool | None]]
 
+# Who answered, written into ``note`` for audit. These are not words anyone
+# said, so they never reach the model as a remark from the user.
+INTERNAL_NOTES = frozenset({"local prompt", "no viewer", "no interactive approver"})
+
+
+def public_note(note: str | None) -> str:
+    """The user's own words about the decision, or nothing.
+
+    A note is also how the broker records *who* answered; that is audit data,
+    not something the user said, and the model must not read it as one.
+    """
+    text = (note or "").strip()
+    return "" if text in INTERNAL_NOTES else text
+
 
 @dataclass(frozen=True, slots=True)
 class ApprovalOutcome:
@@ -68,6 +82,11 @@ class ApprovalOutcome:
     approval_id: UUID | None
     message: str = ""
     reason: str = ""
+    # What the user wrote with their decision. It travels with the grant
+    # because the model's only record of the exchange is the tool result: a
+    # model that is not told the page answered reports that nothing was asked
+    # (measured in the C5 acceptance, where every run had a real approval card).
+    note: str = ""
 
 
 class ApprovalBroker:
@@ -112,9 +131,11 @@ class ApprovalBroker:
                     if current is None:
                         return ApprovalOutcome(False, None, UNAVAILABLE, "unavailable")
                     if current.status == "approved":
-                        return ApprovalOutcome(True, current.id)
+                        note = public_note(current.note)
+                        return ApprovalOutcome(True, current.id, note=note)
                     if current.status == "denied":
-                        return ApprovalOutcome(False, current.id, DENIED, "denied")
+                        return ApprovalOutcome(False, current.id, DENIED, "denied",
+                                               public_note(current.note))
                     if current.status == "expired":
                         return ApprovalOutcome(False, current.id, EXPIRED, "expired")
                     if current.status == "cancelled":

@@ -20,6 +20,18 @@ class GateDecision:
     reason: str = ""
     code: str = "denied"
     approval_id: UUID | None = None
+    # The user's words with their decision, carried through to the tool result
+    # so the model can report the answer it actually got.
+    note: str = ""
+
+
+def _with_note(message: str, note: str) -> str:
+    """A refusal carries the reason the user gave, when they gave one.
+
+    The fixed wording says not to retry; the user's own sentence says what to
+    change instead, which is the part a second attempt actually needs.
+    """
+    return f"{message}\nThe user's note: {note}" if note else message
 
 
 class ToolGate(Protocol):
@@ -94,7 +106,8 @@ class HumanGate:
             tool_name=call.name, arguments=call.arguments,
             cwd=str(context.workspace), signal=signal, budget=budget, subject=subject)
         return GateDecision(outcome.approved and outcome.approval_id is not None,
-                            outcome.message, outcome.reason, outcome.approval_id)
+                            _with_note(outcome.message, "" if outcome.approved else outcome.note),
+                            outcome.reason, outcome.approval_id, outcome.note)
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +246,7 @@ class WriteGate:
             cwd=str(context.workspace), signal=signal, budget=budget,
             subject=intent.subject)
         if outcome.approved and outcome.approval_id is not None:
-            return GateDecision(True, "", outcome.reason, outcome.approval_id)
-        return GateDecision(False, WRITE_REFUSALS.get(outcome.reason, outcome.message),
+            return GateDecision(True, "", outcome.reason, outcome.approval_id, outcome.note)
+        return GateDecision(False, _with_note(WRITE_REFUSALS.get(outcome.reason, outcome.message),
+                                              outcome.note),
                             outcome.reason or "denied")

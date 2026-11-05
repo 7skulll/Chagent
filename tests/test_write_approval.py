@@ -80,12 +80,12 @@ class WriteGradingTests(unittest.TestCase):
 
 
 class StubBroker:
-    def __init__(self, approved=True, reason="approved"):
-        self.approved, self.reason, self.calls = approved, reason, []
+    def __init__(self, approved=True, reason="approved", note=""):
+        self.approved, self.reason, self.note, self.calls = approved, reason, note, []
 
     async def request(self, **kwargs):
         self.calls.append(kwargs)
-        return ApprovalOutcome(self.approved, uuid4(), "", self.reason)
+        return ApprovalOutcome(self.approved, uuid4(), "", self.reason, self.note)
 
 
 class WriteApprovalTests(unittest.IsolatedAsyncioTestCase):
@@ -112,6 +112,15 @@ class WriteApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(broker.calls[0]["tool_name"], "write_file")
         self.assertIn("overwrite existing.py", broker.calls[0]["subject"])
 
+    async def test_the_users_note_travels_with_the_approval(self):
+        # The note is the only place the user's own words about the decision
+        # exist, and the gate is the only thing that sees them.
+        broker = StubBroker(note="only this file")
+        decision = await self.check(WriteGate(ApprovalPolicy(mode="untrusted"), broker),
+                                    "write_file", path="existing.py", content="new")
+        self.assertTrue(decision.allow)
+        self.assertEqual(decision.note, "only this file")
+
     async def test_denial_says_the_file_was_not_modified(self):
         broker = StubBroker(approved=False, reason="denied")
         decision = await self.check(WriteGate(ApprovalPolicy(mode="untrusted"), broker),
@@ -120,6 +129,16 @@ class WriteApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.code, "denied")
         self.assertIn("file was not modified", decision.reason)
         self.assertIn("Do not resend", decision.reason)
+
+    async def test_a_denial_carries_the_reason_the_user_gave(self):
+        # The fixed wording says "do not resend"; the user's sentence says what
+        # to do instead, which is what a second attempt needs.
+        broker = StubBroker(approved=False, reason="denied", note="the name is wrong")
+        decision = await self.check(WriteGate(ApprovalPolicy(mode="untrusted"), broker),
+                                    "write_file", path="existing.py", content="new")
+        self.assertFalse(decision.allow)
+        self.assertIn("file was not modified", decision.reason)
+        self.assertIn("The user's note: the name is wrong", decision.reason)
 
     async def test_a_new_file_never_reaches_the_broker(self):
         broker = StubBroker()
@@ -141,6 +160,20 @@ class WriteApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(decision.allow)
         self.assertEqual(decision.code, "unavailable")
         self.assertIn("file was not modified", decision.reason)
+
+
+class PublicNoteTests(unittest.TestCase):
+    def test_internal_markers_are_not_the_users_words(self):
+        from chagent.tools.approvals import public_note
+
+        for note in ("local prompt", "no viewer", "no interactive approver", "", None, "   "):
+            with self.subTest(note=note):
+                self.assertEqual(public_note(note), "")
+
+    def test_a_real_note_is_kept_without_its_padding(self):
+        from chagent.tools.approvals import public_note
+
+        self.assertEqual(public_note("  only this one  "), "only this one")
 
 
 class GateWiringTests(unittest.TestCase):

@@ -29,6 +29,14 @@ class ToolBatchResult:
     stalled: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class Grant:
+    """An approval the page already gave, and what the user said with it."""
+
+    approval_id: UUID
+    note: str = ""
+
+
 @dataclass(slots=True)
 class ToolOutcome:
     result: AgentToolResult
@@ -196,6 +204,11 @@ class ToolScheduler:
                 budget.pause()
             try:
                 result = await executor.execute(call, context=context, signal=signal, on_update=on_update)
+                grant = grants.get(index)
+                if grant is not None:
+                    # The page answered before this call could run, and the
+                    # result is the model's only record of that answer.
+                    result = with_approval(result, grant, call.name)
                 self.progress.completed(context.run_id, call, executor.registry.get(call.name), result)
                 outcomes[index] = ToolOutcome(result, ToolResultMessage(
                     tool_call_id=call.id, tool_name=call.name, content=result.content,
@@ -242,12 +255,12 @@ class ToolScheduler:
                             granted = grants.get(index)
                             if granted is not None:
                                 spent = await self.approvals.consume(
-                                    granted, run_id=context.run_id, tool_record_id=identities[index],
+                                    granted.approval_id, run_id=context.run_id, tool_record_id=identities[index],
                                     tool_name=call.name,
                                     arguments=call.arguments, cwd=str(context.workspace))
                                 if not spent:
                                     outcomes[index] = refused_outcome(
-                                        call, approval_result(STALE, granted, "stale"))
+                                        call, approval_result(STALE, granted.approval_id, "stale"))
                                     ready[index].set_result(None)
                                     continue
                             decision: Decision = self.progress.check(
@@ -323,7 +336,7 @@ class ToolScheduler:
     async def _ask(self, calls, indices, context, executor, identities, signal, budget):
         """Run optional gates before taking execution resources."""
         refused: dict[int, object] = {}
-        grants: dict[int, UUID] = {}
+        grants: dict[int, Grant] = {}
         gates = self.gates if self.gates is not None else self.default_gates()
         for index in indices:
             call = calls[index]
@@ -344,8 +357,36 @@ class ToolScheduler:
                     refused[index] = approval_result(decision.reason, decision.approval_id, decision.code)
                     break
                 if decision.approval_id is not None:
-                    grants[index] = decision.approval_id
+                    grants[index] = Grant(decision.approval_id, decision.note)
         return refused, grants
+
+
+def with_approval(result: AgentToolResult, grant: Grant, tool_name: str) -> AgentToolResult:
+    """Put the page's answer into the result the model reads.
+
+    C5 measured the gap this closes: every run in that acceptance had a real
+    approval card, a consumed grant and the expected file on disk, and the final
+    answer still said no approval had been requested. The model never sees the
+    page and the question is answered before the tool runs, so the result is the
+    only place the decision can reach it. The wording says both what happened
+    and what not to say, because "do not invent tool output" in the system
+    prompt did not cover a fact the model had no way to observe.
+    """
+    line = (f"Approval: the user approved this {tool_name} call in the page before it ran "
+            f"(approval {str(grant.approval_id)[:8]}). When you describe what happened, say it was "
+            f"approved; do not report that no approval was requested.")
+    if grant.note:
+        line += f"\nThe user added with the approval: {grant.note}"
+    details = dict(result.details) if isinstance(result.details, dict) else {}
+    details["approval"] = "approved"
+    details["approval_id"] = str(grant.approval_id)
+    if grant.note:
+        details["approval_note"] = grant.note
+    return AgentToolResult(
+        content=[TextContent(line), *result.content], details=details,
+        structured_content=result.structured_content, usage=result.usage,
+        is_error=result.is_error, terminate=result.terminate,
+        outcome_unknown=result.outcome_unknown)
 
 
 def approval_result(message: str, approval_id, reason: str):
