@@ -63,6 +63,8 @@ class HumanGate:
             cwd = fs.root.joinpath(*parts)
             subject = (f"{call.arguments.get('command', '')}\nDirectory: {cwd}\n"
                        f"Purpose: {call.arguments.get('purpose', '')}\n"
+                       f"Timeout: {call.arguments.get('timeout_ms', 30000)} ms\n"
+                       "Environment: PATH, HOME, LANG only; stdin closed\n"
                        f"Container verification: {evidence['name']} exit 0")
         outcome = await self.broker.request(
             run_id=context.run_id, tool_record_id=tool_record_id,

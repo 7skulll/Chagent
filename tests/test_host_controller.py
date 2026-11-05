@@ -18,7 +18,7 @@ from chagent.storage.migrate import migrate
 from chagent.storage.repositories import ConversationRepository, RunRepository
 from chagent.storage.approvals import ApprovalRepository
 from chagent.domain.messages import UserMessage
-from chagent.hostexec.native import NativeHostExecTool
+from chagent.hostexec.native import NativeHostExecTool, mark_interrupted_native_executions
 from chagent.tools.context import ToolContext
 from chagent.tools.policy import fingerprint
 from chagent.tools.policy import ApprovalPolicy
@@ -140,3 +140,12 @@ class HostWorkspaceIdentityTests(unittest.IsolatedAsyncioTestCase):
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT status FROM native_executions WHERE approval_id=%s", (request.id,))
             self.assertEqual((await cursor.fetchone())["status"], "completed")
+            await connection.execute("UPDATE native_executions SET status='starting', ended_at=NULL WHERE approval_id=%s",
+                                     (request.id,))
+        self.assertEqual(await mark_interrupted_native_executions(self.database), 1)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute("SELECT status,ended_at FROM native_executions WHERE approval_id=%s",
+                                              (request.id,))
+            row = await cursor.fetchone()
+        self.assertEqual(row["status"], "unknown")
+        self.assertIsNotNone(row["ended_at"])

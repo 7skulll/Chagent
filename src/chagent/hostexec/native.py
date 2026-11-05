@@ -13,6 +13,15 @@ from chagent.tools.policy import fingerprint
 from chagent.tools.workspace import WorkspaceFS
 
 
+async def mark_interrupted_native_executions(database) -> int:
+    """A restarted controller must not treat an in-flight spawn as retryable."""
+    async with database.connection() as connection:
+        cursor = await connection.execute(
+            "UPDATE native_executions SET status='unknown', ended_at=now() "
+            "WHERE status='starting' RETURNING approval_id")
+        return len(await cursor.fetchall())
+
+
 class NativeHostExecTool(AgentTool):
     def __init__(self, database):
         self.database = database

@@ -612,6 +612,9 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
         try:
             async with Database(configured) as database:
                 await migrate(database)
+                if configured.execution_profile == "host-controller":
+                    from chagent.hostexec.native import mark_interrupted_native_executions
+                    await mark_interrupted_native_executions(database)
                 sandbox = Sandbox.from_settings(configured)
                 web = WebAccess(configured.search_api_key) if configured.web_access != "off" else None
                 if selected is None:
