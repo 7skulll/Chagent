@@ -12,7 +12,26 @@
 
 统一工具面复用现有 Runner、文件与命令工具。容器路径已用真实模型完成 Spring Boot 项目创建、构建、启动和 HTTP 验证；旧 seatbelt 执行路径已移除。此前按模式交付的验收记录仍保留作历史证据；当前行为以本页和代码为准。
 
+**自主建站目标尚未交付。** 当前 Chagent 主控与工具都在容器里；任意宿主工作区切换、持续的网站服务入口和同页宿主审批尚不构成完整闭环。目标架构、迁移和验收门槛统一见[自主建站整体方案](docs/宿主执行方案.md)。
+
 ## 启动
+
+### 实验性原型：经本机终端确认后执行宿主命令
+
+这条方案 A 原型独立于容器启动，默认关闭，**不是自主建站目标架构，也未通过真实模型端到端验收**。它只接受申请，每次在启动它的宿主终端显示完整命令与工作目录；用户必须在该终端输入当次申请 ID 才执行，聊天回复不能代替确认。代理只支持有超时的一次性命令，暂不管理持续运行的宿主服务。
+
+1. 在 `.env` 设置 `CHAGENT_HOST_EXEC=approval`，并设置随机的 `CHAGENT_HOST_TOKEN`（至少 32 字符）。`CHAGENT_HOST_ENDPOINT` 通常为 `http://host.docker.internal:8766`。该 token 只允许容器提交申请，不代表用户批准。
+2. 每次启动时由用户指定工作区根目录；`CHAGENT_WORKSPACES` 与代理的 `--host-root` 必须指向**同一个**宿主绝对路径。在**本机交互终端**启动代理：
+
+   ```sh
+   PYTHONPATH=src uv run python -m chagent.hostexec.service --env-file .env --host-root '/绝对路径/工作区'
+   ```
+
+3. 另一个终端以相同路径设置 `CHAGENT_WORKSPACES`，再运行 `docker compose up --build`。启用时网页启动会探测代理；不可达或没有交互终端则启动失败。已在当前 macOS Docker Desktop 环境验证容器能连到代理健康接口；其他环境需另行验证。默认代理申请端口监听所有接口，应通过本机防火墙限制非 Docker 来源；确认只在代理终端完成。
+
+当前只能在同一挂载根目录内切换工作区。跨宿主目录的自动重挂载暂时关闭：数据库目前用容器路径 `/workspaces` 标识工作区，直接重挂载会把旧会话错误地关联到新宿主目录。修复持久化身份后才能开放这条路径；更换挂载根目录前不要把旧会话当成新目录的会话使用。
+
+宿主执行结果及拒绝会返回模型，宿主审计日志位于 macOS `~/Library/Logs/chagent/hostexec.jsonl`。容器命令仍沿用原有审批；宿主代理的确认独立且不能由容器网页代替。
 
 **容器入口**：先安装并启动 Docker 兼容运行时，设置 `CHAGENT_WORKSPACES` 为已有工作区的绝对路径，在 `.env` 中配置模型密钥，然后运行 `docker compose up --build`。Compose 启动 PostgreSQL 与 Chagent；容器内工作区位于 `/workspaces`，网页和项目服务分别映射到本机 `127.0.0.1:8765`、`127.0.0.1:8080`。Compose 会覆盖 `.env` 中的本机执行档设置。镜像含 Java 21、Maven、Node 和 npm；Maven 缓存保存在独立卷。当前容器路径的验证与限制见[容器执行验收](docs/验收记录汇总.md#6-容器执行2026-11-04)。
 
@@ -67,7 +86,7 @@ CHAGENT_WEB_ACCESS=deepseek
 
 网页工具运行在 agent 进程中，命令的容器边界不覆盖它。私有地址拒绝由供应商执行，本机不能审计完整名单。
 
-本机不执行命令：`configured` 档只读写文件、联网查资料，`CHAGENT_ALLOW_HOST_COMMANDS=true` 会被拒绝（没有容器边界就没有可执行能力）。容器入口使用 `CHAGENT_EXECUTION_PROFILE=containerized`、`CHAGENT_BOUNDARY=container` 和 `CHAGENT_SANDBOX=off`；启动时核对容器标记与显式声明，命令可联网。执行行为由三轴描述：`boundary`（进程跑在哪）、`capability`（能否执行命令）、`gate`（是否逐次审批）；容器并非强安全边界，取消 run 不回滚文件或外部副作用。详见[当前执行契约](docs/统一可编程执行契约.md)与[容器验收](docs/验收记录汇总.md#6-容器执行2026-11-04)。
+默认的本机 `configured` 档不执行命令：它只读写文件、联网查资料，`CHAGENT_ALLOW_HOST_COMMANDS=true` 会被拒绝。实验性 `host_exec` 是上文所述的独立审批通道。容器入口使用 `CHAGENT_EXECUTION_PROFILE=containerized`、`CHAGENT_BOUNDARY=container` 和 `CHAGENT_SANDBOX=off`；启动时核对容器标记与显式声明，容器命令可联网。执行行为由三轴描述：`boundary`（进程跑在哪）、`capability`（能否执行命令）、`gate`（是否逐次审批）；容器并非强安全边界，取消 run 不回滚文件或外部副作用。详见[当前执行契约](docs/统一可编程执行契约.md)与[容器验收](docs/验收记录汇总.md#6-容器执行2026-11-04)。
 
 命令/测试和长进程已有底层实现；长进程只属于本 run，正常结束、失败、取消与超时回收进程组，没有 PTY 或重启接管。网页 `process` 支持 list/read/write/stop；write 每次最多 8192 字符，可用 `close_stdin=true` 发送 EOF。一次性命令仍从 `/dev/null` 读取输入。
 
@@ -81,7 +100,7 @@ NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
 
 数据库测试用独立临时 schema，不读写业务表。未设置测试数据库时集成测试跳过，跳过不是通过。若宿主注入了 `NODE_OPTIONS`（node 代理 shim），前端相关用例会假失败，用 `env -u NODE_OPTIONS ...` 复跑。
 
-最近的完整回归（2026-11-05，C3 审批链合入后复跑）**570 项通过、0 跳过、102.6 秒**；前一批为 565 项。容器内真实 `run_tests` 对 Spring Boot 项目返回 `Suite: maven`、`Result: passed (exit 0)`；容器真实模型链路与宿主 HTTP 200 的证据见[容器阶段验收](docs/验收记录汇总.md#6-容器执行2026-11-04)。真实 Python 项目的修复、取消与恢复，以及首次上下文压缩失败的分析见[阶段验收](docs/验收记录汇总.md#7-真实-python-项目2026-11-04)。思考模型摘要修复尚未在新镜像重跑真实模型链路。历史只读与 work 验收分别见[只读验收记录](docs/验收记录汇总.md#1-只读-code-r3r52026-11-02)和[浏览器验收记录](docs/验收记录汇总.md#2-work-模式真实浏览器2026-11-02)；它们不代表当前产品模式。
+最近的完整回归（2026-11-05，本机 PostgreSQL 临时 schema）**594 项通过、0 跳过、61.5 秒**，覆盖本次工作区浏览与实验性宿主代理代码；这不是自主建站验收。容器内真实 `run_tests` 对 Spring Boot 项目返回 `Suite: maven`、`Result: passed (exit 0)`；容器真实模型链路与宿主 HTTP 200 的历史证据见[容器阶段验收](docs/验收记录汇总.md#6-容器执行2026-11-04)。真实 Python 项目的修复、取消与恢复见[阶段验收](docs/验收记录汇总.md#7-真实-python-项目2026-11-04)。实验性宿主代理只验证了容器到健康接口连通、自动化批准/拒绝与三次真实终端申请过期拒绝，未验收真实模型完成本机原生命令。历史只读与 work 验收分别见[只读验收记录](docs/验收记录汇总.md#1-只读-code-r3r52026-11-02)和[浏览器验收记录](docs/验收记录汇总.md#2-work-模式真实浏览器2026-11-02)；它们不代表当前产品模式。
 
 CLI 保留一次性运行与确定性 `--tool` 诊断，不再扩张为第二套产品入口。从源码启动 CLI 时需显式指定已存在的安全工作区，例如 `--workspace /你的资料目录`；继续会话沿用保存的工作区。
 

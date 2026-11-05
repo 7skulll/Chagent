@@ -911,9 +911,12 @@ async function showApproval(runId) {
   if (!data.pending.length || state.run !== runId) return;
   hideApproval();
   const request = data.pending[0];
+  // A write is not a command: the card has to say what it would replace, not
+  // name the tool and leave the user reading JSON.
+  const writeLabels = {write_file: "写入文件", edit_file: "修改文件", apply_patch: "应用补丁", create_directory: "新建目录"};
   const row = textNode("div", "", "approval");
   row.id = "approval";
-  row.append(textNode("div", `需要确认：${request.tool_name}`, "approval-title"));
+  row.append(textNode("div", `需要确认：${writeLabels[request.tool_name] || request.tool_name}`, "approval-title"));
   row.append(textNode("code", request.subject, "approval-command"));
   row.append(textNode("div", `目录 ${request.cwd}，${new Date(request.expires_at).toLocaleTimeString()} 前有效，批准只对这一次调用生效`, "approval-note"));
   const actions = textNode("div", "", "approval-actions");
@@ -1532,7 +1535,7 @@ function workspaceNotice(message, failed = false) {
   $("workspace-notice").classList.toggle("failed", failed);
 }
 async function switchWorkspace(path) {
-  await ensureWorkspace(path);
+  if (!await ensureWorkspace(path)) return;
   state.session = null; loadGeneratedFiles(); localStorage.removeItem("chagent.session");
   showArchived(false); state.query = ""; $("session-search").value = "";
   resetStream(); state.loading = false; state.readonly = false; setBusy(false);
@@ -1542,6 +1545,24 @@ async function switchWorkspace(path) {
   $("messages").replaceChildren(); $("empty").hidden = false; $("session-title").textContent = "聊天";
   $("usage-pill").hidden = true;
   await listSessions();
+}
+async function switchHostWorkspace(path) {
+  if (window.ChagentFiles && !await window.ChagentFiles.beforeWorkspace(path)) throw new Error("已取消切换工作区；草稿保留。");
+  const switched = await post("/api/workspaces/switch-host", {path});
+  if (switched.status === "denied") throw new Error("宿主工作区切换未获确认。");
+  if (switched.status !== "restarting") throw new Error("宿主工作区切换未开始。");
+  workspaceNotice("已确认切换；正在重新挂载工作区并重启 Chagent…");
+  localStorage.setItem("chagent.workspace", "/workspaces");
+  const started = Date.now();
+  const poll = async () => {
+    try {
+      const config = await api("/api/config");
+      if (config.host_workspace_path === switched.path) { location.reload(); return; }
+    } catch (_) { /* The container is restarting. */ }
+    if (Date.now() - started < 90000) setTimeout(poll, 1500);
+    else workspaceNotice("切换超时，请查看宿主代理日志并刷新页面。", true);
+  };
+  setTimeout(poll, 1500);
 }
 async function loadWorkspaces() {
   const page = await api("/api/workspaces");
@@ -1563,7 +1584,7 @@ async function loadWorkspaces() {
   if (!page.items.length) target.append(textNode("p", "还没有记录。", "muted"));
 }
 $("workspace-button").addEventListener("click", () => {
-  workspaceNotice(""); $("workspace-path").value = "";
+  workspaceNotice(""); $("workspace-path").value = ""; $("workspace-browse").hidden = true;
   $("workspace-dialog").showModal();
   loadWorkspaces().catch(error => workspaceNotice(error.message, true));
 });
@@ -1573,8 +1594,13 @@ $("workspace-form").addEventListener("submit", async event => {
   const path = $("workspace-path").value.trim();
   if (!path) return;
   try {
-    await switchWorkspace(path);
-    $("workspace-dialog").close();
+    const hostExecution = (await api("/api/config")).host_execution;
+    if (hostExecution && path.startsWith("/") && path !== "/workspaces" && !path.startsWith("/workspaces/")) {
+      await switchHostWorkspace(path);
+    } else {
+      await switchWorkspace(path);
+      $("workspace-dialog").close();
+    }
   } catch (error) { workspaceNotice(error.message, true); }
 });
 
@@ -1631,15 +1657,62 @@ $("open-config").addEventListener("click", () => {
 });
 $("close-config").addEventListener("click", () => $("config-dialog").close());
 
+// The system dialog only exists on macOS, and the container entry is Linux, so
+// "open a folder" is the same button in both places: ask the host first, and
+// let the page walk the published tree when there is no dialog to ask.
+const browse = {path: null, parent: null, nextAfter: null};
+async function loadBrowse(path, after = null) {
+  const query = new URLSearchParams();
+  if (path) query.set("path", path);
+  if (after !== null) query.set("after", after);
+  const page = await api(`/api/workspace-browse${query.size ? `?${query}` : ""}`);
+  browse.path = page.path; browse.parent = page.parent; browse.nextAfter = page.next_after;
+  $("workspace-browse-path").textContent = page.path; $("workspace-browse-path").title = page.path;
+  $("workspace-browse-up").disabled = !page.parent;
+  $("workspace-browse-open").textContent = `打开“${workspaceName(page.path)}”`;
+  const target = $("workspace-browse-list");
+  if (after === null) target.replaceChildren();
+  if (!page.entries.length && after === null) target.append(textNode("p", "这里没有子文件夹。", "muted"));
+  for (const entry of page.entries) {
+    const row = document.createElement("button");
+    row.type = "button"; row.className = "workspace-row"; row.title = entry.path;
+    row.append(textNode("span", entry.name), textNode("span", entry.reason || (entry.opened ? "已打开" : ""), "muted"));
+    row.disabled = !entry.available;
+    if (entry.available) row.addEventListener("click", () => loadBrowse(entry.path).catch(error => workspaceNotice(error.message, true)));
+    target.append(row);
+  }
+  $("workspace-browse-more").hidden = !browse.nextAfter;
+  $("workspace-browse").hidden = false;
+}
+async function openBrowsedWorkspace() {
+  if (!browse.path) return;
+  try { await switchWorkspace(browse.path); $("workspace-browse").hidden = true; $("workspace-dialog").close(); }
+  catch (error) { workspaceNotice(error.message, true); }
+}
+$("workspace-browse-up").addEventListener("click", () => {
+  if (browse.parent) loadBrowse(browse.parent).catch(error => workspaceNotice(error.message, true));
+});
+$("workspace-browse-open").addEventListener("click", () => openBrowsedWorkspace());
+$("workspace-browse-more").addEventListener("click", () => {
+  if (browse.nextAfter) loadBrowse(browse.path, browse.nextAfter).catch(error => workspaceNotice(error.message, true));
+});
+$("workspace-browse-close").addEventListener("click", () => { $("workspace-browse").hidden = true; });
 $("native-workspace-picker").addEventListener("click", async () => {
   const button = $("native-workspace-picker"); button.disabled = true;
   workspaceNotice("请选择本机文件夹…");
   try {
     const result = await post("/api/workspace-picker", {});
+    // No system dialog here (the container entry, or another OS): navigate in
+    // the page rather than refusing the request the user just made.
+    if (result.native_picker === false) { workspaceNotice(""); await loadBrowse(); return; }
     if (result.cancelled) workspaceNotice("已取消选择");
     else { await switchWorkspace(result.workspace.path); $("workspace-dialog").close(); }
-  } catch (error) { workspaceNotice(error.message, true); }
-  finally { button.disabled = false; }
+  } catch (error) {
+    workspaceNotice(error.message, true);
+    // A dialog that exists but refuses (permissions, no display) still leaves
+    // the page navigable, so the failed path is not a dead end.
+    await loadBrowse().catch(() => {});
+  } finally { button.disabled = false; }
 });
 
 window.ChagentWorkspaceSwitch = switchWorkspace;

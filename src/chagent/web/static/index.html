@@ -216,6 +216,18 @@
     <div class="memory-heading"><div><h2 id="workspace-heading">工作区</h2><p>会话、上传与文件工具都限定在选中的目录内。</p></div><button id="close-workspace" class="quiet" aria-label="关闭工作区">关闭 ×</button></div>
     <div id="workspace-notice" role="status"></div>
     <div id="workspace-list" class="workspace-list"></div>
+    <div id="workspace-browse" hidden>
+      <div class="browse-head">
+        <button type="button" id="workspace-browse-up" class="quiet">↑ 上一级</button>
+        <span id="workspace-browse-path" class="browse-path"></span>
+      </div>
+      <div id="workspace-browse-list" class="workspace-list"></div>
+      <button type="button" id="workspace-browse-more" class="quiet" hidden>加载更多文件夹</button>
+      <div class="browse-foot">
+        <button type="button" id="workspace-browse-open">打开此文件夹</button>
+        <button type="button" id="workspace-browse-close" class="quiet">收起</button>
+      </div>
+    </div>
     <form id="workspace-form">
       <button type="button" id="native-workspace-picker">打开文件夹…</button>
       <label for="workspace-path">或手工输入本机目录</label>

@@ -29,6 +29,7 @@ from chagent.tools.artifacts import ReadArtifactTool
 from chagent.tools.generated_files import CreateFileTool
 from chagent.tools.sandbox import Sandbox
 from chagent.tools.web import WebAccess, create_web_tools
+from chagent.tools.host import HostExecTool
 
 
 #: Tools that change files in the workspace. Shared by both modes; what a
@@ -50,7 +51,8 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
                             web: WebAccess | None = None,
                             include_echo: bool = False,
                             process_stdin: bool = True,
-                            versioned_files: bool = False) -> ToolRegistry:
+                            versioned_files: bool = False,
+                            host_exec: tuple[str, str] | None = None) -> ToolRegistry:
     """One tool face. ``mode`` is required so no call site gets a face by accident.
 
     The second layer (``ToolExecutor``) is the registry itself: an executor built
@@ -96,6 +98,8 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
             # Useless without a command to attach to, so it follows the same
             # switch instead of appearing in every session.
             registry.register(ProcessTool(processes, allowed_actions=("read", "stop") if readonly_code or not process_stdin else None))
+        if host_exec is not None and containerized:
+            registry.register(HostExecTool(*host_exec, artifacts.database if artifacts is not None else None))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
         if allow_workspace_writes and not readonly_code:

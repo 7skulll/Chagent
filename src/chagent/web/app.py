@@ -5,6 +5,8 @@ from dataclasses import asdict
 from importlib.resources import files
 import json
 import logging
+import os
+import httpx
 from pathlib import Path
 from time import monotonic
 from uuid import UUID
@@ -101,6 +103,8 @@ async def config(current: Current):
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
         "approval_grace": settings.approval_unwatched_grace,
         "host_commands": current.runner.tools.allow_host_commands,
+        "host_execution": current.runner.tools.registry.get("host_exec") is not None,
+        "host_workspace_path": os.environ.get("CHAGENT_HOST_WORKSPACE_PATH", ""),
         "web_access": settings.web_access,
         "web_key": "set" if settings.search_api_key.strip() else "missing",
         "compaction": policy.enabled, "tokenizer": tokenizer,
@@ -568,6 +572,19 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                                 max_processes=configured.max_processes, web=web,
                                                 allow_workspace_writes=True, versioned_files=True)
                 else:
+                    host_exec = None
+                    if os.environ.get("CHAGENT_HOST_EXEC", "off") == "approval":
+                        endpoint = os.environ.get("CHAGENT_HOST_ENDPOINT", "")
+                        token = os.environ.get("CHAGENT_HOST_TOKEN", "")
+                        if not endpoint or len(token) < 32:
+                            raise ValueError("Host execution requires CHAGENT_HOST_ENDPOINT and a 32-character CHAGENT_HOST_TOKEN")
+                        async with httpx.AsyncClient(timeout=2, trust_env=False) as probe:
+                            response = await probe.get(endpoint.rstrip("/") + "/health",
+                                                       headers={"Authorization": "Bearer " + token})
+                        response.raise_for_status()
+                        if not response.json().get("available"):
+                            raise ValueError("Host executor has no interactive confirmation terminal")
+                        host_exec = (endpoint, token)
                     runner = create_runner(database, selected.model(), client,
                                            allow_host_commands=configured.allow_host_commands,
                                            code_mode=configured.code_mode,
@@ -576,14 +593,16 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            # One writable file and command surface for both legacy rows.
                                            allow_workspace_writes=True, versioned_files=True,
                                            process_stdin=True,
-                                           timeout=selected.run_timeout, max_turns=configured.max_turns,
+                                           timeout=max(selected.run_timeout, 300) if host_exec else selected.run_timeout,
+                                           max_turns=configured.max_turns,
                                            max_tool_concurrency=configured.max_tool_concurrency,
                                            memory_worker_concurrency=configured.memory_worker_concurrency,
                                            sandbox=sandbox, approval_policy=approval,
                                            approval_timeout=configured.approval_timeout,
                                            approval_grace=configured.approval_unwatched_grace,
                                            process_wall_timeout=configured.process_timeout,
-                                           max_processes=configured.max_processes, web=web)
+                                           max_processes=configured.max_processes, web=web,
+                                           host_exec=host_exec)
                 app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env(),
                                                programmable=not demo)
                 try:

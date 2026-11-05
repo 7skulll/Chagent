@@ -295,17 +295,82 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
     async def test_picker_cancel_and_failure_do_not_register_workspace(self):
         from unittest.mock import patch
         before = (await self.client.get('/api/workspaces')).json()
-        with patch('chagent.web.file_api.choose_directory', return_value=''):
+        with patch('chagent.web.file_api.native_picker_available', return_value=True), \
+                patch('chagent.web.file_api.choose_directory', return_value=''):
             response = await self.client.post('/api/workspace-picker', json={})
-        self.assertEqual(response.json(), {'cancelled': True})
+        self.assertEqual(response.json(), {'cancelled': True, 'native_picker': True})
         self.assertEqual((await self.client.get('/api/workspaces')).json(), before)
-        with patch('chagent.web.file_api.choose_directory', return_value=str(self.workspace)):
+        # No system dialog on this host: the page is told to navigate instead,
+        # and the request is not an error the user has to work around.
+        with patch('chagent.web.file_api.native_picker_available', return_value=False):
+            response = await self.client.post('/api/workspace-picker', json={})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json(), {'cancelled': True, 'native_picker': False})
+        self.assertEqual((await self.client.get('/api/workspaces')).json(), before)
+        with patch('chagent.web.file_api.native_picker_available', return_value=True), \
+                patch('chagent.web.file_api.choose_directory', return_value=str(self.workspace)):
             response = await self.client.post('/api/workspace-picker', json={})
         self.assertEqual(response.status_code,200,response.text)
         self.assertFalse(response.json()['cancelled'])
+        self.assertTrue(response.json()['native_picker'])
         first = response.json()['workspace']['id']
         second = (await self.client.post('/api/workspaces', json={'path':str(self.workspace)})).json()['id']
         self.assertEqual(first,second)
+
+    async def test_browse_lists_only_directories_inside_the_published_root(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as home:
+            root = Path(home).resolve()
+            (root / 'alpha').mkdir()
+            (root / 'beta').mkdir()
+            (root / '.hidden').mkdir()
+            (root / 'note.txt').write_text('x', encoding='utf-8')
+            (root / 'alpha' / 'inner').mkdir()
+            environment = patch.dict(os.environ, {'CHAGENT_WORKSPACE_ROOT': str(root)})
+            before = (await self.client.get('/api/workspaces')).json()
+            with environment:
+                listing = (await self.client.get('/api/workspace-browse')).json()
+                self.assertEqual(listing['path'], str(root))
+                self.assertEqual(listing['root'], str(root))
+                self.assertIsNone(listing['parent'])
+                self.assertEqual([item['name'] for item in listing['entries']], ['.hidden', 'alpha', 'beta'])
+                self.assertTrue(all(item['available'] for item in listing['entries']))
+                deeper = (await self.client.get('/api/workspace-browse',
+                                                params={'path': str(root / 'alpha')})).json()
+                self.assertEqual(deeper['parent'], str(root))
+                self.assertEqual([item['name'] for item in deeper['entries']], ['inner'])
+                # Discovery has no side effect: browsing an unopened directory
+                # must not register it or add it to the open set.
+                self.assertEqual((await self.client.get('/api/workspaces')).json(), before)
+                outside = await self.client.get('/api/workspace-browse', params={'path': '/etc'})
+                self.assertEqual(outside.status_code, 400)
+                missing = await self.client.get('/api/workspace-browse',
+                                                params={'path': str(root / 'gone')})
+                self.assertEqual(missing.status_code, 400)
+                not_a_directory = await self.client.get('/api/workspace-browse',
+                                                        params={'path': str(root / 'note.txt')})
+                self.assertEqual(not_a_directory.status_code, 400)
+
+    async def test_browse_pages_directories_and_refuses_symlink_escape(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as outside:
+            root = Path(home).resolve()
+            for index in range(205):
+                (root / f'folder-{index:03}').mkdir()
+            (root / 'escape').symlink_to(Path(outside), target_is_directory=True)
+            with patch.dict(os.environ, {'CHAGENT_WORKSPACE_ROOT': str(root)}):
+                first = (await self.client.get('/api/workspace-browse')).json()
+                self.assertEqual(len(first['entries']), 200)
+                self.assertEqual(first['next_after'], 'folder-198')
+                escape = next(item for item in first['entries'] if item['name'] == 'escape')
+                self.assertFalse(escape['available'])
+                second = (await self.client.get('/api/workspace-browse',
+                                               params={'after': first['next_after']})).json()
+                self.assertEqual([item['name'] for item in second['entries']],
+                                 [f'folder-{index:03}' for index in range(199, 205)])
+                self.assertIsNone(second['next_after'])
+                self.assertEqual((await self.client.get('/api/workspace-browse',
+                    params={'path': str(root / 'escape')})).status_code, 400)
 
     async def test_work_agent_creates_a_downloadable_file(self):
         runner = create_demo_runner(self.database, tool_name="create_file", work_only=True,

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from chagent.boundaries import validate_workspace
 from chagent.storage.repositories import ConversationRepository
@@ -35,3 +35,9 @@ async def workspaces(current: deps.Current):
 async def open_workspace(value: WorkspaceCreate, current: deps.Current):
     """Open one directory; from then on requests may name it as their workspace."""
     return await deps.open_workspace(value, current)
+
+
+@router.post("/workspaces/switch-host")
+async def switch_host_workspace(value: WorkspaceCreate, current: deps.Current):
+    """Remain closed until host workspace identity is persisted independently of the mount path."""
+    raise HTTPException(503, "跨宿主目录切换暂不可用：必须先修复工作区持久化标识")

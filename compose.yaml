@@ -25,6 +25,7 @@ services:
       CHAGENT_IMAGE: chagent:local
       CHAGENT_CONTAINER_DECLARED: "true"
       CHAGENT_WORKSPACE_ROOT: /workspaces
+      CHAGENT_HOST_WORKSPACE_PATH: ${CHAGENT_WORKSPACES}
       CHAGENT_SANDBOX: "off"
       CHAGENT_SANDBOX_NETWORK: "true"
       CHAGENT_SANDBOX_WRITABLE: "true"
@@ -34,6 +35,10 @@ services:
       # overwrite both land on the user's machine. Ask by default; set
       # CHAGENT_APPROVAL=never explicitly for an unattended run.
       CHAGENT_APPROVAL: "untrusted"
+      # Optional, explicit host execution channel. Start the host agent first.
+      CHAGENT_HOST_EXEC: ${CHAGENT_HOST_EXEC:-off}
+      CHAGENT_HOST_ENDPOINT: ${CHAGENT_HOST_ENDPOINT:-http://host.docker.internal:8766}
+      CHAGENT_HOST_TOKEN: ${CHAGENT_HOST_TOKEN:-}
     volumes:
       - type: bind
         source: ${CHAGENT_WORKSPACES:?Set CHAGENT_WORKSPACES to an existing absolute directory}

@@ -37,6 +37,7 @@ def _tool_faces(
     versioned_files: bool = False,
     unified: bool = False,
     containerized: bool = False,
+    host_exec: tuple[str, str] | None = None,
 ) -> dict[str, ToolExecutor]:
     """Build a unified executor or diagnostic mode-specific executors.
 
@@ -74,6 +75,7 @@ def _tool_faces(
             process_stdin=process_stdin, versioned_files=versioned_files,
             artifacts=ArtifactRepository(database), sandbox=sandbox,
             processes=processes, web=web, include_echo=include_echo,
+            host_exec=host_exec,
         )
         faces[mode] = ToolExecutor(registry, allow_host_commands=allow_host_commands)
     if unified:
@@ -156,6 +158,7 @@ def create_runner(
     versioned_files: bool = False,
     unified: bool = False,
     containerized: bool = False,
+    host_exec: tuple[str, str] | None = None,
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -166,7 +169,7 @@ def create_runner(
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
                         single_face=single_face, allow_workspace_writes=allow_workspace_writes,
                         process_stdin=process_stdin, versioned_files=versioned_files,
-                        unified=unified, containerized=containerized)
+                        unified=unified, containerized=containerized, host_exec=host_exec)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))

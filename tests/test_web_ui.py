@@ -86,10 +86,12 @@ class WebSurfaceTests(unittest.TestCase):
         self.assertEqual(orphans, [], f"这些按钮没有任何行为：{orphans}")
 
     def test_button_surface_is_pinned(self):
-        # The original 50 controls plus six functional rail shortcuts and the
-        # sidebar search disclosure. Every added button must still pass the
-        # handler check above; this count only prevents accidental duplicates.
-        self.assertEqual(len(self.page.buttons), 55)
+        # The original 50 controls plus six functional rail shortcuts, the
+        # sidebar search disclosure, and the four in-page directory picker
+        # controls that stand in where the host has no system dialog. Every
+        # added button must still pass the handler check above; this count only
+        # prevents accidental duplicates.
+        self.assertEqual(len(self.page.buttons), 59)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)

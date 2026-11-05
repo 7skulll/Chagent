@@ -175,6 +175,31 @@ class WorkspaceCreate(InputModel):
     touch: StrictBool = True
 
 
+class DirectoryEntry(BaseModel):
+    """One child directory of a browse target, already checked for opening."""
+
+    name: str
+    path: Path
+    available: bool = True
+    reason: str | None = None
+    #: Already registered, so the page can show ``opened`` next to ``sessions``.
+    opened: bool = False
+
+
+class DirectoryListing(BaseModel):
+    """What the in-page picker may walk: one bounded, server-side tree.
+
+    A browser cannot hand the server a path it has no way to know, so the
+    server publishes exactly one tree and the page navigates inside it.
+    """
+
+    path: Path
+    root: Path
+    parent: Path | None = None
+    entries: list[DirectoryEntry]
+    next_after: str | None = None
+
+
 class ConfigView(BaseModel):
     """What the running process will actually do, not what the environment said.
 
@@ -195,6 +220,8 @@ class ConfigView(BaseModel):
     approval_timeout: float
     approval_grace: float
     host_commands: bool
+    host_execution: bool = False
+    host_workspace_path: str = ""
     web_access: str
     web_key: Literal["set", "missing"]
     compaction: bool

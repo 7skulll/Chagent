@@ -1,15 +1,20 @@
 """Workspace-ID-based file endpoints, independent of Agent execution mode."""
 import asyncio
+import heapq
+import os
 import subprocess
 import sys
+from pathlib import Path
 from uuid import UUID
 from typing import Literal
 from fastapi import APIRouter, Query
 from starlette.exceptions import HTTPException
 from pydantic import Field, StrictStr
 
+from chagent.boundaries import validate_workspace, within_root
 from chagent.files import FileService, FileConflict
-from chagent.web.schemas import InputModel
+from chagent.storage.repositories import ConversationRepository
+from chagent.web.schemas import DirectoryEntry, DirectoryListing, InputModel
 from chagent.web.deps import Current
 
 router = APIRouter(prefix='/api', tags=['工作区文件'])
@@ -119,27 +124,137 @@ async def restore(workspace_id: UUID, record: UUID, value: RestoreInput, current
     return await perform(await service(current, workspace_id), 'restore', str(record), value.target)
 
 
-def choose_directory():
-    if sys.platform != 'darwin':
-        raise HTTPException(503, '系统目录选择器不可用，请手工输入路径')
+#: A directory listing is a picker, not a file manager. A hundred children are
+#: still explorable; ten thousand are a page nobody reads.
+BROWSE_LIMIT = 200
+
+
+#: The one tree the page may walk. A native dialog can reach anything the OS
+#: user can read; the page cannot, because it has no way to learn a path the
+#: server never mentioned. ``CHAGENT_WORKSPACE_ROOT`` is that tree when the
+#: deployment sets one — the container mounts host directories under
+#: ``/workspaces`` — and the home directory otherwise.
+def picker_root() -> Path:
+    setting = os.environ.get('CHAGENT_WORKSPACE_ROOT')
+    raw = Path(setting).expanduser() if setting and setting.strip() else Path.home()
     try:
-        result = subprocess.run(['/usr/bin/osascript', '-e', 'try\nPOSIX path of (choose folder with prompt "选择 Chagent 工作区")\non error number -128\nreturn ""\nend try'], capture_output=True, text=True, timeout=120)
-    except (OSError, subprocess.TimeoutExpired):
-        raise HTTPException(503, '目录选择器不可用或超时，请手工输入路径') from None
+        root = raw.resolve(strict=True)
+    except OSError:
+        raise ValueError('工作区根目录不存在或不可访问') from None
+    if not root.is_dir():
+        raise ValueError('工作区根目录必须是目录')
+    return root
+
+
+def confined(target: Path, root: Path) -> Path:
+    """Resolve one browse target and refuse anything above the published root."""
+    try:
+        resolved = target.expanduser().resolve(strict=True)
+    except OSError:
+        raise ValueError('目录不存在或不可访问') from None
+    if not within_root(resolved, root):
+        raise ValueError('只能浏览工作区根目录之内的文件夹')
+    if not resolved.is_dir():
+        raise ValueError('该路径不是目录')
+    return resolved
+
+
+def native_picker_available() -> bool:
+    """Only macOS has a system dialog wired here; elsewhere the page navigates."""
+    return sys.platform == 'darwin'
+
+
+def choose_directory() -> str:
+    """Ask the OS for a folder; an empty string means the user cancelled.
+
+    A cancel and a failure must stay distinct: the first changes nothing, the
+    second has to tell the page why, because ``osascript`` also fails when the
+    host denies automation or the dialog cannot reach the display.
+    """
+    script = ('try\n'
+              'POSIX path of (choose folder with prompt "选择 Chagent 工作区")\n'
+              'on error number -128\n'
+              'return ""\n'
+              'end try')
+    try:
+        result = subprocess.run(['/usr/bin/osascript', '-e', script],
+                                capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(503, '目录选择器超时，请重试或手工输入路径') from None
+    except OSError:
+        raise HTTPException(503, '无法启动目录选择器，请手工输入路径') from None
     if result.returncode:
-        raise HTTPException(503, '目录选择器不可用，请手工输入路径')
-    return result.stdout.strip()
+        reason = [line for line in (result.stderr or '').splitlines() if line.strip()]
+        detail = f'：{reason[-1].strip()[:200]}' if reason else ''
+        raise HTTPException(503, f'目录选择器不可用{detail}')
+    # ``POSIX path of`` prints one line and no trailing slash rule; only the
+    # newline is ours to remove. Stripping whitespace would rename a folder
+    # whose name legitimately ends in a space.
+    return result.stdout.rstrip('\n')
 
 
 @router.post('/workspace-picker')
 async def picker(current: Current):
+    """The system dialog when the host has one, otherwise a signal to navigate."""
     from chagent.web.deps import open_workspace
     from chagent.web.schemas import WorkspaceCreate
+    if not native_picker_available():
+        return dict(cancelled=True, native_picker=False)
     path = await asyncio.to_thread(choose_directory)
     if not path:
-        return dict(cancelled=True)
+        return dict(cancelled=True, native_picker=True)
     opened = await open_workspace(WorkspaceCreate(path=path), current)
-    return dict(cancelled=False, workspace=opened)
+    return dict(cancelled=False, native_picker=True, workspace=opened)
+
+
+@router.get('/workspace-browse', response_model=DirectoryListing)
+async def browse(current: Current, path: str | None = Query(default=None, max_length=4096),
+                 after: str | None = Query(default=None, max_length=255)):
+    """List child directories of one target inside the published root.
+
+    Discovery only: nothing is opened or registered here, so walking a tree has
+    no side effect. The rows carry the same availability verdict as
+    ``GET /api/workspaces``, computed now rather than on first use.
+    """
+    root = picker_root()
+    target = confined(Path(path), root) if path else root
+    known = {row['path'] for row in
+             await ConversationRepository(current.runner.conversations.database).workspaces()}
+    entries = []
+    def order(name: str) -> tuple[str, str]:
+        return name.casefold(), name
+
+    def directories():
+        # Scan the directory, but keep only one page in memory. A full sort can
+        # allocate an unbounded list before BROWSE_LIMIT is ever checked.
+        with os.scandir(target) as children:
+            for child in children:
+                try:
+                    if child.is_dir() and (after is None or order(child.name) > order(after)):
+                        yield child.name
+                except OSError:
+                    continue
+    try:
+        names = heapq.nsmallest(BROWSE_LIMIT + 1, directories(), key=order)
+    except OSError:
+        raise ValueError('目录不可读，请选择其他文件夹') from None
+    more = len(names) > BROWSE_LIMIT
+    for name in names[:BROWSE_LIMIT]:
+        entry = target / name
+        try:
+            confined(entry, root)
+            opened = validate_workspace(entry)
+        except (ValueError, OSError, RuntimeError):
+            entries.append(DirectoryEntry(name=entry.name, path=entry, available=False,
+                                          reason='目录不可访问或不符合工作区准入要求',
+                                          opened=False))
+        else:
+            entries.append(DirectoryEntry(name=entry.name, path=opened, available=True,
+                                          opened=str(opened) in known))
+    return DirectoryListing(path=target, root=root,
+                            parent=None if target == root else target.parent,
+                            entries=entries,
+                            next_after=names[BROWSE_LIMIT - 1] if more else None)
 
 
 class OutputInput(FileInput):

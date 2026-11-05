@@ -14,12 +14,17 @@ def protected_source() -> Path:
     return package
 
 
+def within_root(path: Path, root: Path) -> bool:
+    """Check resolved paths against the same root used for workspace admission."""
+    return path == root or path.is_relative_to(root)
+
+
 def validate_workspace(path: Path) -> Path:
     target = path.expanduser().resolve(strict=True)
     root_setting = os.environ.get("CHAGENT_WORKSPACE_ROOT")
     if root_setting:
         root = Path(root_setting).expanduser().resolve(strict=True)
-        if target != root and not target.is_relative_to(root):
+        if not within_root(target, root):
             raise ValueError("Workspace must be inside CHAGENT_WORKSPACE_ROOT")
     if not target.is_dir():
         raise ValueError("工作区必须是目录")
