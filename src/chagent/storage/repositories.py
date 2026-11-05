@@ -664,15 +664,31 @@ class RunRepository:
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             for index, (identity, call) in enumerate(zip(identities, calls)):
+                arguments = postgres_json_safe(call.arguments)
+                # An attempt is one execution of one invocation. The count runs in
+                # this transaction, so two identical calls in one batch are 1 and 2,
+                # and a retry in a later turn is 2 rather than a fresh 1.
+                cursor = await connection.execute(
+                    "SELECT count(*) AS n FROM tool_calls WHERE run_id = %s AND name = %s "
+                    "AND arguments = %s", (run_id, call.name, Jsonb(arguments)))
+                attempt = (await cursor.fetchone())["n"] + 1
                 await connection.execute(
-                    "INSERT INTO tool_calls (id, run_id, model_call_id, call_id, name, arguments, status, call_index) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s)",
-                    (identity, run_id, model_call_id, call.id, call.name,
-                     Jsonb(postgres_json_safe(call.arguments)), index))
-                await self._event(connection, run_id, "tool_queued", {"tool_call_id": call.id, "name": call.name},
-                                  locked=True)
+                    "INSERT INTO tool_calls (id, run_id, model_call_id, call_id, name, arguments, status, "
+                    "call_index, attempt) VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s, %s)",
+                    (identity, run_id, model_call_id, call.id, call.name, Jsonb(arguments), index, attempt))
+                await self._event(connection, run_id, "tool_queued", {
+                    "tool_call_id": call.id, "name": call.name, "attempt": attempt}, locked=True)
         self.notifications.notify(run_id)
         return identities
+
+    async def call_attempts(self, identities: list[UUID]) -> dict[UUID, int]:
+        """The attempt number of each just-queued call, for the model-facing note."""
+        if not identities:
+            return {}
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT id, attempt FROM tool_calls WHERE id = ANY(%s)", (list(identities),))
+            return {row["id"]: row["attempt"] for row in await cursor.fetchall()}
 
     async def start_tool_call(self, run_id: UUID, model_call_id: UUID, call: ToolCall, *, record_id: UUID) -> UUID:
         await self.flush_events(run_id)

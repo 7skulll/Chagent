@@ -15,6 +15,7 @@ from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
 from chagent.tools.approvals import STALE, ApprovalBroker
 from chagent.tools.gate import HumanGate, ToolGate, WriteGate
+from chagent.tools.retry import UNKNOWN_OUTCOME_NOTE, annotate as annotate_failure
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.policy import ApprovalPolicy
 from chagent.tools.progress import ProgressGuard, Decision
@@ -142,6 +143,7 @@ class ToolScheduler:
         if context.run_id is None or context.session_id is None:
             raise ValueError("Tool batches require a run and session")
         identities = await self.runs.queue_tool_calls(context.run_id, model_call_id, calls)
+        attempts = await self.runs.call_attempts(identities)
         signal = asyncio.Event()
         outcomes: dict[int, ToolOutcome] = {}
         committed: dict[int, StoredMessage] = {}
@@ -204,6 +206,7 @@ class ToolScheduler:
                 budget.pause()
             try:
                 result = await executor.execute(call, context=context, signal=signal, on_update=on_update)
+                result = with_failure(result, attempts.get(identities[index]))
                 grant = grants.get(index)
                 if grant is not None:
                     # The page answered before this call could run, and the
@@ -319,13 +322,14 @@ class ToolScheduler:
             # Writes are asked once per model turn, before any group runs: three
             # sequential `write_file` calls are one card, not three. The `asked`
             # set keeps `_ask` from opening a second question for them.
-            batch_refused, batch_grants = await self._ask_writes(calls, context, identities, signal, budget)
+            batch_refused, batch_grants = await self._ask_writes(
+                calls, context, identities, signal, budget, attempts=attempts)
             asked: set[int] = set(batch_refused) | set(batch_grants)
             for parallel, indices in self._groups(calls, executor):
                 # Questions are asked before a slot, the workspace gate or an
                 # execution slot is taken, so an unanswered one blocks only this run.
                 refused, grants = await self._ask(calls, indices, context, executor, identities,
-                                                  signal, budget, skip=asked)
+                                                  signal, budget, skip=asked, attempts=attempts)
                 refused = {**batch_refused, **refused}
                 grants = {**batch_grants, **grants}
                 async with gate.hold(parallel):
@@ -340,8 +344,14 @@ class ToolScheduler:
         return ToolBatchResult([outcomes[i].result for i in range(len(calls))],
                                [committed[i].message for i in range(len(calls))], stalled)
 
-    async def _ask(self, calls, indices, context, executor, identities, signal, budget, skip=frozenset()):
-        """Run optional gates before taking execution resources."""
+    async def _ask(self, calls, indices, context, executor, identities, signal, budget,
+                   skip=frozenset(), attempts: dict | None = None):
+        """Run optional gates before taking execution resources.
+
+        ``attempts`` maps a tool record to this invocation's attempt number; it is
+        carried into the refusal so the model can tell a first try from a retry.
+        """
+        attempts = attempts or {}
         refused: dict[int, object] = {}
         grants: dict[int, Grant] = {}
         gates = self.gates if self.gates is not None else self.default_gates()
@@ -365,14 +375,15 @@ class ToolScheduler:
                     })
                     break
                 if not decision.allow:
-                    refused[index] = approval_result(decision.reason, decision.approval_id, decision.code)
+                    refused[index] = approval_result(decision.reason, decision.approval_id,
+                                                     decision.code, attempt=attempts.get(identities[index]))
                     break
                 if decision.approval_id is not None:
                     grants[index] = Grant(decision.approval_id, decision.note)
         return refused, grants
 
 
-    async def _ask_writes(self, calls, context, identities, signal, budget):
+    async def _ask_writes(self, calls, context, identities, signal, budget, attempts: dict | None = None):
         """One page question for every write this model turn wants to make.
 
         The batch spans the whole turn rather than one parallel group: writes are
@@ -380,6 +391,7 @@ class ToolScheduler:
         keeps its own approval row, fingerprint and single-use consumption; only
         the decision is shared.
         """
+        attempts = attempts or {}
         refused: dict[int, object] = {}
         grants: dict[int, Grant] = {}
         gates = self.gates if self.gates is not None else self.default_gates()
@@ -415,7 +427,8 @@ class ToolScheduler:
                 grants[index] = Grant(outcome.approval_id, outcome.note)
             else:
                 decision = gate.refusal(outcome)
-                refused[index] = approval_result(decision.reason, decision.approval_id, decision.code)
+                refused[index] = approval_result(decision.reason, decision.approval_id, decision.code,
+                                                 attempt=attempts.get(identities[index]))
         return refused, grants
 
 
@@ -459,13 +472,37 @@ def _note_text(note: str) -> str:
     return note if len(note) <= NOTE_CHARS else note[:NOTE_CHARS].rstrip() + " …"
 
 
-def approval_result(message: str, approval_id, reason: str):
-    """A refusal that says what happened, so the model does not retry blindly."""
+def approval_result(message: str, approval_id, reason: str, *, attempt: int | None = None):
+    """A refusal that says what happened, what it is called, and whether to retry."""
     return AgentToolResult(
         content=[TextContent(message)], is_error=True,
         details={"approval": reason, "approval_id": str(approval_id) if approval_id else None,
-                 "execution_started": False},
+                 "execution_started": False,
+                 **annotate_failure(None, reason, attempt)},
     )
+
+
+def with_failure(result: AgentToolResult, attempt: int | None) -> AgentToolResult:
+    """Name what kind of failure this is, and say the unknown-outcome case out loud."""
+    if not result.is_error:
+        if attempt is None:
+            return result
+        return AgentToolResult(
+            content=result.content,
+            details={**(result.details if isinstance(result.details, dict) else {}), "attempt": attempt},
+            structured_content=result.structured_content, usage=result.usage,
+            is_error=result.is_error, terminate=result.terminate,
+            outcome_unknown=result.outcome_unknown)
+    code = "outcome_unknown" if result.outcome_unknown else "execution_failed"
+    content = ([TextContent(UNKNOWN_OUTCOME_NOTE), *result.content]
+               if result.outcome_unknown else result.content)
+    # An unknown outcome must be read, not skimmed: the note goes first, and the
+    # tool's own text stays behind it.
+    return AgentToolResult(
+        content=content,
+        details=annotate_failure(result.details, code, attempt),
+        structured_content=result.structured_content, usage=result.usage,
+        is_error=True, terminate=result.terminate, outcome_unknown=result.outcome_unknown)
 
 
 def refused_outcome(call: ToolCall, result: AgentToolResult) -> ToolOutcome:
