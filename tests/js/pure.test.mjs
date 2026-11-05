@@ -106,11 +106,13 @@ test("a write approval names the action, not the tool", () => {
 test("configuration reads as behaviour, not as booleans", () => {
   const config = {boundary: "container", capability: "full", gate: "approval", controller: "host-controller",
     approval: "untrusted", approval_timeout: 120, approval_grace: 30, tools: 12, run_timeout: 600,
+    run_wall_timeout: 3600,
     workspace_writable: true, process_stdin: false, host_commands: true, web_access: "deepseek",
     web_key: "set", compaction: true, max_turns: 32, max_processes: 2, process_timeout: 300};
   assert.equal(configValue("gate", config), "仅宿主原生操作逐次审批");
   assert.equal(configValue("capability", config), "可执行命令");
   assert.equal(configValue("approval", config), "untrusted，等待 120 秒，无人查看 30 秒后放弃");
+  assert.equal(configValue("run_wall_timeout", config), "3600 秒");
   assert.equal(configValue("web_access", config), "deepseek，密钥已配置");
   assert.equal(configValue("max_processes", config), "2 个，单个 300 秒");
 });

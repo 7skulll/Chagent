@@ -214,6 +214,7 @@ class ConfigView(BaseModel):
     provider: str
     model: str
     run_timeout: float
+    run_wall_timeout: float | None = None
     boundary: str = "none"
     capability: str = "read-only"
     gate: str = "none"

@@ -89,6 +89,11 @@ class OutputService:
         digest = sha256(data).hexdigest()
         identity = request_id or uuid4()
         async with self.database.transaction() as connection:
+            if session_id is not None:
+                cursor = await connection.execute('SELECT workspace_id FROM sessions WHERE id=%s', (session_id,))
+                session = await cursor.fetchone()
+                if session is None or session['workspace_id'] != workspace_id:
+                    raise ValueError('输出会话与工作区不一致')
             cursor = await connection.execute(
                 "INSERT INTO file_outputs (id,workspace_id,session_id,run_id,tool_call_id,source,path,payload,content_hash,size,status,token) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'staged',%s) ON CONFLICT DO NOTHING RETURNING *",

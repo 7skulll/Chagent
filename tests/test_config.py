@@ -52,6 +52,8 @@ class SettingsTests(unittest.TestCase):
             {"db_timeout": float("inf")},
             {"approval_unwatched_grace": -1},
             {"approval_unwatched_grace": float("nan")},
+            {"run_wall_timeout": 0},
+            {"run_wall_timeout": float("inf")},
             {"max_turns": 0},
             {"max_turns": 129},
             {"max_tool_concurrency": 0},
@@ -77,6 +79,10 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(Settings.from_env({}).approval_unwatched_grace, 10.0)
         self.assertEqual(Settings.from_env({"CHAGENT_APPROVAL_UNWATCHED_GRACE": "0"}).approval_unwatched_grace, 0.0)
         self.assertEqual(Settings.from_env({"CHAGENT_APPROVAL_UNWATCHED_GRACE": "2.5"}).approval_unwatched_grace, 2.5)
+
+    def test_run_wall_timeout_is_explicit_and_configurable(self):
+        self.assertEqual(Settings.from_env({}).run_wall_timeout, 3600.0)
+        self.assertEqual(Settings.from_env({"CHAGENT_RUN_WALL_TIMEOUT": "900"}).run_wall_timeout, 900.0)
 
     def test_host_commands_require_explicit_boolean_setting(self):
         self.assertFalse(Settings.from_env({}).allow_host_commands)

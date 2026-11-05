@@ -71,6 +71,17 @@ class InlineThresholdTests(unittest.TestCase):
 
 
 class RunBudgetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_wall_limit_expires_even_while_approval_budget_is_paused(self):
+        fired = asyncio.Event()
+        budget = RunBudget(1.0, fired.set, wall_seconds=0.05)
+        budget.start()
+        budget.pause(capped=False)
+        try:
+            await asyncio.wait_for(fired.wait(), 0.5)
+            self.assertTrue(budget.expired)
+        finally:
+            budget.stop()
+
     async def test_nested_pauses_need_matching_resumes(self):
         fired = []
         budget = RunBudget(5.0, lambda: fired.append(True))

@@ -92,11 +92,11 @@ class WebRuntime:
     async def workspace_id(self, workspace: Path | None = None):
         root = self.workspace if workspace is None else workspace
         if self.settings.execution_profile == "host-controller":
+            if root == Path("/workspaces") or root.is_relative_to(Path("/workspaces")):
+                raise HTTPException(409, "旧容器工作区路径必须先核实原宿主目录并重新绑定")
             root = validate_workspace(root)
             if self.auth_guard is not None:
                 self.auth_guard(root)
-            if root == Path("/workspaces") or root.is_relative_to(Path("/workspaces")):
-                raise HTTPException(409, "旧容器工作区路径必须先核实原宿主目录并重新绑定")
             stat = root.stat()
             async with self.runner.conversations.database.transaction() as connection:
                 cursor = await connection.execute(

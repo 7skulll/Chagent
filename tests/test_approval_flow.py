@@ -178,6 +178,18 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.end_reason, "model_stop")
         self.assertTrue(marker.exists())
 
+    async def test_wall_limit_ends_a_run_waiting_for_approval(self):
+        marker = self.workspace / "wall-limit.txt"
+        runner = self.runner(arguments={"cmd": f"printf x > {marker.name}"})
+        runner.timeout = 1.0
+        runner.wall_timeout = 0.3
+        session = await runner.conversations.create_session(self.workspace)
+        from chagent.agent.runner import RunFailedError
+        with self.assertRaises(RunFailedError) as failure:
+            await asyncio.wait_for(runner.run(session, "等待审批"), timeout=5)
+        self.assertEqual(failure.exception.end_reason, "run_timeout")
+        self.assertFalse(marker.exists())
+
     async def test_an_allowlisted_command_runs_without_a_question(self):
         policy = ApprovalPolicy.from_settings(Settings(
             execution_profile="containerized", container_declared=True,

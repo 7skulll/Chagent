@@ -60,6 +60,7 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
                                f"workspace_writable={str(settings.sandbox_writable).lower()} "
                                f"container_declared={str(settings.container_declared).lower()}")
         sections["memory"] = f"worker_concurrency={settings.memory_worker_concurrency}"
+        sections["run_wall"] = f"timeout={settings.run_wall_timeout:g}s (includes approvals and tools)"
         sections["processes"] = (f"max_per_run={settings.max_processes} "
                                  f"wall_timeout={settings.process_timeout:g}s")
         # The key itself never appears here; only whether one is present, and

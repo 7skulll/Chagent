@@ -19,6 +19,10 @@ from chagent.storage.migrate import migrate
 from chagent.storage.repositories import ConversationRepository, RunRepository
 from chagent.storage.approvals import ApprovalRepository
 from chagent.domain.messages import ToolCall, UserMessage
+from chagent.domain.memories import MemoryProposal
+from chagent.storage.memories import MemoryRepository
+from chagent.outputs import OutputService
+from chagent.sessions.errors import SessionNotFoundError
 from chagent.hostexec.native import (NativeHostExecTool, NativeHostProcessTool,
                                      mark_interrupted_native_executions)
 from chagent.tools.context import ToolContext
@@ -109,6 +113,80 @@ class HostWorkspaceIdentityTests(unittest.IsolatedAsyncioTestCase):
         stat = self.first.stat()
         self.assertEqual((row["host_path"], row["device"], row["inode"], row["state"]),
                          (str(self.first.resolve()), stat.st_dev, stat.st_ino, "active"))
+
+    async def test_migrated_workspace_memory_and_outputs_stay_with_their_binding(self):
+        first_id = await self.runtime.workspace_id(self.first)
+        self.runtime.open_workspace(str(self.second))
+        second_id = await self.runtime.workspace_id(self.second)
+        conversations = ConversationRepository(self.database)
+        first_session = await conversations.create_session(self.first)
+        second_session = await conversations.create_session(self.second)
+        memories = MemoryRepository(self.database)
+        outputs = OutputService(self.database)
+
+        first_memory = await memories.propose(
+            MemoryProposal("project.marker", "first project", "workspace", origin="manual"), first_id)
+        second_memory = await memories.propose(
+            MemoryProposal("project.marker", "second project", "workspace", origin="manual"), second_id)
+        self.assertEqual({item.id for item in (await memories.list(first_id))["items"]}, {first_memory.id})
+        self.assertEqual({item.id for item in (await memories.list(second_id))["items"]}, {second_memory.id})
+        self.assertIsNone(await memories.current("workspace", second_id, "first-only"))
+        with self.assertRaises(LookupError):
+            await memories.get(first_memory.id, second_id)
+
+        # An existing file makes each output wait for a confirmation, so both
+        # the read path and the subsequent write decision can be checked.
+        (self.first / "result.txt").write_text("first original")
+        (self.second / "result.txt").write_text("second original")
+        first_output = await outputs.submit(first_id, self.first, "result.txt", b"first new",
+                                            source="test", session_id=first_session)
+        second_output = await outputs.submit(second_id, self.second, "result.txt", b"second new",
+                                             source="test", session_id=second_session)
+        self.assertEqual(first_output["status"], second_output["status"])
+        self.assertEqual(first_output["status"], "pending")
+        self.assertEqual([item["id"] for item in await outputs.pending(first_id)], [first_output["id"]])
+        self.assertEqual([item["id"] for item in await outputs.pending(second_id)], [second_output["id"]])
+        with self.assertRaises(FileNotFoundError):
+            await outputs.decide(second_id, self.second, first_output["id"], first_output["token"], "overwrite")
+        self.assertEqual((self.second / "result.txt").read_text(), "second original")
+        await outputs.decide(first_id, self.first, first_output["id"], first_output["token"], "overwrite")
+        self.assertEqual((self.first / "result.txt").read_text(), "first new")
+        self.assertEqual((self.second / "result.txt").read_text(), "second original")
+        self.assertEqual((await conversations.get_session(first_session)).workspace_id, first_id)
+        self.assertEqual((await conversations.get_session(second_session)).workspace_id, second_id)
+        with self.assertRaises(ValueError):
+            await outputs.submit(second_id, self.second, "wrong-session.txt", b"wrong",
+                                 source="test", session_id=first_session)
+        self.assertFalse((self.second / "wrong-session.txt").exists())
+
+        # Simulate 0021's quarantine of an old container mount. Its records
+        # remain auditable in storage but must not become a host workspace.
+        legacy_id, legacy_session = uuid4(), uuid4()
+        async with self.database.connection() as connection:
+            await connection.execute("INSERT INTO workspaces (id,root_path) VALUES (%s,'/workspaces/legacy')",
+                                     (legacy_id,))
+            await connection.execute(
+                "INSERT INTO workspace_bindings (workspace_id,host_path,device,inode,state) "
+                "VALUES (%s,'/workspaces/legacy',0,0,'rebind_required')", (legacy_id,))
+            await connection.execute("INSERT INTO sessions (id,workspace_id,title,mode) VALUES (%s,%s,'old','work')",
+                                     (legacy_session, legacy_id))
+            await connection.execute("INSERT INTO task_states (session_id) VALUES (%s)", (legacy_session,))
+        legacy_memory = await memories.propose(
+            MemoryProposal("project.marker", "legacy project", "workspace", origin="manual"), legacy_id)
+        async with self.database.connection() as connection:
+            await connection.execute(
+                "INSERT INTO file_outputs (id,workspace_id,session_id,source,path,payload,content_hash,size,status,token) "
+                "VALUES (%s,%s,%s,'test','legacy.txt',%s,'legacy-hash',6,'pending',%s)",
+                (uuid4(), legacy_id, legacy_session, b"legacy", uuid4()))
+        self.assertNotIn(legacy_memory.id, {item.id for item in (await memories.list(first_id))["items"]})
+        self.assertNotIn(legacy_memory.id, {item.id for item in (await memories.list(second_id))["items"]})
+        self.assertEqual(await outputs.pending(first_id), [])
+        self.assertEqual([item["id"] for item in await outputs.pending(second_id)], [second_output["id"]])
+        with self.assertRaises(HTTPException) as blocked:
+            await self.runtime.workspace_id(Path("/workspaces/legacy"))
+        self.assertEqual(blocked.exception.status_code, 409)
+        with self.assertRaises((SessionNotFoundError, ValueError)):
+            await self.runtime.session(legacy_session)
 
     async def test_native_execution_requires_single_consumed_approval(self):
         root = self.first.resolve()

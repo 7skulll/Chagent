@@ -142,7 +142,7 @@ export const approvalTitle = toolName => WRITE_LABELS[toolName] || toolName;
 export const CONFIG_LABELS = [
   ["provider", "供应商"], ["model", "模型"], ["tools", "工具数"],
   ["controller", "主控位置"],
-  ["run_timeout", "单次运行上限"], ["boundary", "执行边界"], ["capability", "执行能力"], ["gate", "门禁"], ["approval", "审批"],
+  ["run_timeout", "活动时间上限"], ["run_wall_timeout", "运行墙钟上限"], ["boundary", "执行边界"], ["capability", "执行能力"], ["gate", "门禁"], ["approval", "审批"],
   ["host_commands", "命令执行"], ["workspace_writable", "工作区写入"], ["process_stdin", "交互输入"], ["web_access", "网页搜索"], ["compaction", "上下文压缩"],
   ["tokenizer", "token 计数"], ["max_turns", "最大轮数"], ["max_processes", "会话进程"],
 ];
@@ -151,6 +151,7 @@ export function configValue(key, c) {
   switch (key) {
     case "tools": return `${c.tools} 个`;
     case "run_timeout": return `${Math.round(c.run_timeout)} 秒`;
+    case "run_wall_timeout": return c.run_wall_timeout == null ? "未设置" : `${Math.round(c.run_wall_timeout)} 秒`;
     case "boundary": return c.boundary === "container" ? "容器（命令可联网）" : "无命令边界";
     case "capability": return c.capability === "full" ? "可执行命令" : "只读，不执行命令";
     case "gate": return c.controller === "host-controller" ? "仅宿主原生操作逐次审批" : c.gate === "approval" ? "逐次审批" : "无需审批";

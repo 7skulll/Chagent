@@ -62,13 +62,14 @@ class AgentRunner:
     def __init__(
         self, model: Model, client: ModelClient, context: ContextBuilder,
         tools: ToolExecutor, conversations: ConversationRepository, runs: RunRepository,
-        max_turns: int = 8, timeout: float = 60,
+        max_turns: int = 8, timeout: float = 60, wall_timeout: float | None = None,
         context_manager: ContextManager | None = None,
         memory_service: MemoryService | None = None,
         max_tool_concurrency: int = 4,
         memory_worker=None,
     ):
-        if max_turns < 1 or not math.isfinite(timeout) or timeout <= 0:
+        if max_turns < 1 or not math.isfinite(timeout) or timeout <= 0 or (wall_timeout is not None and
+                (not math.isfinite(wall_timeout) or wall_timeout <= 0)):
             raise ValueError("Run limits must be positive and finite")
         self.model = model
         self.client = client
@@ -85,6 +86,7 @@ class AgentRunner:
         self.scheduler = ToolScheduler(runs, max_concurrency=max_tool_concurrency)
         self.max_turns = max_turns
         self.timeout = timeout
+        self.wall_timeout = wall_timeout
         self._tasks: dict[UUID, asyncio.Task] = {}
         self._states: dict[UUID, RunState] = {}
         # Set by bootstrap; absent in tests that drive the loop directly.
@@ -135,7 +137,8 @@ class AgentRunner:
         heartbeat_task = asyncio.create_task(heartbeat(), name=f"run-heartbeat-{run_id}")
         # A pausable budget rather than asyncio.timeout: waiting for a human is
         # not the run spending its execution time (see agent/budget.py).
-        budget = RunBudget(self.timeout, lambda: task.cancel() if task is not None else None)
+        budget = RunBudget(self.timeout, lambda: task.cancel() if task is not None else None,
+                           wall_seconds=self.wall_timeout)
         try:
             budget.start()
             if on_started is not None:
