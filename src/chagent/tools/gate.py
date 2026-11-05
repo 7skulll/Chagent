@@ -1,6 +1,7 @@
 """Optional decisions made before a tool takes execution resources."""
 
 import asyncio
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -61,11 +62,33 @@ class HumanGate:
             if evidence is None:
                 return GateDecision(False, "First verify the operation in the container, then request native execution", "unverified")
             cwd = fs.root.joinpath(*parts)
+            stdin = ("stdin stays open; every later write needs its own approval"
+                     if "yield_time_ms" in call.arguments else "stdin closed")
             subject = (f"{call.arguments.get('command', '')}\nDirectory: {cwd}\n"
                        f"Purpose: {call.arguments.get('purpose', '')}\n"
                        f"Timeout: {call.arguments.get('timeout_ms', 30000)} ms\n"
-                       "Environment: PATH, HOME, LANG only; stdin closed\n"
+                       f"Environment: PATH, HOME, LANG only; {stdin}\n"
                        f"Container verification: {evidence['name']} exit 0")
+        if self.sandbox_mode == "managed-container" and call.name == "host_process" \
+                and call.arguments.get("action") == "write":
+            chars = str(call.arguments.get("chars", ""))
+            close_stdin = call.arguments.get("close_stdin", False) is True
+            async with self.broker.approvals.database.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT command, cwd, status FROM native_executions "
+                    "WHERE run_id=%s AND process_id=%s",
+                    (context.run_id, call.arguments.get("process_id")))
+                execution = await cursor.fetchone()
+            if execution is None or execution["status"] != "running":
+                return GateDecision(False, "No live native process with that id in this run; "
+                                           "the write was not executed", "unknown_process")
+            subject = (f"Native process {call.arguments.get('process_id')}: "
+                       f"{str(execution['command'])[:400]}\n"
+                       f"Directory: {execution['cwd']}\n"
+                       f"Input: {json.dumps(chars, ensure_ascii=False)} "
+                       f"({len(chars.encode('utf-8'))} UTF-8 bytes)\n"
+                       f"close_stdin: {close_stdin}\n"
+                       "One-time approval for exactly this input; it does not cover later writes.")
         outcome = await self.broker.request(
             run_id=context.run_id, tool_record_id=tool_record_id,
             tool_name=call.name, arguments=call.arguments,

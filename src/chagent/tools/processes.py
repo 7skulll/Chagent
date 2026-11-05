@@ -305,6 +305,65 @@ def _status(record: ManagedProcess) -> str:
     return state
 
 
+async def read_process(record: ManagedProcess, params: JsonObject) -> AgentToolResult:
+    """The bounded read shared by every process face (container and native)."""
+    since, wait_ms = params.get("since", 0), params.get("wait_ms", 0)
+    if wait_ms and record.running and since >= record.cursor:
+        # A bounded wait is how a model follows a build instead of polling
+        # once per turn. The event is cleared before waiting and the cursor
+        # re-checked after, so a stale set from earlier output cannot make
+        # this return instantly, and output that arrives mid-clear is not
+        # slept through.
+        deadline = asyncio.get_running_loop().time() + wait_ms / 1000
+        while record.running and record.cursor <= since:
+            record.new_output.clear()
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                break
+            with suppress(TimeoutError):
+                await asyncio.wait_for(record.new_output.wait(), remaining)
+    if record.running:
+        # The last line and the exit code usually land together, and the
+        # exit code arrives through a different task than the output. A
+        # short grace here saves the model a whole turn spent re-reading
+        # just to learn whether the command finished.
+        with suppress(TimeoutError):
+            await asyncio.wait_for(record.finished.wait(),
+                                   EOF_GRACE if record.eof else EXIT_GRACE)
+    text, missed = record.page(since)
+    truncated = len(text) > PAGE_CHARS
+    text = text[:PAGE_CHARS]
+    offset = max(min(since, record.cursor), record.window_start)
+    next_cursor = offset + len(text)
+    head = [f"Process: {record.id}", f"Command: {record.command[:200]}",
+            f"Status: {_status(record)}"]
+    if missed is not None:
+        head.append(f"Gap: output before cursor {missed} was dropped "
+                    f"(the window holds {record.window} characters)")
+    if text:
+        head.append(f"Output from cursor {offset}:")
+    else:
+        head.append("No new output" + (" yet; read again with wait_ms to block."
+                                       if record.running else "."))
+    head.append(f"Next since: {next_cursor}" + (" (more is already available)" if truncated else ""))
+    return AgentToolResult(
+        content=[TextContent("\n".join(head) + ("\n\n" + text if text else ""))],
+        details={**record.snapshot(), "since": since, "next_since": next_cursor,
+                 "truncated": truncated, "output": text})
+
+
+async def stop_process(manager: ProcessManager, record: ManagedProcess) -> AgentToolResult:
+    """Stop one process and show what it had produced until then."""
+    if record.running:
+        await manager.stop(record)
+    tail, _ = record.page(max(0, record.cursor - 2000))
+    return AgentToolResult(
+        content=[TextContent(f"Stopped {record.id}; exit code {record.exit_code}. "
+                             f"{record.cursor} characters produced in total."
+                             + ("\n\nLast output:\n" + tail if tail else ""))],
+        details=record.snapshot())
+
+
 class ProcessTool(AgentTool):
     """Read, feed and stop the processes a run started with ``yield_time_ms``."""
 
@@ -382,49 +441,7 @@ class ProcessTool(AgentTool):
                                details={"processes": [record.snapshot() for record in records]})
 
     async def _read(self, record: ManagedProcess, params: JsonObject) -> AgentToolResult:
-        since, wait_ms = params.get("since", 0), params.get("wait_ms", 0)
-        if wait_ms and record.running and since >= record.cursor:
-            # A bounded wait is how a model follows a build instead of polling
-            # once per turn. The event is cleared before waiting and the cursor
-            # re-checked after, so a stale set from earlier output cannot make
-            # this return instantly, and output that arrives mid-clear is not
-            # slept through.
-            deadline = asyncio.get_running_loop().time() + wait_ms / 1000
-            while record.running and record.cursor <= since:
-                record.new_output.clear()
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    break
-                with suppress(TimeoutError):
-                    await asyncio.wait_for(record.new_output.wait(), remaining)
-        if record.running:
-            # The last line and the exit code usually land together, and the
-            # exit code arrives through a different task than the output. A
-            # short grace here saves the model a whole turn spent re-reading
-            # just to learn whether the command finished.
-            with suppress(TimeoutError):
-                await asyncio.wait_for(record.finished.wait(),
-                                       EOF_GRACE if record.eof else EXIT_GRACE)
-        text, missed = record.page(since)
-        truncated = len(text) > PAGE_CHARS
-        text = text[:PAGE_CHARS]
-        offset = max(min(since, record.cursor), record.window_start)
-        next_cursor = offset + len(text)
-        head = [f"Process: {record.id}", f"Command: {record.command[:200]}",
-                f"Status: {_status(record)}"]
-        if missed is not None:
-            head.append(f"Gap: output before cursor {missed} was dropped "
-                        f"(the window holds {record.window} characters)")
-        if text:
-            head.append(f"Output from cursor {offset}:")
-        else:
-            head.append("No new output" + (" yet; read again with wait_ms to block."
-                                           if record.running else "."))
-        head.append(f"Next since: {next_cursor}" + (" (more is already available)" if truncated else ""))
-        return AgentToolResult(
-            content=[TextContent("\n".join(head) + ("\n\n" + text if text else ""))],
-            details={**record.snapshot(), "since": since, "next_since": next_cursor,
-                     "truncated": truncated, "output": text})
+        return await read_process(record, params)
 
     async def _write(self, record: ManagedProcess, params: JsonObject) -> AgentToolResult:
         chars, close = params.get("chars", ""), bool(params.get("close_stdin", False))
@@ -456,14 +473,7 @@ class ProcessTool(AgentTool):
             details={**record.snapshot(), "written": len(chars), "closed_stdin": close})
 
     async def _stop(self, record: ManagedProcess) -> AgentToolResult:
-        if record.running:
-            await self.manager.stop(record)
-        tail, _ = record.page(max(0, record.cursor - 2000))
-        return AgentToolResult(
-            content=[TextContent(f"Stopped {record.id}; exit code {record.exit_code}. "
-                                 f"{record.cursor} characters produced in total."
-                                 + ("\n\nLast output:\n" + tail if tail else ""))],
-            details=record.snapshot())
+        return await stop_process(self.manager, record)
 
     def _unknown(self, run_id: UUID) -> str:
         known = [record.id for record in self.manager.owned(run_id)]

@@ -30,7 +30,7 @@ from chagent.tools.generated_files import CreateFileTool
 from chagent.tools.sandbox import Sandbox
 from chagent.tools.web import WebAccess, create_web_tools
 from chagent.tools.host import HostExecTool
-from chagent.hostexec.native import NativeHostExecTool
+from chagent.hostexec.native import NativeHostExecTool, NativeHostProcessTool
 from chagent.tools.site import SiteTool
 
 
@@ -106,7 +106,12 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
         if native_host_exec:
             if sandbox is None or not sandbox.settings.host_controller or artifacts is None:
                 raise ValueError("Native host execution requires a host controller and database")
-            registry.register(NativeHostExecTool(artifacts.database))
+            if processes is None:
+                raise ValueError("Native host execution requires a process manager")
+            # In the host-controller build the manager holds native children only:
+            # container exec is one-shot and the container `process` tool is absent.
+            registry.register(NativeHostExecTool(artifacts.database, processes))
+            registry.register(NativeHostProcessTool(artifacts.database, processes))
             registry.register(SiteTool(sandbox, artifacts.database))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))

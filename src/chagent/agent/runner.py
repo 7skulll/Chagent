@@ -304,11 +304,20 @@ class AgentRunner:
         if self.sandbox is not None:
             settings = self.sandbox.settings
             if settings.containerized:
-                state.environment = (
-                    "Boundary: container. Commands run inside the container, can access the network, "
-                    "and see only mounted workspaces. Maven, Java and Node are installed. "
-                    "Use process(action='read' or 'stop') for long-running commands; do not use nohup."
-                )
+                if settings.host_controller:
+                    state.environment = (
+                        "Boundary: container per workspace. Ordinary commands, tests and builds run in the "
+                        "workspace's Docker container. host_exec runs a command on the user's computer and "
+                        "needs one page approval per request; a native process started with yield_time_ms is "
+                        "managed with host_process, where every stdin write needs its own approval. "
+                        "Maven, Java and Node are installed. Do not use nohup."
+                    )
+                else:
+                    state.environment = (
+                        "Boundary: container. Commands run inside the container, can access the network, "
+                        "and see only mounted workspaces. Maven, Java and Node are installed. "
+                        "Use process(action='read' or 'stop') for long-running commands; do not use nohup."
+                    )
         if self.memory_service is not None and self.memory_service.explicit_command(state) is not None:
             # The command is answered without a model, so nothing reads the
             # workspace: skipping the scan keeps it out of large trees' way.

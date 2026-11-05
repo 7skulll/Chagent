@@ -46,5 +46,6 @@ def validate_web_runner(settings: Settings, runner) -> None:
     if (command is None or tests is None or command.sandbox is not sandbox
             or tests.sandbox is not sandbox or (not managed and not command.process_stdin)):
         raise ValueError("网页命令工具必须共用实际沙箱并支持交互输入")
-    if managed and (face.registry.get("host_exec") is None or face.registry.get("site") is None):
-        raise ValueError("宿主主控必须提供网页审批宿主执行与持续网站服务")
+    if managed and (face.registry.get("host_exec") is None or face.registry.get("host_process") is None
+                    or face.registry.get("site") is None):
+        raise ValueError("宿主主控必须提供网页审批宿主执行、宿主进程管理与持续网站服务")

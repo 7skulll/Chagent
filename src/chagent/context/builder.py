@@ -80,11 +80,12 @@ TOOLS_SECTION = (
 # a small context window is exactly where that cost is not affordable.
 MODE_SECTIONS = {
     "unified": (
-        "This session can read and edit workspace files, execute commands, run tests, and read or stop "
-        "long-running processes. Use process(action=write) to send bounded stdin or EOF to a process "
-        "started with yield_time_ms. The Boundary section states where commands run and whether network "
-        "is available. Use the tools when the task requires them "
-        "and report actual results."
+        "This session can read and edit workspace files, execute commands, run tests, and manage "
+        "long-running processes. Use process(action=write) for bounded stdin or EOF to a process "
+        "started with yield_time_ms; in the host-controller build, native processes started by "
+        "host_exec answer to host_process, and each write needs its own page approval. The Boundary "
+        "section states where commands run and whether network is available. Use the tools when "
+        "the task requires them and report actual results."
     ),
     "work": (
         "This session is work mode: it reads documents and edits workspace files, but host "

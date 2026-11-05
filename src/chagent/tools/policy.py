@@ -43,6 +43,12 @@ def subject(tool_name: str, arguments: dict) -> str:
         return f"run_tests {suite}" + (f" {selection}" if selection else "")
     if tool_name == "host_exec":
         return f"{arguments.get('command', '')} (workdir={arguments.get('workdir', '.')})"
+    if tool_name == "host_process" and arguments.get("action") == "write":
+        chars = arguments.get("chars", "")
+        return (f"host_process {arguments.get('process_id', '<missing>')} stdin "
+                f"{json.dumps(chars, ensure_ascii=False)} "
+                f"({len(str(chars).encode('utf-8'))} UTF-8 bytes); "
+                f"close_stdin={arguments.get('close_stdin', False) is True}")
     if tool_name == "process" and arguments.get("action") == "write":
         chars = arguments.get("chars", "")
         return (f"process {arguments.get('process_id', '<missing>')} stdin "
@@ -88,7 +94,11 @@ class ApprovalPolicy:
 
     def requires_approval(self, tool_name: str, arguments: dict, *, sandbox: str) -> bool:
         if sandbox == "managed-container":
-            return tool_name == "host_exec"
+            # The host controller asks for native launches and for every later
+            # write to a native process's stdin; the launch grant never covers
+            # input, and one write grant never covers a second write.
+            return tool_name == "host_exec" or (
+                tool_name == "host_process" and arguments.get("action") == "write")
         if self.mode == "never" or not self.covers(tool_name, arguments):
             return False
         # A command allowlist says nothing about bytes later sent to its stdin.
