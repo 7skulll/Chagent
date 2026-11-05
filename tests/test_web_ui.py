@@ -22,8 +22,17 @@ from pathlib import Path
 STATIC = Path(__file__).resolve().parents[1] / "src" / "chagent" / "web" / "static"
 MARKUP = (STATIC / "index.html").read_text(encoding="utf-8")
 APP = (STATIC.parent / "app.py").read_text(encoding="utf-8")
-SCRIPT = (STATIC / "app.js").read_text(encoding="utf-8") + (STATIC / "file-editor.js").read_text(encoding="utf-8")
 STYLES = (STATIC / "style.css").read_text(encoding="utf-8")
+
+#: Every page module, not just the two entry scripts. A handler that moved into
+#: views/ must still count as "attached", and an id that moved out of app.js must
+#: still be checked against the markup — otherwise splitting a file would quietly
+#: weaken the only test that links the markup to the script.
+MODULES = {
+    path.relative_to(STATIC).as_posix(): path.read_text(encoding="utf-8")
+    for path in sorted(STATIC.rglob("*.js"))
+}
+SCRIPT = "\n".join(MODULES.values())
 
 # Created by app.js at runtime (approval prompt), so it has no markup of its own.
 RUNTIME_IDS = {"approval"}
@@ -93,6 +102,16 @@ class WebSurfaceTests(unittest.TestCase):
         cls.page = _Markup()
         cls.page.feed(MARKUP)
         cls.lookups = set(re.findall(r'\$\("([A-Za-z0-9_-]+)"\)', SCRIPT))
+        #: Forms whose submit one of the modules handles, in either idiom:
+        #: `$("id").addEventListener("submit", ...)` or `on($("id"), "submit", ...)`.
+        cls.submit_forms = {
+            literal or wrapped
+            for literal, wrapped in re.findall(
+                r'(?:\$\(["\']([A-Za-z0-9_-]+)["\']\)\.addEventListener\(\s*["\']submit'
+                r'|on\(\$\(["\']([A-Za-z0-9_-]+)["\']\)\s*,\s*["\']submit)',
+                SCRIPT,
+            )
+        }
 
     def label(self, attrs):
         return attrs.get("title") or attrs.get("aria-label") or attrs.get("id") or "未命名按钮"
@@ -102,7 +121,7 @@ class WebSurfaceTests(unittest.TestCase):
         for attrs, form in self.page.buttons:
             if attrs.get("id") and attrs["id"] in self.lookups:
                 continue
-            if attrs.get("type") == "submit" and form and f'$("{form}").addEventListener("submit"' in SCRIPT:
+            if attrs.get("type") == "submit" and form and form in self.submit_forms:
                 continue
             # Delegated handler: the group is looked up and the child is chosen by
             # its data attribute, which is how a two-state switch stays one handler.
@@ -151,6 +170,60 @@ class WebSurfaceTests(unittest.TestCase):
 
     def test_no_placeholder_controls_are_left(self):
         self.assertNotIn("未开放", MARKUP)
+
+    def test_no_window_globals_carry_calls_between_modules(self):
+        """Cross-module calls are imports, not page globals.
+
+        `window.ChagentFiles?.open(...)` cannot fail: if the file panel is not
+        loaded, renamed, or thrown during evaluation, the button simply stops
+        doing anything and nothing anywhere reports it. That was the worst
+        failure mode on this page, so the ban is a test, not a convention.
+        """
+        offenders = {}
+        for name, text in MODULES.items():
+            found = set(re.findall(r"\bwindow\.Chagent\w*", text))
+            if found:
+                offenders[name] = sorted(found)
+        self.assertEqual(offenders, {}, f"模块仍在通过 window 全局互相调用：{offenders}")
+
+    def test_module_imports_respect_the_layering_rule(self):
+        """Only downward imports, never sideways.
+
+        One direction keeps the module graph acyclic and makes "which layer owns
+        this decision" answerable from the path. `run/run-render.js` may import
+        `render/` because it is the composition point of those cards; nothing
+        imports `run/` except the entry point.
+        """
+        allowed = {
+            "core": {"core"},
+            "run": {"core", "render"},
+            "render": {"core", "render"},
+            "view": {"core", "render", "run"},
+            # The entry point and the file panel it creates may import any layer:
+            # they are the composition root, not a layer of their own.
+            "shell": {"core", "render", "run", "view", "shell"},
+        }
+
+        def layer(name: str) -> str:
+            if "/" not in name:
+                # markdown.js is a leaf with no imports at all.
+                return "core" if name == "markdown.js" else "shell"
+            folder = name.split("/", 1)[0]
+            return "view" if folder == "views" else folder
+
+        violations = []
+        for name, text in MODULES.items():
+            source = layer(name)
+            for spec in IMPORT.findall(text):
+                resolved = (STATIC / name).parent / spec
+                try:
+                    target = resolved.resolve().relative_to(STATIC.resolve()).as_posix()
+                except ValueError:
+                    violations.append(f"{name} → {spec}（逃出 static/）")
+                    continue
+                if layer(target) not in allowed[source]:
+                    violations.append(f"{name} → {target}")
+        self.assertEqual(violations, [], f"跨层 import：{sorted(violations)}")
 
     def test_every_referenced_asset_is_served(self):
         """Every asset the page can load must be in the server allow-list.

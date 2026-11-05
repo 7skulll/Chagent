@@ -481,17 +481,37 @@ async def events(run_id: UUID, request: Request, current: Current, after: Sequen
     })
 
 
+#: The only paths a client may fetch under /static/. A dict literal rather than a
+#: directory read, so adding a module is an explicit line here — and so
+#: tests/test_web_ui.py can prove the page's module graph is fully listed.
+ASSETS = {
+    "index.html": "text/html", "api-docs.html": "text/html", "style.css": "text/css",
+    "main.js": "text/javascript", "app.js": "text/javascript",
+    "file-editor.js": "text/javascript", "markdown.js": "text/javascript",
+    "api-docs.js": "text/javascript",
+    "core/api.js": "text/javascript", "core/clipboard.js": "text/javascript",
+    "core/dom.js": "text/javascript", "core/format.js": "text/javascript",
+    "core/markdown.js": "text/javascript", "core/store.js": "text/javascript",
+    "run/run-reducer.js": "text/javascript", "run/run-render.js": "text/javascript",
+    "render/approval.js": "text/javascript", "render/files.js": "text/javascript",
+    "render/message.js": "text/javascript", "render/sources.js": "text/javascript",
+    "render/usage.js": "text/javascript",
+    "views/chat.js": "text/javascript", "views/config.js": "text/javascript",
+    "views/context.js": "text/javascript", "views/generated.js": "text/javascript",
+    "views/memory.js": "text/javascript", "views/sessions.js": "text/javascript",
+    "views/layout.js": "text/javascript", "views/preview.js": "text/javascript",
+    "views/uploads.js": "text/javascript", "views/workspace.js": "text/javascript",
+}
+
+
 async def asset(name: str = "index.html"):
     # An allow-list, not a directory read: the route must not become a way to
     # fetch anything else that happens to sit next to the page. Keys are the
     # only paths that exist for a client, so `..` and absolute paths have no
     # meaning here — they are simply not in the dict.
-    media = {"index.html": "text/html", "main.js": "text/javascript", "app.js": "text/javascript", "file-editor.js": "text/javascript", "markdown.js": "text/javascript",
-             "core/dom.js": "text/javascript", "core/api.js": "text/javascript",
-             "style.css": "text/css", "api-docs.html": "text/html", "api-docs.js": "text/javascript"}
-    if name not in media:
+    if name not in ASSETS:
         raise HTTPException(404)
-    return Response(files("chagent.web").joinpath("static", name).read_bytes(), media_type=media[name],
+    return Response(files("chagent.web").joinpath("static", name).read_bytes(), media_type=ASSETS[name],
                     headers={"Cache-Control": "no-cache"})
 
 

@@ -19,7 +19,6 @@ globalThis.NativeURL = RealURL;
 const events = new Map();
 window.addEventListener = (name, fn) => events.set(name, fn);
 window.dispatchEvent = event => events.get(event.type)?.(event);
-window.ChagentShowFiles = () => {};
 const rules = [];
 document.styleSheets = [{cssRules: rules, insertRule(rule) { rules.push({style: {setProperty() {}}}); return rules.length - 1; }}];
 document.documentElement = {clientWidth: 1440, clientHeight: 900};
@@ -65,12 +64,22 @@ const input = value => { el('file-editor').value = value; el('file-editor').fire
 const choice = label => { const found = el('file-choice-actions').querySelectorAll('button').find(button => button.textContent === label); assert(found, 'missing choice ' + label); found.fire('click'); };
 
 eval(readFileSync(STATIC + 'markdown.js', 'utf8'));
-window.ChagentMarkdown = globalThis.ChagentMarkdown;
-await import(pathToFileURL(STATIC + 'file-editor.js').href);
+
+/* The panel is created with its collaborators instead of reading them off the
+ * page global: a rename here fails at load, not at the first click. */
+const {initFileEditor} = await import(pathToFileURL(STATIC + 'file-editor.js').href);
+const panel = initFileEditor({
+  state: {currentWorkspace: null},
+  switchWorkspace: async () => {},
+  showFiles() {},
+  loadContext() {},
+  outputChanged() {},
+  checkPendingUploads: async () => {},
+});
 
 (async () => {
   const one = {id: 'one', path: '/one'}, two = {id: 'two', path: '/two'};
-  window.ChagentFiles.workspace(one); await tick(); await window.ChagentFiles.open('one', 'a.md');
+  panel.workspace(one); await tick(); await panel.open('one', 'a.md');
   input('# submitted\n');
   assert(FILES.get('one/a.md').content === '# original\r\n', 'editing wrote to disk');
   assert(el('file-state').textContent.includes('未保存'), 'missing dirty marker');
@@ -84,26 +93,26 @@ await import(pathToFileURL(STATIC + 'file-editor.js').href);
   el('file-save').fire('click'); await tick();
   assert(!el('file-conflict').hidden, 'old revision save should show conflict');
   assert(el('file-editor').value === '# typed during save\n', 'conflict lost draft');
-  const switching = window.ChagentFiles.beforeWorkspace('/two'); await tick();
+  const switching = panel.beforeWorkspace('/two'); await tick();
   assert(el('file-choice-dialog').open, 'workspace switch bypassed dirty prompt'); choice('取消');
   assert(await switching === false, 'cancel did not cancel switch');
   assert(el('file-editor').value === '# typed during save\n', 'cancel changed draft');
   el('file-tabs').querySelectorAll('button').find(button => button.textContent === '×').fire('click'); await tick();
   choice('取消'); await tick(); assert(el('file-path').textContent === 'a.md', 'cancel closed tab');
-  const changing = window.ChagentFiles.beforeWorkspace('/two'); await tick(); choice('放弃修改'); assert(await changing, 'discard failed');
-  window.ChagentFiles.workspace(two); await tick(); await window.ChagentFiles.open('two', 'a.md');
+  const changing = panel.beforeWorkspace('/two'); await tick(); choice('放弃修改'); assert(await changing, 'discard failed');
+  panel.workspace(two); await tick(); await panel.open('two', 'a.md');
   assert(el('file-editor').value === '# workspace two\n', 'same-name cross-workspace draft leaked');
   input('<script>alert(1)</script>\n'); el('file-markdown').fire('click');
   assert(el('file-markdown-view').innerHTML.includes('&lt;script&gt;'), 'Markdown preview executed markup');
   const previous = entryRequests.filter(id => id === 'two').length;
-  holdEntries = true; window.ChagentFiles.workspace(one); await tick();
+  holdEntries = true; panel.workspace(one); await tick();
   assert(releaseEntries, 'old workspace directory request was not held');
-  window.ChagentFiles.workspace(two); await tick();
+  panel.workspace(two); await tick();
   assert(entryRequests.filter(id => id === 'two').length > previous, 'old refresh blocked the new workspace');
   releaseEntries(); await tick();
   const names = el('file-tree').querySelectorAll('button').map(button => button.textContent);
   assert(names.some(name => name.includes('two.txt')) && !names.some(name => name.includes('one.txt')), 'old directory response leaked into new workspace');
-  await window.ChagentFiles.open('two', 'pages.pdf');
+  await panel.open('two', 'pages.pdf');
   assert(el('file-editor').hidden && !el('file-preview').hidden, 'PDF opened as editable text');
   assert(el('file-save').disabled && el('file-save-as').disabled, 'binary preview permits text saving');
   assert(el('preview-image').src.includes('page=1'), 'first PDF page was not selected');
@@ -116,10 +125,10 @@ await import(pathToFileURL(STATIC + 'file-editor.js').href);
   el('preview-image').onerror(); assert(!el('preview-error').hidden, 'preview decode error missing');
   el('preview-retry').fire('click'); await tick(); assert(el('preview-error').hidden, 'retry did not reload preview');
   preview.kind = 'unsupported'; preview.reason = 'unsupported format';
-  await window.ChagentFiles.open('two', 'image.heic'); assert(el('preview-image').hidden, 'unsupported format rendered inline');
+  await panel.open('two', 'image.heic'); assert(el('preview-image').hidden, 'unsupported format rendered inline');
   assert(el('preview-note').textContent === 'unsupported format', 'missing format explanation');
   pendingRows = [{id: 'out', path: 'a.md', size: 3, status: 'pending', token: 'nonce'}];
-  await window.ChagentFiles.refresh();
+  await panel.refresh();
   el('file-confirmations').querySelectorAll('button').find(button => button.textContent === '覆盖').fire('click'); await tick();
   const actions = el('file-confirmations').querySelectorAll('button');
   assert(actions.length && actions.every(button => !button.disabled), 'temporary confirmation failure left controls disabled');

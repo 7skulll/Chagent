@@ -30,6 +30,7 @@ from pathlib import Path
 
 NODE = shutil.which("node")
 SCRIPT = Path(__file__).resolve().parent / "js" / "render-page.mjs"
+REPLAY = Path(__file__).resolve().parent / "js" / "replay-page.mjs"
 
 
 @unittest.skipUnless(NODE, "node is not installed")
@@ -41,6 +42,24 @@ class PageRenderTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         problems = json.loads(result.stdout)
         self.assertEqual(problems, [], "页面渲染或交互失败：" + "；".join(problems))
+
+
+    def test_the_streamed_run_renders_the_same_however_it_is_replayed(self):
+        """Replay equivalence for the converged run renderer.
+
+        ``replay-page.mjs`` reduces a fixed event list through
+        ``run/run-reducer.js`` and paints it with ``run/run-render.js``: once at
+        the end, once after every event, and once more into a fresh renderer. All
+        three must produce the same DOM, painting twice must change nothing, and
+        the streamed paragraph must be byte-identical to what the message
+        renderer produces for the same text. That last check is the one that
+        would have caught the old "looks right while streaming, different after
+        a refresh" class of defect.
+        """
+        result = subprocess.run([NODE, str(REPLAY)], capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        problems = json.loads(result.stdout)
+        self.assertEqual(problems, [], "运行流渲染不一致：" + "；".join(problems))
 
 
 if __name__ == "__main__":
