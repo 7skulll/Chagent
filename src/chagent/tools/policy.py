@@ -97,3 +97,30 @@ class ApprovalPolicy:
         # on-request: sandboxed execution is inside the configured permission;
         # unsandboxed execution is not.
         return sandbox == "off"
+
+
+#: Tools that change the workspace, which is a bind mount of the user's own
+#: directory once the container is in the picture. Kept equal to
+#: ``tools.builtin.WRITE_TOOLS`` by a test: that set decides which tools may
+#: exist, this one decides which need a human, and they must name the same
+#: tools even though they answer different questions. ``create_file`` is absent
+#: on purpose: it already stops at a host confirmation when a name collides.
+FILE_WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "create_directory"})
+
+#: Where a *new* file is as consequential as an overwrite. Git hooks and CI
+#: workflows run later without anyone re-reading them, and package or shell
+#: configuration decides what executes the next time the user types a command.
+SENSITIVE_DIRS = frozenset({".git", ".github", ".husky", ".devcontainer", ".vscode", ".idea"})
+SENSITIVE_NAMES = frozenset({".npmrc", ".pypirc", ".netrc", ".gitconfig", ".bashrc", ".zshrc",
+                             ".profile", ".bash_profile", ".config"})
+
+
+def sensitive_path(relative: str) -> bool:
+    """Whether creating this path is a decision rather than a scratch write."""
+    parts = [part for part in relative.replace("\\", "/").split("/") if part not in ("", ".")]
+    if not parts:
+        return False
+    if parts[0] in SENSITIVE_DIRS:
+        return True
+    name = parts[-1]
+    return name in SENSITIVE_NAMES or name == ".env" or name.startswith(".env.")

@@ -42,6 +42,23 @@ UNWATCHED = ("No browser page was waiting for this command, so it was not execut
 STALE = ("The approval was no longer valid when the tool was about to start (expired, already "
          "used, or the invocation changed); it was not executed.")
 
+# A write is not a command, and the refusal has to read that way: nothing was
+# executed, the file is untouched, and resending the same content is not the
+# answer. Kept next to the command wording so the two cannot drift apart.
+WRITE_REFUSALS = {
+    "denied": ("The user declined this change, so the file was not modified. This is a decision about "
+               "the edit, not a tool failure. Do not resend the same change; ask what should be different."),
+    "expired": ("No one approved this change before the deadline, so the file was not modified. Asking "
+                "again will ask again; do not slip the same content through a different path."),
+    "unwatched": ("No browser page was waiting for this change, so the file was not modified. The user "
+                  "was not there to answer, which says nothing about the edit itself; ask whether they "
+                  "still want it."),
+    "cancelled": "The run ended while this change was waiting for approval; the file was not modified.",
+    "unavailable": "No approver is available for this change, so the file was not modified.",
+    "stale": ("The approval was no longer valid when the edit was about to start (expired, already "
+              "used, or the content changed); the file was not modified."),
+}
+
 ApprovalDecider = Callable[[ApprovalRequest], Awaitable[bool | None]]
 
 
@@ -71,10 +88,12 @@ class ApprovalBroker:
 
     async def request(self, *, run_id: UUID, tool_record_id: UUID, tool_name: str,
                       arguments: dict, cwd: str,
-                      signal: asyncio.Event | None = None, budget=None) -> ApprovalOutcome:
+                      signal: asyncio.Event | None = None, budget=None,
+                      subject: str | None = None) -> ApprovalOutcome:
         request = await self.approvals.create(
             run_id=run_id, tool_record_id=tool_record_id, fingerprint=fingerprint(tool_name, arguments, cwd),
-            tool_name=tool_name, cwd=cwd, subject=subject_of(tool_name, arguments), ttl=self.timeout)
+            tool_name=tool_name, cwd=cwd, subject=subject or subject_of(tool_name, arguments),
+            ttl=self.timeout)
         asked = False
         unwatched_since: float | None = None
         # A human deciding is not the run spending its execution budget.

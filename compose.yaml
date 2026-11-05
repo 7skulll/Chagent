@@ -30,7 +30,10 @@ services:
       CHAGENT_SANDBOX_WRITABLE: "true"
       CHAGENT_CODE_MODE: "on"
       CHAGENT_ALLOW_HOST_COMMANDS: "true"
-      CHAGENT_APPROVAL: never
+      # The workspace is a bind mount of the host directory, so a command and an
+      # overwrite both land on the user's machine. Ask by default; set
+      # CHAGENT_APPROVAL=never explicitly for an unattended run.
+      CHAGENT_APPROVAL: "untrusted"
     volumes:
       - type: bind
         source: ${CHAGENT_WORKSPACES:?Set CHAGENT_WORKSPACES to an existing absolute directory}

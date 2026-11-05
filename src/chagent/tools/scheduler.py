@@ -14,7 +14,7 @@ from chagent.storage.repositories import RunRepository
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
 from chagent.tools.approvals import STALE, ApprovalBroker
-from chagent.tools.gate import HumanGate, ToolGate
+from chagent.tools.gate import HumanGate, ToolGate, WriteGate
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.policy import ApprovalPolicy
 from chagent.tools.progress import ProgressGuard, Decision
@@ -89,6 +89,18 @@ class ToolScheduler:
 
     def release(self, run_id: UUID) -> None:
         self.progress.release(run_id)
+
+    def default_gates(self) -> tuple[ToolGate, ...]:
+        """The questions a run asks when approvals are on.
+
+        Commands and workspace writes answer different questions, so they stay
+        two gates: a shape may allow one and still want the other. ``never``
+        asks neither, which is what keeps an upgrade from blocking existing runs.
+        """
+        if self.policy.mode == "never":
+            return ()
+        return (HumanGate(self.policy, self.approvals, self.sandbox_mode),
+                WriteGate(self.policy, self.approvals))
 
     async def cancel_approvals(self, run_id: UUID) -> None:
         if self.approvals is not None:
@@ -293,9 +305,7 @@ class ToolScheduler:
         """Run optional gates before taking execution resources."""
         refused: dict[int, object] = {}
         grants: dict[int, UUID] = {}
-        gates = self.gates if self.gates is not None else (
-            (HumanGate(self.policy, self.approvals, self.sandbox_mode),)
-            if self.policy.mode != "never" else ())
+        gates = self.gates if self.gates is not None else self.default_gates()
         for index in indices:
             call = calls[index]
             for gate in gates:

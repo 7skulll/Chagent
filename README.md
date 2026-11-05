@@ -8,6 +8,8 @@
 
 当前生产网页接受 `boundary=container`、`capability=full`，`gate` 可为 `none` 或 `approval`；两者都要求显式声明并通过实际容器检查。`configured` 与只读工作区不会被自动提升。三轴由开关推导，不单独设置。完整行为见[统一可编程执行契约](docs/统一可编程执行契约.md)。
 
+`gate=approval` 同时管两件事：执行类调用（`exec_command`、`run_tests`、`process(write)`）和**会覆盖工作区文件的写入**（`write_file`、`edit_file`、`apply_patch`）。工作区是宿主目录的 bind 挂载，一次覆盖写入不经过任何命令就直接改你的真实文件，所以写入按不可逆性分级审批：新建普通文件不问，覆盖、打补丁、以及在新钩子/配置路径放入文件才问。`compose.yaml` 默认取 `gate=approval`；无人值守运行需显式设 `CHAGENT_APPROVAL=never`。
+
 统一工具面复用现有 Runner、文件与命令工具。容器路径已用真实模型完成 Spring Boot 项目创建、构建、启动和 HTTP 验证；旧 seatbelt 执行路径已移除。此前按模式交付的验收记录仍保留作历史证据；当前行为以本页和代码为准。
 
 ## 启动
