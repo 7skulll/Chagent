@@ -150,6 +150,21 @@ export function reduce(state, event) {
     case "memory_write_failed":
       return notice(state, "本次记忆整理未完成，回答已保留。", true);
 
+    case "workspace_manifest_after": {
+      const changes = payload?.diff;
+      if (!changes) return notice(state, "工作区结束清单已记录；起始清单不可用，无法计算差异。", true);
+      const {added, modified, deleted} = changes.counts;
+      const paths = [...changes.added, ...changes.modified, ...changes.deleted]
+        .slice(0, 12).map(item => item.path).join("、");
+      const suffix = paths ? `：${paths}${added + modified + deleted > 12 ? " 等" : ""}` : "";
+      return notice(state,
+        `工作区文件差异（已记录）：新增 ${added}，修改 ${modified}，删除 ${deleted}${suffix}${changes.complete ? "" : "；扫描不完整，请查看运行记录"}`,
+        !changes.complete);
+    }
+
+    case "workspace_manifest_error":
+      return notice(state, "工作区文件清单未能完整记录，请查看运行记录。", true);
+
     default:
       // Unknown event types are ignored rather than fatal: the server owns the
       // event vocabulary, and a page that throws on a new one loses the run.

@@ -377,7 +377,8 @@ async def active_runs(current: Current, active: bool = True):
 
 @api.get("/runs/{run_id}", response_model=RunView, tags=["运行"])
 async def run_detail(run_id: UUID, current: Current):
-    return await current.run(run_id)
+    run = await current.run(run_id)
+    return {**run, "file_diff": await current.runner.runs.file_diff(run_id)}
 
 
 @api.get("/runs/{run_id}/approvals", tags=["运行"])

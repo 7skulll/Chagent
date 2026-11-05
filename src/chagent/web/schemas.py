@@ -319,6 +319,7 @@ class RunView(BaseModel):
     waiting_for: Literal["approval"] | None = None
     approval_id: UUID | None = None
     approval: dict | None = None
+    file_diff: dict | None = None
 
 
 class ApprovalDecision(BaseModel):

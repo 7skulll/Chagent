@@ -265,6 +265,8 @@ class MemoryService:
                 "created_at = now(), ended_at = NULL",
                 (identity, job.run_id, PROMPT_VERSION, Jsonb(asdict(request))))
         await self.runs.audit_event(job.run_id, "memory_extraction_started", {"extraction_id": str(identity)})
+        request.workspace = (await self.conversations.get_session(job.session_id)).workspace
+        request.run_id = job.run_id
         try:
             try:
                 async with asyncio.timeout(self.policy.timeout):

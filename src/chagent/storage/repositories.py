@@ -794,6 +794,15 @@ class RunRepository:
             )
             return await cursor.fetchall()
 
+    async def file_diff(self, run_id: UUID) -> dict | None:
+        """Read the durable final inventory without paging through the event stream."""
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT payload FROM run_events WHERE run_id = %s "
+                "AND type = 'workspace_manifest_after' ORDER BY sequence DESC LIMIT 1", (run_id,))
+            row = await cursor.fetchone()
+            return row["payload"].get("diff") if row is not None else None
+
     async def terminal_sequence(self, run_id: UUID) -> int | None:
         async with self.database.connection() as connection:
             cursor = await connection.execute(

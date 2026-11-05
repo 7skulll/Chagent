@@ -10,6 +10,7 @@ from chagent.context.tokens import TokenCounter, select_counter
 from chagent.memory.worker import MemoryWorker
 from chagent.models.base import Model, ModelClient
 from chagent.models.fake import FakeModelClient
+from chagent.models.http import HTTPModelClient
 from chagent.storage.database import Database
 from chagent.storage.memory_jobs import MemoryJobRepository
 from chagent.storage.repositories import ConversationRepository, RunRepository
@@ -184,6 +185,10 @@ def create_runner(
                                   counter=token_counter or select_counter(model))
     conversations = ConversationRepository(database)
     runs = RunRepository(database, inline_bytes=inline_bytes_for(builder.input_budget(model)))
+    if isinstance(client, HTTPModelClient):
+        async def outbound_audit(run_id, purpose):
+            await runs.audit_event(run_id, "model_export_blocked", {"purpose": purpose, "reason": "protected_path"})
+        client.outbound_audit = outbound_audit
     jobs = MemoryJobRepository(database)
     memory_service = MemoryService(MemoryRepository(database), conversations, runs, builder.counter,
                                    policy=memory_policy, jobs=jobs)

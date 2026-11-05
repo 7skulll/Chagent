@@ -114,7 +114,7 @@ class ContextCompactor:
 
     async def compact(self, *, model: Model, client: ModelClient, turns: list[list[StoredMessage]],
                       previous: str, limit: int, compaction_id: UUID, run_id: UUID,
-                      task_input: str = "") -> tuple[str, Usage | None]:
+                      task_input: str = "", workspace=None) -> tuple[str, Usage | None]:
         serialized = [serialize_turn(turn) for turn in turns]
         # Evidence from an earlier summary is re-derived from these turns, so it
         # must not be carried into the next summary as if it were a fact.
@@ -138,6 +138,8 @@ class ContextCompactor:
                     raise CompactionError("One completed turn exceeds the summarization input budget")
                 request = self.request(model, previous, serialized[index:end], limit, task_input)
                 identity = await self.summaries.start_call(compaction_id, run_id, calls, request)
+                request.workspace = workspace
+                request.run_id = run_id
                 started = monotonic_ns()
                 response = None
                 try:

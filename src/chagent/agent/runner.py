@@ -29,6 +29,7 @@ from chagent.tools.executor import ToolExecutor
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
 from chagent.tools.scheduler import ToolScheduler
+from chagent.workspace_manifest import snapshot, diff
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ class AgentRunner:
         # Session processes outlive their invocation, never their run.
         self.processes = None
         self._workspace_identities = {}
+        self._manifest_after_recorded: set[UUID] = set()
 
     def cancel(self, run_id: UUID) -> bool:
         task = self._tasks.get(run_id)
@@ -139,12 +141,16 @@ class AgentRunner:
         # not the run spending its execution time (see agent/budget.py).
         budget = RunBudget(self.timeout, lambda: task.cancel() if task is not None else None,
                            wall_seconds=self.wall_timeout)
+        manifest_root = None
+        manifest_before = None
         try:
             budget.start()
             if on_started is not None:
                 on_started(run_id)
             state = await self._load_state(run_id, session_id)
             self._states[run_id] = state
+            manifest_root = state.session.workspace
+            manifest_before = await self._record_manifest_before(run_id, manifest_root)
             command = (self.memory_service.explicit_command(state)
                        if self.memory_service is not None else None)
             result = (await self._explicit_memory(state, command) if command is not None
@@ -154,6 +160,7 @@ class AgentRunner:
                 # enqueues a job so this answer never waits for a second model call.
                 await self.memory_service.on_completed(
                     connection, session_id, run_id, state=state, has_answer=result.message is not None)
+            await self._record_manifest_after(run_id, manifest_root, manifest_before)
             await self.runs.finish(run_id, "completed", end_reason=result.end_reason,
                                    on_completed=commit if self.memory_service is not None else None)
             if self.memory_worker is not None and result.message is not None:
@@ -162,9 +169,11 @@ class AgentRunner:
             if heartbeat_error is not None:
                 raise RunFailedError(run_id, "Run heartbeat failed; ownership is uncertain", "storage_error") from heartbeat_error
             if budget.expired:
-                await self._close_if_running(run_id, "failed", "Run exceeded its time budget", "run_timeout")
+                await self._close_if_running(run_id, "failed", "Run exceeded its time budget", "run_timeout",
+                                             manifest_root, manifest_before)
                 raise RunFailedError(run_id, "Run exceeded its time budget", "run_timeout") from None
-            await self._close_if_running(run_id, "cancelled", "Run cancelled", "user_cancelled")
+            await self._close_if_running(run_id, "cancelled", "Run cancelled", "user_cancelled",
+                                         manifest_root, manifest_before)
             raise
         except RunOwnershipLost as error:
             raise RunFailedError(run_id, str(error), "storage_error") from error
@@ -181,7 +190,7 @@ class AgentRunner:
             else:
                 end_reason = "execution_error"
             status = "cancelled" if end_reason == "model_aborted" else "failed"
-            await self._close_if_running(run_id, status, reason, end_reason)
+            await self._close_if_running(run_id, status, reason, end_reason, manifest_root, manifest_before)
             raise RunFailedError(run_id, reason, end_reason) from error
         else:
             return result
@@ -217,6 +226,7 @@ class AgentRunner:
             self.runs.database.run_owners.pop(run_id, None)
             self._tasks.pop(run_id, None)
             self._states.pop(run_id, None)
+            self._manifest_after_recorded.discard(run_id)
             if self.context_manager is not None:
                 self.context_manager.release(run_id)
             try:
@@ -249,7 +259,32 @@ class AgentRunner:
             return True
         return counter.count(messages) <= budget_of(self.model)
 
-    async def _close_if_running(self, run_id: UUID, status: str, reason: str, end_reason: RunEndReason) -> None:
+    async def _record_manifest_before(self, run_id: UUID, root) -> dict | None:
+        try:
+            before = await asyncio.to_thread(snapshot, root)
+            await self.runs.event(run_id, "workspace_manifest_before", before)
+            return before
+        except (OSError, ValueError) as error:
+            logger.warning("Could not inventory workspace before run (%s)", type(error).__name__)
+            await self.runs.event(run_id, "workspace_manifest_error",
+                                  {"phase": "before", "reason": type(error).__name__})
+            return None
+
+    async def _record_manifest_after(self, run_id: UUID, root, before: dict | None) -> None:
+        if run_id in self._manifest_after_recorded or root is None:
+            return
+        try:
+            after = await asyncio.to_thread(snapshot, root)
+            summary = diff(before, after) if before is not None else None
+            await self.runs.event(run_id, "workspace_manifest_after", {**after, "diff": summary})
+            self._manifest_after_recorded.add(run_id)
+        except (OSError, ValueError) as error:
+            logger.warning("Could not inventory workspace after run (%s)", type(error).__name__)
+            await self.runs.event(run_id, "workspace_manifest_error",
+                                  {"phase": "after", "reason": type(error).__name__})
+
+    async def _close_if_running(self, run_id: UUID, status: str, reason: str, end_reason: RunEndReason,
+                                manifest_root=None, manifest_before: dict | None = None) -> None:
         """Close a run from an exception handler without leaking storage errors.
 
         ``finish`` re-checks ownership, and an exception raised inside an
@@ -262,6 +297,12 @@ class AgentRunner:
         if row is None or row["status"] != "running":
             return
         try:
+            try:
+                await self._record_manifest_after(run_id, manifest_root, manifest_before)
+            except (DatabaseError, PoolTimeout):
+                # An already failed event buffer can still be dropped by finish.
+                # Preserve the original storage failure and terminal run event.
+                logger.warning("Could not persist final workspace inventory after storage failure")
             await self.runs.finish(run_id, status, reason, end_reason=end_reason)
         except RunOwnershipLost as error:
             raise RunFailedError(run_id, str(error), "storage_error") from error
@@ -400,6 +441,10 @@ class AgentRunner:
                 if not self._note_fits(messages):
                     messages.pop()
             model_call_id = await self.runs.start_model_call(run_id, iteration, built)
+            # Local outbound metadata is deliberately absent from the stored
+            # model-call request, which remains an audit of the raw transcript.
+            built.request.workspace = state.session.workspace
+            built.request.run_id = run_id
             state.active_model_call_id = model_call_id
             message = await self._response(run_id, built.request)
             record = await self.runs.save_response(run_id, session_id, model_call_id, message)
@@ -421,6 +466,9 @@ class AgentRunner:
                 raise RunExecutionError("Tool calls require toolUse stop reason", "model_protocol_error")
             if len({call.id for call in calls}) != len(calls):
                 raise RunExecutionError("Duplicate tool call IDs in one response", "model_protocol_error")
+            from chagent.models.outbound import invocation_to_host
+            for call in calls:
+                call.arguments = invocation_to_host(call.arguments, state.session.workspace)
             batch = await self.scheduler.execute_batch(calls, context=tool_context, model_call_id=model_call_id,
                                                         executor=executor, on_committed=state.append_committed,
                                                         budget=budget)

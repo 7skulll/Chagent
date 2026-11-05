@@ -59,6 +59,48 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             cursor = await connection.execute("SELECT count(*) AS n FROM model_calls")
             self.assertEqual((await cursor.fetchone())["n"], 0)
 
+    async def test_protected_source_in_input_is_blocked_and_audited_before_network(self):
+        import httpx
+        from chagent.boundaries import protected_source
+        from chagent.bootstrap import create_runner
+        from chagent.models.factory import create_model_client
+        from chagent.models.settings import ModelSettings
+        settings = ModelSettings.from_env({"CHAGENT_PROVIDER": "openai", "OPENAI_API_KEY": "test-secret"})
+        sent = []
+        def transport(request):
+            sent.append(request)
+            return httpx.Response(400)
+        async with create_model_client(settings, transport=httpx.MockTransport(transport)) as client:
+            runner = create_runner(self.database, settings.model(), client)
+            with self.assertRaises(RunFailedError) as failure:
+                await runner.run(self.session, f"请读取 {protected_source()}")
+        self.assertEqual(sent, [])
+        events = await runner.runs.events(failure.exception.run_id)
+        self.assertEqual(sum(event["type"] == "model_export_blocked" for event in events), 1)
+
+    async def test_virtual_workspace_file_argument_executes_in_session_root(self):
+        root = Path(self.workspace_directory.name)
+        (root / "notes.txt").write_text("virtual-path-ok", encoding="utf-8")
+        runner = create_demo_runner(self.database, tool_name="read_file",
+                                    tool_arguments={"path": "/workspace/notes.txt"})
+        result = await runner.run(self.session, "read")
+        self.assertEqual(result.end_reason, "model_stop")
+        self.assertIn("virtual-path-ok", result.message.content[0].text)
+
+    async def test_run_records_real_file_change(self):
+        root = Path(self.workspace_directory.name)
+        runner = create_demo_runner(self.database, tool_name="write_file",
+                                    tool_arguments={"path": "site.txt", "content": "built"})
+        result = await runner.run(self.session, "build")
+        self.assertEqual((root / "site.txt").read_text(), "built")
+        events = await runner.runs.events(result.run_id)
+        before = next(event["payload"] for event in events if event["type"] == "workspace_manifest_before")
+        after = next(event["payload"] for event in events if event["type"] == "workspace_manifest_after")
+        self.assertEqual(before["files"], [])
+        self.assertEqual(after["diff"]["counts"], {"added": 1, "modified": 0, "deleted": 0})
+        self.assertEqual(after["diff"]["added"][0]["path"], "site.txt")
+        self.assertEqual(await runner.runs.file_diff(result.run_id), after["diff"])
+
     async def test_workspace_replaced_between_runs_is_refused(self):
         workspace = Path(self.workspace_directory.name)
         await self.runner.run(self.session, "first")
@@ -83,6 +125,11 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         events = await self.runner.runs.events(result.run_id)
         self.assertEqual([event["sequence"] for event in events], list(range(1, len(events) + 1)))
         self.assertEqual(events[-1]["type"], "run_completed")
+        self.assertIn("workspace_manifest_before", [event["type"] for event in events])
+        self.assertEqual(events[-2]["type"], "workspace_manifest_after")
+        self.assertEqual(await self.runner.runs.file_diff(result.run_id),
+                         {"complete": True, "added": [], "modified": [], "deleted": [],
+                          "counts": {"added": 0, "modified": 0, "deleted": 0}})
         restored = await ConversationRepository(self.database).messages(self.session)
         self.assertEqual([item.message.role for item in restored], ["user", "assistant", "toolResult", "assistant"])
         self.assertIsInstance(restored[2].message, ToolResultMessage)
@@ -356,7 +403,8 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         recorded = await self.runner.runs.events(raised.exception.run_id)
         # The environment snapshot is projected before the context is built, so it
         # is audited even for a run that never reaches the model.
-        events = [item for item in recorded if item["type"] != "environment_projected"]
+        events = [item for item in recorded if item["type"] not in {
+            "environment_projected", "workspace_manifest_before", "workspace_manifest_after"}]
         self.assertEqual([item["type"] for item in events], ["run_started", "context_rejected", "run_failed"])
         rejection = events[1]["payload"]
         self.assertGreater(rejection["required_tokens"], rejection["input_budget"])

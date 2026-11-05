@@ -3,6 +3,8 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Literal, Protocol
+from pathlib import Path
+from uuid import UUID
 
 from chagent.domain.messages import Message
 from chagent.models.events import AssistantMessageEvent
@@ -33,6 +35,8 @@ class ModelRequest:
     max_tokens: int | None = None
     temperature: float | None = None
     purpose: Literal["task", "summary", "memory"] = "task"
+    workspace: Path | None = None
+    run_id: UUID | None = None
 
 
 class ModelClient(Protocol):

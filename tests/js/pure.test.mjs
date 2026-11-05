@@ -189,6 +189,14 @@ test("an unknown event does not repaint", () => {
   assert.equal(reduce(state, event("something_new", {})), state);
 });
 
+test("the final file notice uses persisted diff counts and paths", () => {
+  const state = reduce(initialRunState("r1"), event("workspace_manifest_after", {
+    diff: {complete: true, counts: {added: 1, modified: 0, deleted: 0},
+      added: [{path: "index.html"}], modified: [], deleted: []},
+  }));
+  assert.match(state.items[0].text, /新增 1，修改 0，删除 0：index.html/);
+});
+
 test("the same events always produce the same state", () => {
   const events = [
     event("model_started"),
