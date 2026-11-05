@@ -13,6 +13,7 @@ from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
 
 from chagent.agent.runner import RunFailedError
+from chagent.agent.turn_note import last_request_message
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
 from chagent.domain.memories import MemoryPolicy
@@ -43,7 +44,7 @@ class BatchClient(FakeModelClient):
 
     async def stream(self, request):
         self.requests.append(deepcopy(request))
-        if isinstance(request.messages[-1], UserMessage):
+        if isinstance(last_request_message(request.messages), UserMessage):
             message = AssistantMessage([], request.model.api, request.model.provider, request.model.id, 0, "pending")
             yield StartEvent(message)
             message = deepcopy(message)

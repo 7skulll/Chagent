@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -8,6 +9,7 @@ from uuid import uuid4
 from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
 
+from chagent.agent.runner import RunFailedError
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
 from chagent.domain.codec import message_from_dict
@@ -43,6 +45,27 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
 
     async def drop_schema(self):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
+
+    async def test_turn_limit_history_is_replayed_by_the_next_run(self):
+        """A run that ran out of turns leaves a usable transcript.
+
+        ``turn_limit`` is raised after a committed tool batch, so the next run
+        must see that history instead of starting blind and re-reading it.
+        Ordinary failures stay out of replay; test_runner covers that side.
+        """
+        runner = create_demo_runner(self.database, max_turns=1)
+        session = await self.manager.create(self.workspace, "replay")
+        with self.assertRaises(RunFailedError):
+            await runner.run(session.id, "FIRST-TASK-CONTEXT")
+        with self.assertRaises(RunFailedError) as second:
+            await runner.run(session.id, "SECOND-TASK-CONTEXT")
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT request FROM model_calls WHERE run_id = %s ORDER BY iteration LIMIT 1",
+                (second.exception.run_id,))
+            request = json.dumps((await cursor.fetchone())["request"])
+        self.assertIn("FIRST-TASK-CONTEXT", request)
+        self.assertIn("SECOND-TASK-CONTEXT", request)
 
     async def test_session_pages_workspace_filter_rename_and_restore(self):
         second = await self.manager.create(self.workspace, "second")

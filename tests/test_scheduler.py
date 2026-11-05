@@ -14,6 +14,7 @@ from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
 
 from chagent.agent.runner import RunFailedError
+from chagent.agent.turn_note import last_request_message
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
 from chagent.domain.memories import MemoryPolicy
@@ -34,7 +35,7 @@ class CallsClient:
         message = AssistantMessage([], "fake", "test", "test", 0, "pending")
         yield StartEvent(message)
         message = deepcopy(message)
-        if isinstance(request.messages[-1], UserMessage):
+        if isinstance(last_request_message(request.messages), UserMessage):
             message.content, message.stop_reason = deepcopy(self.calls), "toolUse"
         else:
             message.content, message.stop_reason = [TextContent("batch complete")], "stop"

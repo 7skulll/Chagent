@@ -60,11 +60,11 @@ DEFAULT_INSTRUCTIONS = ("You are Chagent, a helpful assistant. Respond to the us
 
 # Tool guidance has its own section so prompt changes remain auditable.
 TOOLS_SECTION = (
-    "Only the tools declared in this request are available. Do not claim you can edit files, "
-    "execute commands, browse, or perform other actions unless the corresponding tool is available. "
-    "For file tasks, inspect relevant files as needed. If edit_file is available, batch related edits "
-    "and verify once. If create_file is available and the user asks "
-    "for a downloadable text file, use it with complete content and a descriptive filename."
+    "Only these tools exist; do not claim an action you cannot take. For file tasks, inspect "
+    "what you need; if edit_file is available, batch related edits and verify once. If "
+    "create_file is available and a file is requested, write complete content under a "
+    "descriptive filename. Independent calls belong in one response: send reads and searches "
+    "together when they do not depend on each other; dependent calls stay sequential."
 )
 
 # The tool list alone is a weak signal: a model that cannot find ``exec_command``
@@ -192,6 +192,15 @@ class BasicContextBuilder:
                       and isinstance(item.message, UserMessage))]
         self._validate(sliced)
         return sliced
+
+    def input_budget(self, model: Model) -> int:
+        """Tokens this model can carry in one request, after the reply reservation.
+
+        Exposed so the tool-result threshold can scale with the same number the
+        selection phase enforces, instead of hard-coding a second opinion about
+        how much context there is.
+        """
+        return self._limits(model)[1]
 
     def _limits(self, model: Model) -> tuple[int, int]:
         """Reserve the reply and the safety margin; refuse an impossible budget."""

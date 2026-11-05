@@ -147,6 +147,21 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT iteration, request FROM model_calls WHERE run_id = %s ORDER BY iteration", (result.run_id,))
             rows = await cursor.fetchall()
         self.assertEqual([row["iteration"] for row in rows], [0, 1])
+
+    async def test_progress_note_is_attached_from_the_second_turn(self):
+        """The model cannot plan against a horizon it is never told about."""
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            session = await self.runner.conversations.create_session(workspace)
+            result = await self.runner.run(session, "第一轮")
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT iteration, request FROM model_calls WHERE run_id = %s ORDER BY iteration", (result.run_id,))
+            rows = await cursor.fetchall()
+        first, second = (json.dumps(row["request"], ensure_ascii=False) for row in rows[:2])
+        self.assertNotIn("[turn ", first, "the opening turn has no tool result to attach it to")
+        self.assertIn("[turn 2/", second)
+        self.assertIn("not a new request", second)
         system = [message_from_dict(row["request"]["messages"][0]).text() for row in rows]
         self.assertEqual(system[0], system[1])
         self.assertNotIn(str(workspace.resolve()), system[0])
@@ -378,7 +393,11 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                         delta = {"tool_calls": [{"index": 0, "id": "tool-one", "type": "function", "function": {"name": "echo", "arguments": '{"text":"from network"}'}}]}
                         stop = "tool_calls"
                     else:
-                        self.assertEqual(body["messages"][-1]["content"], "from network")
+                        # The runner appends its turn note as a trailing user
+                        # message, so the tool result is the last message with
+                        # role "tool", not simply the last message.
+                        tool_messages = [item for item in body["messages"] if item.get("role") == "tool"]
+                        self.assertEqual(tool_messages[-1]["content"], "from network")
                         delta, stop = {"content": "provider completed"}, "stop"
                     event = {"choices": [{"index": 0, "delta": delta, "finish_reason": stop}],
                              "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}

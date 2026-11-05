@@ -179,6 +179,13 @@ class ToolScheduler:
                     reporter.add_done_callback(report_failure)
 
             started = monotonic_ns()
+            # Waiting for a command is not the run spending its thinking budget.
+            # A verified Maven build alone can outlast a short run ceiling, and
+            # every tool keeps its own timeout, so pausing here cannot leave a
+            # run waiting without a bound. Counted by ``RunBudget`` because a
+            # parallel batch pauses once per running tool.
+            if budget is not None:
+                budget.pause()
             try:
                 result = await executor.execute(call, context=context, signal=signal, on_update=on_update)
                 self.progress.completed(context.run_id, call, executor.registry.get(call.name), result)
@@ -192,6 +199,8 @@ class ToolScheduler:
                     await updates.put(None)
                     await reporter
             finally:
+                if budget is not None:
+                    budget.resume()
                 accepting = False
                 if reporter is not None:
                     if not reporter.done():

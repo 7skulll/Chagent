@@ -14,7 +14,7 @@ from chagent.storage.database import Database
 from chagent.storage.memory_jobs import MemoryJobRepository
 from chagent.storage.repositories import ConversationRepository, RunRepository
 from chagent.storage.summaries import SummaryRepository
-from chagent.storage.artifacts import ArtifactRepository
+from chagent.storage.artifacts import ArtifactRepository, inline_bytes_for
 from chagent.tools.builtin import create_builtin_registry
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.processes import ProcessManager
@@ -137,7 +137,7 @@ def create_demo_runner(
 def create_runner(
     database: Database, model: Model, client: ModelClient, *, allow_host_commands: bool = False,
     context_policy: ContextPolicy | None = None, token_counter: TokenCounter | None = None,
-    timeout: float = 180,
+    timeout: float = 600,
     compaction_policy: CompactionPolicy | None = None,
     max_turns: int = 32,
     memory_policy: MemoryPolicy | None = None,
@@ -179,7 +179,8 @@ def create_runner(
     default_face = faces.get("work") or next(iter(faces.values()))
     builder = BasicContextBuilder(policy=context_policy,
                                   counter=token_counter or select_counter(model))
-    conversations, runs = ConversationRepository(database), RunRepository(database)
+    conversations = ConversationRepository(database)
+    runs = RunRepository(database, inline_bytes=inline_bytes_for(builder.input_budget(model)))
     jobs = MemoryJobRepository(database)
     memory_service = MemoryService(MemoryRepository(database), conversations, runs, builder.counter,
                                    policy=memory_policy, jobs=jobs)

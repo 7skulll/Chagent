@@ -14,6 +14,7 @@ from chagent.boundaries import validate_workspace
 from chagent.agent.budget import RunBudget
 from chagent.agent.types import FinishDecision, RunState
 from chagent.agent.stream_writer import TextStreamWriter
+from chagent.agent.turn_note import turn_note
 from chagent.context.builder import ContextBudgetError, ContextBuilder
 from chagent.context.manager import ContextManager
 from chagent.memory.service import MemoryService
@@ -231,6 +232,20 @@ class AgentRunner:
             if self.memory_service is not None:
                 self.memory_service.release(run_id)
 
+    def _note_fits(self, messages) -> bool:
+        """Whether the assembled request still fits after the progress note.
+
+        The builder reports a token estimate per selection; adding to the tail
+        after the fact means nothing re-checked the total. Counting here is
+        cheap next to a provider call, and dropping the note on overflow is
+        always better than a request the provider rejects.
+        """
+        counter = getattr(self.context, "counter", None)
+        budget_of = getattr(self.context, "input_budget", None)
+        if counter is None or budget_of is None:
+            return True
+        return counter.count(messages) <= budget_of(self.model)
+
     async def _close_if_running(self, run_id: UUID, status: str, reason: str, end_reason: RunEndReason) -> None:
         """Close a run from an exception handler without leaking storage errors.
 
@@ -359,6 +374,19 @@ class AgentRunner:
                 raise
             if self.memory_service is not None:
                 built = await self.memory_service.enrich(built, session_id, run_id, state=state)
+            # Trailing, unpersisted, and outside the cached system prefix. The
+            # model cannot see the loop, so without this it cannot tell a first
+            # turn from the last one it will get. The transcript renderer merges
+            # consecutive user-role messages, so on the wire this rides with the
+            # tool result as a second part rather than as a new turn.
+            if iteration:
+                messages = built.request.messages
+                messages.append(UserMessage(turn_note(iteration, self.max_turns), time_ns() // 1_000_000))
+                # Selection sized this request to fit, and compaction may have
+                # just run. A few dozen tokens of advice is not worth pushing
+                # the request past the window, so the note yields.
+                if not self._note_fits(messages):
+                    messages.pop()
             model_call_id = await self.runs.start_model_call(run_id, iteration, built)
             state.active_model_call_id = model_call_id
             message = await self._response(run_id, built.request)

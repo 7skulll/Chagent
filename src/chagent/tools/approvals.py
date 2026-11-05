@@ -96,9 +96,11 @@ class ApprovalBroker:
             ttl=self.timeout)
         asked = False
         unwatched_since: float | None = None
-        # A human deciding is not the run spending its execution budget.
+        # A human deciding is not the run spending its execution budget, and the
+        # wait is already bounded by ``self.timeout``: the run budget's pause
+        # ceiling must not cut a correct wait short.
         if budget is not None:
-            budget.pause()
+            budget.pause(capped=False)
         try:
             with self.runs.notifications.subscribe(run_id) as subscription:
                 while True:

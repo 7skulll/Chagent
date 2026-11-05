@@ -13,6 +13,7 @@ from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
 
 from chagent.agent.runner import RunFailedError
+from chagent.agent.turn_note import last_request_message
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
 from chagent.context.builder import BasicContextBuilder
@@ -177,11 +178,11 @@ class LongRunTests(unittest.IsolatedAsyncioTestCase):
                     records = await owner.runner.conversations.messages(owner.session)
                     reference = records[-1].message.artifact
                     self.reference = reference
-                    owner.assertIn(reference.id, request.messages[-1].content[0].text)
-                    owner.assertNotIn("甲😀Z\n" * 500, request.messages[-1].content[0].text)
+                    owner.assertIn(reference.id, last_request_message(request.messages).content[0].text)
+                    owner.assertNotIn("甲😀Z\n" * 500, last_request_message(request.messages).content[0].text)
                     call = ToolCall("read", "read_artifact", {"artifact_id": reference.id, "offset": len(text) - 11, "limit": 100})
                 else:
-                    owner.assertIn("TAIL-TARGET", request.messages[-1].content[0].text)
+                    owner.assertIn("TAIL-TARGET", last_request_message(request.messages).content[0].text)
                 message.content = [call] if self.step <= 2 else [TextContent("artifact read")]
                 yield DoneEvent(reason=message.stop_reason, message=message)
         client = ArtifactClient()

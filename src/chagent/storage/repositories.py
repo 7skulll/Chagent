@@ -20,7 +20,7 @@ from chagent.domain.runs import RunEndReason, RunStatus, StoredMessage, terminal
 from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState, validate_mode
 from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError, StateConflictError
 from chagent.storage.database import Database
-from chagent.storage.artifacts import ArtifactRepository, INLINE_BYTES
+from chagent.storage.artifacts import ArtifactRepository, INLINE_MIN_BYTES, inline_bytes_for
 from chagent.storage.event_queue import EventItem, EventStream
 from chagent.tools.base import AgentToolResult
 
@@ -318,9 +318,17 @@ class ConversationRepository:
     async def messages(self, session_id: UUID, current_run: UUID | None = None, *, project_artifacts: bool = False) -> list[StoredMessage]:
         """All records for inspection, or completed/current-run history for the model.
 
-        Failed or interrupted runs remain inspectable but are not replayed into
-        the baseline context: they may contain unfinished tool-call batches.
+        Failed or interrupted runs remain inspectable but are mostly not
+        replayed into the baseline context: they may contain unfinished
+        tool-call batches. The two exceptions both end *after* a committed
+        batch — ``execute_batch`` returns, results are stored and paired with
+        their calls, and only then can the loop find that it is out of turns or
+        that the model repeated itself. Replaying them is what stops a run that
+        hit the turn limit from restarting blind: without it the next run sees
+        only the recovery note, re-reads what it already read, and spends its
+        budget arriving at the same place.
         """
+        replayable = "('turn_limit', 'repeated_tool_call')"
         payload = ("CASE WHEN jsonb_typeof(m.payload->'artifact') = 'object' THEN "
                    "(jsonb_set(m.payload, '{content}', jsonb_path_query_array(m.payload, '$.content[*] ? (@.type == \"image\")')) - 'details') "
                    "ELSE m.payload END" if project_artifacts else "m.payload")
@@ -333,7 +341,8 @@ class ConversationRepository:
             # A replay is a linear story: a record replaced by a later run is
             # not part of it, even though the row is still readable above.
             query += ("AND m.superseded_by IS NULL "
-                      "AND (m.run_id IS NULL OR r.status = 'completed' OR r.id = %s) ")
+                      "AND (m.run_id IS NULL OR r.status = 'completed' "
+                      f"OR r.end_reason IN {replayable} OR r.id = %s) ")
             params = (session_id, current_run)
         query += "ORDER BY m.sequence"
         async with self.database.connection() as connection:
@@ -344,8 +353,9 @@ class ConversationRepository:
 
 
 class RunRepository:
-    def __init__(self, database: Database):
+    def __init__(self, database: Database, *, inline_bytes: int = INLINE_MIN_BYTES):
         self.database = database
+        self.inline_bytes = inline_bytes
         self.notifications = database.notifications
         # Buffered high-frequency events, one stream per active run in this
         # process. Streams are never reconstructed from rows.
@@ -688,7 +698,7 @@ class RunRepository:
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             text = "\n".join(block.text for block in message.content if hasattr(block, "text"))
-            if len(text.encode("utf-8")) > INLINE_BYTES:
+            if len(text.encode("utf-8")) > self.inline_bytes:
                 details = result.details if isinstance(result.details, dict) else {}
                 message.artifact = await ArtifactRepository(self.database).create(
                     connection, session_id=session_id, run_id=run_id, tool_record_id=record_id, text=text,
