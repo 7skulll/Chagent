@@ -376,17 +376,29 @@ def with_approval(result: AgentToolResult, grant: Grant, tool_name: str) -> Agen
             f"(approval {str(grant.approval_id)[:8]}). When you describe what happened, say it was "
             f"approved; do not report that no approval was requested.")
     if grant.note:
-        line += f"\nThe user added with the approval: {grant.note}"
+        line += f"\nThe user added with the approval: {_note_text(grant.note)}"
     details = dict(result.details) if isinstance(result.details, dict) else {}
     details["approval"] = "approved"
     details["approval_id"] = str(grant.approval_id)
     if grant.note:
+        # The full remark stays in the record; only the model-facing copy is
+        # bounded, so a long paste cannot crowd out the result it annotates.
         details["approval_note"] = grant.note
     return AgentToolResult(
         content=[TextContent(line), *result.content], details=details,
         structured_content=result.structured_content, usage=result.usage,
         is_error=result.is_error, terminate=result.terminate,
         outcome_unknown=result.outcome_unknown)
+
+
+#: A note is context, not content: the page caps one at 2000 characters, and a
+#: small context window cannot afford to spend that on a remark in front of the
+#: tool output it is annotating.
+NOTE_CHARS = 500
+
+
+def _note_text(note: str) -> str:
+    return note if len(note) <= NOTE_CHARS else note[:NOTE_CHARS].rstrip() + " …"
 
 
 def approval_result(message: str, approval_id, reason: str):

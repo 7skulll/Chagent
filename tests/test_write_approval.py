@@ -247,5 +247,26 @@ class HostControllerWriteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("file was not modified", decision.reason)
 
 
+class WithApprovalTests(unittest.TestCase):
+    def test_a_long_note_is_bounded_for_the_model_and_kept_in_the_record(self):
+        # The page allows 2000 characters. Spending all of them in front of the
+        # tool output would let a paste crowd out the result it annotates, so
+        # only the model-facing copy is cut; the stored note stays whole.
+        from chagent.domain.messages import TextContent
+        from chagent.tools.base import AgentToolResult
+        from chagent.tools.scheduler import Grant, NOTE_CHARS, with_approval
+
+        note = "x" * (NOTE_CHARS + 400)
+        result = with_approval(
+            AgentToolResult(content=[TextContent("Written: file.txt")]),
+            Grant(uuid4(), note), "write_file")
+        head = result.content[0].text
+        self.assertIn("The user added with the approval:", head)
+        self.assertTrue(head.endswith("…"), head[-20:])
+        self.assertLess(len(head), len(note))
+        self.assertEqual(result.details["approval_note"], note)
+        self.assertEqual(result.content[1].text, "Written: file.txt")
+
+
 if __name__ == "__main__":
     unittest.main()
