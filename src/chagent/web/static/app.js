@@ -1,6 +1,10 @@
 "use strict";
 
-const $ = id => document.getElementById(id);
+// Module boundaries live in docs/前端重构方案.md. core/ has no knowledge of the
+// conversation; everything below may use it, and core/ never imports upward.
+import { $, textNode } from "./core/dom.js";
+import { api, post, patch } from "./core/api.js";
+
 const terminal = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const state = {session: null, run: null, source: null, version: 0, before: null, sessionCursor: null,
   busy: false, loading: false, workspace: null, archived: false, query: "", readonly: false,
@@ -25,14 +29,6 @@ const ARCHIVED_HINT = "已归档，恢复后才能继续对话";
 const narrow = window.matchMedia("(max-width: 960px)");
 const narrowTools = window.matchMedia("(max-width: 1180px)");
 
-async function api(path, options = {}) {
-  const response = await fetch(path, options);
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error || `请求失败 (${response.status})`);
-  return value;
-}
-const post = (path, value) => api(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(value)});
-const patch = (path, value) => api(path, {method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(value)});
 // Every workspace-scoped call names its workspace; the server refuses ones that
 // were never opened, so a stale tab cannot act in a directory it did not pick.
 const withWorkspace = path => state.workspace
@@ -40,11 +36,6 @@ const withWorkspace = path => state.workspace
   : path;
 function showError(error) { $("error").textContent = error.message || String(error); $("error").hidden = false; }
 function clearError() { $("error").hidden = true; }
-function textNode(tag, text, className) {
-  const node = document.createElement(tag); node.textContent = text;
-  if (className) node.className = className;
-  return node;
-}
 // ---------- 滚动跟随 ----------
 // Following the stream is the default. Scrolling up hands control back to the
 // reader — new text must not yank the page — and the button is how they return.
@@ -1736,3 +1727,10 @@ window.ChagentCheckUploads = async () => {
     }
   }
 };
+
+// Test seams. tests/js/render-page.mjs drives the same functions a click would,
+// through an import instead of an appended `eval` line: a renamed export fails
+// the test instead of silently leaving the harness with a stale name.
+// Nothing in the page reads these.
+export { openSession };
+export function setFollowForTest(value) { follow = value; }

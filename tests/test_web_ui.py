@@ -21,11 +21,37 @@ from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "src" / "chagent" / "web" / "static"
 MARKUP = (STATIC / "index.html").read_text(encoding="utf-8")
+APP = (STATIC.parent / "app.py").read_text(encoding="utf-8")
 SCRIPT = (STATIC / "app.js").read_text(encoding="utf-8") + (STATIC / "file-editor.js").read_text(encoding="utf-8")
 STYLES = (STATIC / "style.css").read_text(encoding="utf-8")
 
 # Created by app.js at runtime (approval prompt), so it has no markup of its own.
 RUNTIME_IDS = {"approval"}
+
+# Relative imports between page modules: `import x from "./core/dom.js"`,
+# `import "./app.js"`, `import("./x.js")`.
+IMPORT = re.compile(r'(?:from|import)\s*\(?\s*["\'](\.{1,2}/[^"\']+)["\']')
+
+
+def _module_graph(entry: str) -> set[str]:
+    """Every static path reachable from one module through relative imports."""
+    seen: set[str] = set()
+    queue = [entry]
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        path = STATIC / name
+        if path.suffix != ".js" or not path.is_file():
+            continue
+        for spec in IMPORT.findall(path.read_text(encoding="utf-8")):
+            resolved = (path.parent / spec).resolve()
+            try:
+                queue.append(resolved.relative_to(STATIC.resolve()).as_posix())
+            except ValueError:
+                continue
+    return seen
 
 # Classes and ids that belonged to placeholder controls Z1 deleted. A leftover
 # class means either the element or half its CSS came back.
@@ -125,6 +151,27 @@ class WebSurfaceTests(unittest.TestCase):
 
     def test_no_placeholder_controls_are_left(self):
         self.assertNotIn("未开放", MARKUP)
+
+    def test_every_referenced_asset_is_served(self):
+        """Every asset the page can load must be in the server allow-list.
+
+        That includes the whole module graph: an `import "./core/dom.js"` the
+        allow-list does not serve is a 404, and a failed module import leaves a
+        blank page with no error in the DOM — invisible until someone opens
+        devtools. Neither the JS tests nor the Python page test load over HTTP,
+        so this text check is the only thing standing between the page and that
+        failure.
+        """
+        referenced = set(re.findall(r'(?:src|href)="/static/([^"]+)"', MARKUP))
+        served = set(re.findall(r'"([A-Za-z0-9_./-]+\.(?:js|css|html))"\s*:', APP))
+        graph = set()
+        for name in referenced:
+            graph |= _module_graph(name)
+        missing = sorted((referenced | graph) - served)
+        self.assertEqual(missing, [], f"页面引用但服务端不提供的静态资源：{missing}")
+        for name in sorted(referenced):
+            with self.subTest(asset=name):
+                self.assertTrue((STATIC / name).is_file(), f"页面引用的文件不存在：{name}")
 
 
 if __name__ == "__main__":

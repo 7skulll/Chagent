@@ -437,8 +437,11 @@ async def events(run_id: UUID, request: Request, current: Current, after: Sequen
 
 async def asset(name: str = "index.html"):
     # An allow-list, not a directory read: the route must not become a way to
-    # fetch anything else that happens to sit next to the page.
-    media = {"index.html": "text/html", "app.js": "text/javascript", "file-editor.js": "text/javascript", "markdown.js": "text/javascript",
+    # fetch anything else that happens to sit next to the page. Keys are the
+    # only paths that exist for a client, so `..` and absolute paths have no
+    # meaning here — they are simply not in the dict.
+    media = {"index.html": "text/html", "main.js": "text/javascript", "app.js": "text/javascript", "file-editor.js": "text/javascript", "markdown.js": "text/javascript",
+             "core/dom.js": "text/javascript", "core/api.js": "text/javascript",
              "style.css": "text/css", "api-docs.html": "text/html", "api-docs.js": "text/javascript"}
     if name not in media:
         raise HTTPException(404)
@@ -635,7 +638,9 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
     app.include_router(memory_router)
     app.include_router(workspace_router)
     app.add_api_route("/", asset, include_in_schema=False)
-    app.add_api_route("/static/{name}", asset, include_in_schema=False)
+    # `path` because the page loads ES modules from subdirectories (`core/…`).
+    # The allow-list below is still the only thing that decides what exists.
+    app.add_api_route("/static/{name:path}", asset, include_in_schema=False)
     async def local_docs():
         return await asset("api-docs.html")
     app.add_api_route("/docs", local_docs, include_in_schema=False)

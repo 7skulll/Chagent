@@ -6,9 +6,10 @@
   <meta name="description" content="Chagent 是本机资料助手，帮助阅读文档、整理信息并生成可下载的文本。">
   <title>Chagent · 本地对话</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/markdown.js" defer></script>
-  <script src="/static/app.js" defer></script>
-  <script src="/static/file-editor.js" defer></script>
+  <!-- markdown.js stays a classic script: it is also require()d by the Python
+       tests, and it publishes ChagentMarkdown before any module evaluates. -->
+  <script src="/static/markdown.js"></script>
+  <script type="module" src="/static/main.js"></script>
 </head>
 <body>
   <!-- 快捷导航只复用已有功能，不增加虚假的用户、通知或终端入口。 -->
