@@ -14,6 +14,7 @@ import { $ } from "./core/dom.js";
 import { renderMarkdown } from "./core/markdown.js";
 import { createLayout } from "./views/layout.js";
 import { createPreview } from "./views/preview.js";
+import { createDraftStore, restorable } from "./views/drafts.js";
 
 export function initFileEditor(ui) {
   const spaces = new Map();
@@ -33,6 +34,19 @@ export function initFileEditor(ui) {
   const normalized = text => text.replace(/\r\n?/g, "\n");
   const serialized = tab => tab.readonly ? tab.raw : tab.newline === "cr" ? tab.draft.replace(/\n/g,"\r") : tab.newline === "crlf" ? tab.draft.replace(/\r?\n/g, "\r\n") : tab.draft;
   const active = () => current && current.tabs.get(current.active);
+  // Drafts are per workspace id + path, so switching workspaces cannot mix them
+  // and a reload can find them again. Storage failures are silent by design.
+  const drafts = createDraftStore(globalThis.localStorage);
+  let draftTimer = 0;
+  function rememberDraft(space, tab) {
+    if (!space || !tab || tab.kind !== "text" || tab.readonly) return;
+    if (!dirty(tab)) { drafts.drop(space.id, tab.path); return; }
+    drafts.save(space.id, tab.path, {draft: tab.draft, version: tab.version, identity: tab.identity});
+  }
+  function rememberDraftSoon(space, tab) {
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => { draftTimer = 0; rememberDraft(space, tab); }, 300);
+  }
 
   function choose(message, options, title="确认操作") {
     const run = () => new Promise(resolve => {
@@ -64,7 +78,7 @@ export function initFileEditor(ui) {
     if (decision === "cancel") return false;
     if (decision === "save") {
       for (const tab of tabs) if (!await saveTab(space,tab)) return false;
-    } else for (const tab of tabs) { tab.draft = tab.original; tab.changed = false; }
+    } else for (const tab of tabs) { tab.draft = tab.original; tab.changed = false; drafts.drop(space.id, tab.path); }
     paint(); return true;
   }
   function takeRead(tab, data) {
@@ -101,8 +115,15 @@ export function initFileEditor(ui) {
         await readPreview(space,tab);tab.info.reason=error.message;
       }
     } space.tabs.set(path,tab); space.active=path;
+    // A draft from before a reload (or a crash) comes back here, never silently
+    // over a newer file: a version mismatch is shown as a conflict.
+    const stored = tab.kind === "text" && !tab.readonly ? restorable(drafts.load(space.id, path), tab) : null;
+    if (stored) {
+      tab.draft = stored.draft;
+      tab.changed = stored.conflict;
+    }
     selectFile(space,path);
-    if (current === space) { reveal(); paint(); notice(tab.kind!=="text"?"预览不会把文件内容自动发送给模型。":tab.readonly ? "混合换行文件当前只读，避免破坏原换行。" : "输入仅修改草稿；点击保存或按 ⌘S 写入磁盘。"); }
+    if (current === space) { reveal(); paint(); notice(tab.kind!=="text"?"预览不会把文件内容自动发送给模型。":tab.readonly ? "混合换行文件当前只读，避免破坏原换行。" : stored ? (stored.conflict ? "已恢复未保存的草稿，但磁盘版本已变化：保存前请先对照。" : "已恢复上次未保存的草稿。") : "输入仅修改草稿；点击保存或按 ⌘S 写入磁盘。"); }
   }
   function reveal() { ui.showFiles(); selectPane("files"); }
   function paint() {
@@ -114,7 +135,7 @@ export function initFileEditor(ui) {
       const wrapper = node("div",null,"file-tab"+(item===tab?" active":""));
       const select = button((dirty(item)?"● ":"")+item.path, () => { selectFile(space,item.path);space.active=item.path; paint(); });
       select.setAttribute("role","tab"); select.setAttribute("aria-selected",String(item===tab));
-      wrapper.append(select,button("×",async () => { if (!await guard(space,[item.path])) return; space.tabs.delete(item.path); if (space.active===item.path) space.active=space.tabs.keys().next().value; paint(); }));
+      wrapper.append(select,button("×",async () => { if (!await guard(space,[item.path])) return; drafts.drop(space.id, item.path); space.tabs.delete(item.path); if (space.active===item.path) space.active=space.tabs.keys().next().value; paint(); }));
       return wrapper;
     }) : []));
     }
@@ -152,6 +173,8 @@ export function initFileEditor(ui) {
       tab.newline=result.newline; tab.changed=false; tab.unavailable=false;
       // Further input during the request is still a draft, not marked saved.
       if (tab.draft===submitted) tab.draft=tab.original;
+      // The draft is only "kept" while it differs from the disk.
+      rememberDraft(space, tab);
       if(current===space) notice(dirty(tab)?"已保存提交的版本；仍有后续修改待保存。":"已保存到工作区。");
       return !dirty(tab);
     } catch(error) {
@@ -349,7 +372,7 @@ export function initFileEditor(ui) {
     // Declared below the returned object; called only by the layout code.
     panelsChanged: () => layout.clampAll(),
   };
-  $("file-editor").addEventListener("input",()=>{const tab=active();if(!tab) return;tab.draft=$("file-editor").value;paint();});
+  $("file-editor").addEventListener("input",()=>{const tab=active();if(!tab) return;tab.draft=$("file-editor").value;paint();rememberDraftSoon(current,tab);});
   $("file-save").addEventListener("click",()=>{const tab=active();if(tab) saveTab(current,tab);});
   $("file-save-as").addEventListener("click",()=>saveAs().catch(fail));
   $("file-markdown").addEventListener("click",()=>{const tab=active();if(tab){tab.preview=!tab.preview;paint();}});

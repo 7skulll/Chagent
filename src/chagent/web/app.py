@@ -507,7 +507,8 @@ ASSETS = {
     "views/chat.js": "text/javascript", "views/config.js": "text/javascript",
     "views/context.js": "text/javascript", "views/generated.js": "text/javascript",
     "views/memory.js": "text/javascript", "views/sessions.js": "text/javascript",
-    "views/layout.js": "text/javascript", "views/preview.js": "text/javascript",
+    "views/drafts.js": "text/javascript", "views/layout.js": "text/javascript",
+    "views/preview.js": "text/javascript",
     "views/uploads.js": "text/javascript", "views/workspace.js": "text/javascript",
 }
 

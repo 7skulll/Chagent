@@ -16,6 +16,7 @@ import {
   uploadStatusLabel, workspaceName, workspaceParent,
 } from "../../src/chagent/web/static/core/format.js";
 import { initialRunState, reduce } from "../../src/chagent/web/static/run/run-reducer.js";
+import { createDraftStore, DRAFT_PREFIX, draftKey, restorable } from "../../src/chagent/web/static/views/drafts.js";
 
 test("token counts shrink only past a thousand", () => {
   assert.equal(formatTokens(0), "0");
@@ -121,6 +122,17 @@ test("configuration reads as behaviour, not as booleans", () => {
 
 const event = (type, payload = {}) => ({type, payload});
 
+function memoryStorage() {
+  const store = new Map();
+  return {
+    get length() { return store.size; },
+    key: index => [...store.keys()][index] ?? null,
+    getItem: key => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)); },
+    removeItem: key => { store.delete(key); },
+  };
+}
+
 test("delta text accumulates into one paragraph per model turn", () => {
   let state = initialRunState("r1");
   state = reduce(state, event("model_started"));
@@ -219,6 +231,60 @@ test("the closing record names the destinations and bytes", () => {
   assert.equal(networkSummary({complete: true, sent_bytes: 0, targets: []}), "容器出网：0 字节；目标 无");
   assert.match(networkSummary({complete: false}), /不完整/);
   assert.equal(networkSummary(null), "");
+});
+
+test("a draft survives a reload and is dropped once saved", () => {
+  const storage = memoryStorage();
+  const drafts = createDraftStore(storage);
+  assert.equal(drafts.load("ws1", "a.md"), null);
+  assert.equal(drafts.save("ws1", "a.md", {draft: "# typed", version: "v1", identity: "i1"}), true);
+  const stored = drafts.load("ws1", "a.md");
+  assert.equal(stored.draft, "# typed");
+  assert.equal(stored.version, "v1");
+  drafts.drop("ws1", "a.md");
+  assert.equal(drafts.load("ws1", "a.md"), null);
+  // Workspaces never share a slot, even for the same relative path.
+  drafts.save("ws1", "a.md", {draft: "one", version: "v1", identity: "i1"});
+  drafts.save("ws2", "a.md", {draft: "two", version: "v2", identity: "i2"});
+  assert.equal(drafts.load("ws1", "a.md").draft, "one");
+  assert.equal(drafts.load("ws2", "a.md").draft, "two");
+  assert.equal(drafts.key("ws1", "a.md"), DRAFT_PREFIX + "ws1:a.md");
+  assert.equal(draftKey("ws2", "b/c.md"), DRAFT_PREFIX + "ws2:b/c.md");
+});
+
+test("a draft too large to keep is declined, not truncated", () => {
+  const drafts = createDraftStore(memoryStorage(), {maxBytes: 8});
+  assert.equal(drafts.save("ws", "big.md", {draft: "x".repeat(9), version: "v", identity: "i"}), false);
+  assert.equal(drafts.load("ws", "big.md"), null);
+});
+
+test("the oldest drafts are pruned first", () => {
+  const storage = memoryStorage();
+  const drafts = createDraftStore(storage, {limit: 2});
+  drafts.save("ws", "a.md", {draft: "a", version: "1", identity: "i"});
+  drafts.save("ws", "b.md", {draft: "b", version: "1", identity: "i"});
+  drafts.save("ws", "c.md", {draft: "c", version: "1", identity: "i"});
+  assert.equal(drafts.load("ws", "a.md"), null, "the oldest draft should be gone");
+  assert.equal(drafts.load("ws", "b.md").draft, "b");
+  assert.equal(drafts.load("ws", "c.md").draft, "c");
+  assert.equal(drafts.entries().length, 2);
+});
+
+test("a corrupted entry is not a draft", () => {
+  const storage = memoryStorage();
+  storage.setItem(DRAFT_PREFIX + "ws:a.md", "{not json");
+  const drafts = createDraftStore(storage);
+  assert.equal(drafts.load("ws", "a.md"), null);
+});
+
+test("restoring a draft is silent only when the disk has not moved", () => {
+  const current = {original: "on disk", version: "v2"};
+  assert.equal(restorable({draft: "on disk", version: "v2"}, current), null, "no unsaved work");
+  assert.deepEqual(restorable({draft: "typed", version: "v2"}, current),
+                   {draft: "typed", conflict: false});
+  assert.deepEqual(restorable({draft: "typed", version: "v1"}, current),
+                   {draft: "typed", conflict: true}, "a stale draft is offered as a conflict");
+  assert.equal(restorable(null, current), null);
 });
 
 test("the same events always produce the same state", () => {

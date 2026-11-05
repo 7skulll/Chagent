@@ -134,8 +134,14 @@ export function installDom() {
     return MEDIA.get(query);
   }});
   setGlobal("matchMedia", globalThis.window.matchMedia);
-  setGlobal("localStorage", {store: new Map(), getItem(k) { return this.store.has(k) ? this.store.get(k) : null; },
-    setItem(k, v) { this.store.set(k, String(v)); }, removeItem(k) { this.store.delete(k); }});
+  setGlobal("localStorage", {
+    store: new Map(),
+    get length() { return this.store.size; },
+    key(index) { return [...this.store.keys()][index] ?? null; },
+    getItem(k) { return this.store.has(k) ? this.store.get(k) : null; },
+    setItem(k, v) { this.store.set(k, String(v)); },
+    removeItem(k) { this.store.delete(k); },
+  });
   setGlobal("navigator", {clipboard: {writeText: async () => {}}});
   setGlobal("requestAnimationFrame", cb => setTimeout(cb, 0));
   setGlobal("cancelAnimationFrame", id => clearTimeout(id));

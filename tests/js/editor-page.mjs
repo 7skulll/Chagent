@@ -81,6 +81,10 @@ const panel = initFileEditor({
   const one = {id: 'one', path: '/one'}, two = {id: 'two', path: '/two'};
   panel.workspace(one); await tick(); await panel.open('one', 'a.md');
   input('# submitted\n');
+  // Drafts live in the browser so a reload or a crash cannot lose typing.
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const kept = localStorage.getItem('chagent.draft.one:a.md');
+  assert(kept && JSON.parse(kept).draft.includes('submitted'), 'the draft was not kept in the browser');
   assert(FILES.get('one/a.md').content === '# original\r\n', 'editing wrote to disk');
   assert(el('file-state').textContent.includes('未保存'), 'missing dirty marker');
   let prevented = false; events.get('beforeunload')({preventDefault() { prevented = true; }}); assert(prevented, 'missing unload protection');
@@ -100,6 +104,7 @@ const panel = initFileEditor({
   el('file-tabs').querySelectorAll('button').find(button => button.textContent === '×').fire('click'); await tick();
   choice('取消'); await tick(); assert(el('file-path').textContent === 'a.md', 'cancel closed tab');
   const changing = panel.beforeWorkspace('/two'); await tick(); choice('放弃修改'); assert(await changing, 'discard failed');
+  assert(!localStorage.getItem('chagent.draft.one:a.md'), 'discarding a draft left it in the browser');
   panel.workspace(two); await tick(); await panel.open('two', 'a.md');
   assert(el('file-editor').value === '# workspace two\n', 'same-name cross-workspace draft leaked');
   input('<script>alert(1)</script>\n'); el('file-markdown').fire('click');
