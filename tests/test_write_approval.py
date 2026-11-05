@@ -144,10 +144,10 @@ class WriteApprovalTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GateWiringTests(unittest.TestCase):
-    def scheduler(self, mode):
+    def scheduler(self, mode, sandbox_mode="off"):
         from chagent.tools.scheduler import ToolScheduler
 
-        return ToolScheduler(None, policy=ApprovalPolicy(mode=mode))
+        return ToolScheduler(None, policy=ApprovalPolicy(mode=mode), sandbox_mode=sandbox_mode)
 
     def test_a_run_with_approvals_asks_both_questions(self):
         names = [gate.name for gate in self.scheduler("untrusted").default_gates()]
@@ -155,6 +155,63 @@ class GateWiringTests(unittest.TestCase):
 
     def test_never_asks_nothing_so_an_upgrade_does_not_block(self):
         self.assertEqual(self.scheduler("never").default_gates(), ())
+
+    def test_the_host_controller_asks_about_writes_too(self):
+        # The regression this guards: the profile kept only HumanGate, whose
+        # subject in that build is native commands, so every overwrite went
+        # through without a card.
+        names = [gate.name for gate in
+                 self.scheduler("untrusted", "managed-container").default_gates()]
+        self.assertEqual(names, ["human", "write"])
+
+    def test_the_host_controller_still_asks_about_native_commands_with_approvals_off(self):
+        names = [gate.name for gate in
+                 self.scheduler("never", "managed-container").default_gates()]
+        self.assertEqual(names, ["human"])
+
+
+class HostControllerWriteTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.workspace = Path(self.temporary.name).resolve()
+        (self.workspace / "existing.py").write_text("old", encoding="utf-8")
+        self.context = ToolContext(workspace=self.workspace, session_id=uuid4(), run_id=uuid4())
+
+    def write_gate(self, broker):
+        from chagent.tools.scheduler import ToolScheduler
+
+        gates = ToolScheduler(None, policy=ApprovalPolicy(mode="untrusted"), approvals=broker,
+                              sandbox_mode="managed-container").default_gates()
+        return next(gate for gate in gates if gate.name == "write")
+
+    async def check(self, gate, name, **arguments):
+        return await gate.check(ToolCall(id="call-1", name=name, arguments=arguments),
+                                context=self.context, tool_record_id=uuid4(),
+                                signal=asyncio.Event(), budget=None)
+
+    async def test_an_overwrite_in_this_profile_reaches_the_broker(self):
+        broker = StubBroker()
+        decision = await self.check(self.write_gate(broker), "write_file",
+                                    path="existing.py", content="new")
+        self.assertTrue(decision.allow)
+        self.assertEqual(broker.calls[0]["tool_name"], "write_file")
+        self.assertIn("overwrite existing.py", broker.calls[0]["subject"])
+
+    async def test_a_new_file_in_this_profile_is_still_quiet(self):
+        broker = StubBroker()
+        decision = await self.check(self.write_gate(broker), "write_file",
+                                    path="fresh.py", content="new")
+        self.assertTrue(decision.allow)
+        self.assertEqual(broker.calls, [])
+
+    async def test_a_denied_overwrite_does_not_write(self):
+        broker = StubBroker(approved=False, reason="denied")
+        decision = await self.check(self.write_gate(broker), "write_file",
+                                    path="existing.py", content="new")
+        self.assertFalse(decision.allow)
+        self.assertEqual(decision.code, "denied")
+        self.assertIn("file was not modified", decision.reason)
 
 
 if __name__ == "__main__":

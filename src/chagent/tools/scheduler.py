@@ -98,7 +98,15 @@ class ToolScheduler:
         asks neither, which is what keeps an upgrade from blocking existing runs.
         """
         if self.sandbox_mode == "managed-container":
-            return (HumanGate(self.policy, self.approvals, self.sandbox_mode),)
+            # Native commands need a page approval no matter what the policy
+            # says, so HumanGate is always here. The write half is not optional
+            # either: file tools in this profile edit the user's real directory
+            # through the workspace mount, so an overwrite reaches the host with
+            # no command in between — exactly the hole WriteGate exists for.
+            gates = [HumanGate(self.policy, self.approvals, self.sandbox_mode)]
+            if self.policy.mode != "never":
+                gates.append(WriteGate(self.policy, self.approvals))
+            return tuple(gates)
         if self.policy.mode == "never":
             return ()
         return (HumanGate(self.policy, self.approvals, self.sandbox_mode),
