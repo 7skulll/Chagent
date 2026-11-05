@@ -27,7 +27,7 @@ import hashlib
 import json
 
 # Tools that run something the model chose on the host.
-HOST_TOOLS = frozenset({"exec_command", "run_tests"})
+HOST_TOOLS = frozenset({"exec_command", "run_tests", "host_exec"})
 MODES = ("never", "on-request", "untrusted")
 # Anything that could turn a prefix-matched command into a different program.
 SHELL_CONTROL = frozenset(";|&<>`$()\n\r")
@@ -41,6 +41,8 @@ def subject(tool_name: str, arguments: dict) -> str:
         suite = arguments.get("suite", "auto")
         selection = arguments.get("selection")
         return f"run_tests {suite}" + (f" {selection}" if selection else "")
+    if tool_name == "host_exec":
+        return f"{arguments.get('command', '')} (workdir={arguments.get('workdir', '.')})"
     if tool_name == "process" and arguments.get("action") == "write":
         chars = arguments.get("chars", "")
         return (f"process {arguments.get('process_id', '<missing>')} stdin "
@@ -85,6 +87,8 @@ class ApprovalPolicy:
         return any(tokens[:len(prefix)] == prefix for prefix in self.allowlist)
 
     def requires_approval(self, tool_name: str, arguments: dict, *, sandbox: str) -> bool:
+        if sandbox == "managed-container":
+            return tool_name == "host_exec"
         if self.mode == "never" or not self.covers(tool_name, arguments):
             return False
         # A command allowlist says nothing about bytes later sent to its stdin.

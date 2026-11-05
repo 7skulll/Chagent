@@ -16,6 +16,8 @@ import { installDom, MEDIA } from "./dom-stub.mjs";
 const STATIC = fileURLToPath(new URL("../../src/chagent/web/static/", import.meta.url));
 
 installDom();
+globalThis.location = {hash: "", pathname: "/", search: ""};
+globalThis.history = {replaceState() {}};
 
 const SESSION = "11111111-1111-1111-1111-111111111111";
 const RUN = "22222222-2222-2222-2222-222222222222";

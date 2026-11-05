@@ -171,6 +171,9 @@ body.sidebar-collapsed .sidebar{display:none}
 #workspace-parent{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-4)}
 .workspace-label #workspace{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-2)}
 .workspace:hover{background:var(--surface-2);color:var(--ink)}
+.site-access{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px var(--sp-2);font-size:var(--text-meta)}
+.site-access[hidden]{display:none}
+.site-access a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
 
 /* ---------- 中间聊天区 ---------- */
 .chat{display:flex;flex-direction:column;flex:1;min-width:0;background:var(--bg)}

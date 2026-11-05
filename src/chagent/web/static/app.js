@@ -882,6 +882,7 @@ function connectRun(runId, version) {
     source.close();
     if (version === state.version) openSession(state.session, {preserveScroll: true}).catch(showError);
     refreshActive();
+    loadSiteAccess().catch(() => {});
   });
   source.onerror = async () => {
     if (version !== state.version) return;
@@ -1315,8 +1316,26 @@ async function ensureWorkspace(path) {
   $("workspace").title = opened.path;
   window.ChagentCurrentWorkspace = opened;
   window.ChagentFiles?.workspace(opened);
+  loadSiteAccess(opened).catch(() => { $("site-access").hidden = true; });
   return opened;
 }
+async function loadSiteAccess(workspace = window.ChagentCurrentWorkspace) {
+  const row = $("site-access");
+  if (state.config?.controller !== "host-controller" || !workspace?.id) { row.hidden = true; return; }
+  const result = await api(`/api/workspaces/${workspace.id}/site`);
+  if (result.service?.state !== "running") { row.hidden = true; return; }
+  $("site-link").href = result.url;
+  $("site-link").title = result.url;
+  row.hidden = false;
+}
+$("site-stop").addEventListener("click", async () => {
+  const workspace = window.ChagentCurrentWorkspace;
+  if (!workspace?.id) return;
+  try {
+    await post(`/api/workspaces/${workspace.id}/site/stop`, {});
+    await loadSiteAccess(workspace);
+  } catch (error) { showError(error); }
+});
 // The full path lives in the title. The sidebar shows the last segment in ink
 // with its parent dimmed before it, so a deep checkout never truncates to a
 // slash the way a left-anchored path does.
@@ -1329,6 +1348,14 @@ function workspaceParent(path) {
   return parts.length ? `${parts[parts.length - 1]}/` : "";
 }
 async function init() {
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const loginToken = fragment.get("auth");
+  if (loginToken) {
+    const response = await fetch("/api/auth", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({token: loginToken})});
+    if (!response.ok) throw new Error("本机网页认证失败，请重新运行 Chagent 启动器");
+    history.replaceState(null, "", location.pathname + location.search);
+  }
   const info = await api("/api/info");
   state.config = await api("/api/config");
   $("model").textContent = `${info.provider} / ${info.model}`;
@@ -1537,24 +1564,6 @@ async function switchWorkspace(path) {
   $("usage-pill").hidden = true;
   await listSessions();
 }
-async function switchHostWorkspace(path) {
-  if (window.ChagentFiles && !await window.ChagentFiles.beforeWorkspace(path)) throw new Error("已取消切换工作区；草稿保留。");
-  const switched = await post("/api/workspaces/switch-host", {path});
-  if (switched.status === "denied") throw new Error("宿主工作区切换未获确认。");
-  if (switched.status !== "restarting") throw new Error("宿主工作区切换未开始。");
-  workspaceNotice("已确认切换；正在重新挂载工作区并重启 Chagent…");
-  localStorage.setItem("chagent.workspace", "/workspaces");
-  const started = Date.now();
-  const poll = async () => {
-    try {
-      const config = await api("/api/config");
-      if (config.host_workspace_path === switched.path) { location.reload(); return; }
-    } catch (_) { /* The container is restarting. */ }
-    if (Date.now() - started < 90000) setTimeout(poll, 1500);
-    else workspaceNotice("切换超时，请查看宿主代理日志并刷新页面。", true);
-  };
-  setTimeout(poll, 1500);
-}
 async function loadWorkspaces() {
   const page = await api("/api/workspaces");
   const target = $("workspace-list"); target.replaceChildren();
@@ -1585,19 +1594,15 @@ $("workspace-form").addEventListener("submit", async event => {
   const path = $("workspace-path").value.trim();
   if (!path) return;
   try {
-    const hostExecution = (await api("/api/config")).host_execution;
-    if (hostExecution && path.startsWith("/") && path !== "/workspaces" && !path.startsWith("/workspaces/")) {
-      await switchHostWorkspace(path);
-    } else {
-      await switchWorkspace(path);
-      $("workspace-dialog").close();
-    }
+    await switchWorkspace(path);
+    $("workspace-dialog").close();
   } catch (error) { workspaceNotice(error.message, true); }
 });
 
 // Runtime configuration: the same facts the CLI prints as `Behavior:`.
 const configLabels = [
   ["provider", "供应商"], ["model", "模型"], ["tools", "工具数"],
+  ["controller", "主控位置"],
   ["run_timeout", "单次运行上限"], ["boundary", "执行边界"], ["capability", "执行能力"], ["gate", "门禁"], ["approval", "审批"],
   ["host_commands", "命令执行"], ["workspace_writable", "工作区写入"], ["process_stdin", "交互输入"], ["web_access", "网页搜索"], ["compaction", "上下文压缩"],
   ["tokenizer", "token 计数"], ["max_turns", "最大轮数"], ["max_processes", "会话进程"],
@@ -1608,7 +1613,8 @@ function configValue(key, c) {
     case "run_timeout": return `${Math.round(c.run_timeout)} 秒`;
     case "boundary": return c.boundary === "container" ? "容器（命令可联网）" : "无命令边界";
     case "capability": return c.capability === "full" ? "可执行命令" : "只读，不执行命令";
-    case "gate": return c.gate === "approval" ? "逐次审批" : "无需审批";
+    case "gate": return c.controller === "host-controller" ? "仅宿主原生操作逐次审批" : c.gate === "approval" ? "逐次审批" : "无需审批";
+    case "controller": return c.controller === "host-controller" ? "本机；每工作区独立 Docker 执行容器" : c.controller;
     case "approval": return `${c.approval}，等待 ${Math.round(c.approval_timeout)} 秒，` +
       (c.approval_grace ? `无人查看 ${Math.round(c.approval_grace)} 秒后放弃` : "无人查看也等到超时");
     case "workspace_writable": return c.workspace_writable ? "允许" : "关闭";

@@ -44,6 +44,7 @@ class WebRuntime:
         self.tasks: set[asyncio.Task] = set()
         self.closing = False
         self._workspace_ids: dict[Path, UUID] = {}
+        self.auth_guard = None
         self._recovery_task: asyncio.Task | None = None
         #: How many browser streams are attached to each run. A count, not a
         #: flag: two tabs on one run means closing one is not "nobody is left".
@@ -74,6 +75,8 @@ class WebRuntime:
             target = validate_workspace(Path(raw))
         except (OSError, RuntimeError):
             raise ValueError("工作区目录不存在") from None
+        if self.auth_guard is not None:
+            self.auth_guard(target)
         self.roots.add(target)
         return target
 
@@ -88,6 +91,30 @@ class WebRuntime:
 
     async def workspace_id(self, workspace: Path | None = None):
         root = self.workspace if workspace is None else workspace
+        if self.settings.execution_profile == "host-controller":
+            root = validate_workspace(root)
+            if self.auth_guard is not None:
+                self.auth_guard(root)
+            if root == Path("/workspaces") or root.is_relative_to(Path("/workspaces")):
+                raise HTTPException(409, "旧容器工作区路径必须先核实原宿主目录并重新绑定")
+            stat = root.stat()
+            async with self.runner.conversations.database.transaction() as connection:
+                cursor = await connection.execute(
+                    "INSERT INTO workspaces (id, root_path) VALUES (%s, %s) ON CONFLICT (root_path) "
+                    "DO UPDATE SET root_path = EXCLUDED.root_path RETURNING id", (uuid4(), str(root)))
+                identity = (await cursor.fetchone())["id"]
+                cursor = await connection.execute(
+                    "INSERT INTO workspace_bindings (workspace_id, host_path, device, inode, state) "
+                    "VALUES (%s,%s,%s,%s,'active') ON CONFLICT (workspace_id) DO UPDATE SET "
+                    "updated_at=now() WHERE workspace_bindings.host_path=EXCLUDED.host_path "
+                    "AND workspace_bindings.device=EXCLUDED.device "
+                    "AND workspace_bindings.inode=EXCLUDED.inode "
+                    "AND workspace_bindings.state='active' RETURNING workspace_id",
+                    (identity, str(root), stat.st_dev, stat.st_ino))
+                if await cursor.fetchone() is None:
+                    raise HTTPException(409, "工作区文件系统身份已变化；执行已暂停，需显式重新绑定")
+            self._workspace_ids[root] = identity
+            return identity
         if root not in self._workspace_ids:
             async with self.runner.conversations.database.connection() as connection:
                 cursor = await connection.execute(
@@ -114,6 +141,8 @@ class WebRuntime:
         if not self.programmable:
             return
         validate_web_runner(self.settings, self.runner)
+        if self.settings.execution_profile == "host-controller":
+            await self.workspace_id(workspace)
         # Explicit preflight owner, separate from all conversation runs.
         support = await self.runner.sandbox.audit(workspace, owner="web-preflight")
         if not support["available"]:

@@ -38,6 +38,7 @@ def _tool_faces(
     unified: bool = False,
     containerized: bool = False,
     host_exec: tuple[str, str] | None = None,
+    native_host_exec: bool = False,
 ) -> dict[str, ToolExecutor]:
     """Build a unified executor or diagnostic mode-specific executors.
 
@@ -76,6 +77,7 @@ def _tool_faces(
             artifacts=ArtifactRepository(database), sandbox=sandbox,
             processes=processes, web=web, include_echo=include_echo,
             host_exec=host_exec,
+            native_host_exec=native_host_exec,
         )
         faces[mode] = ToolExecutor(registry, allow_host_commands=allow_host_commands)
     if unified:
@@ -159,6 +161,7 @@ def create_runner(
     unified: bool = False,
     containerized: bool = False,
     host_exec: tuple[str, str] | None = None,
+    native_host_exec: bool = False,
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -169,7 +172,8 @@ def create_runner(
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
                         single_face=single_face, allow_workspace_writes=allow_workspace_writes,
                         process_stdin=process_stdin, versioned_files=versioned_files,
-                        unified=unified, containerized=containerized, host_exec=host_exec)
+                        unified=unified, containerized=containerized, host_exec=host_exec,
+                        native_host_exec=native_host_exec)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))
@@ -195,7 +199,8 @@ def create_runner(
         ApprovalRepository(database, runs), runs, timeout=approval_timeout,
         decider=approval_decider, remote=approval_remote, grace=approval_grace,
     )
-    runner.scheduler.sandbox_mode = sandbox.settings.mode if sandbox is not None else "off"
+    runner.scheduler.sandbox_mode = ("managed-container" if sandbox is not None and sandbox.settings.host_controller
+                                     else sandbox.settings.mode if sandbox is not None else "off")
     # Per-session mode resolution: a single face harness has nothing to resolve.
     runner.tool_faces = None if single_face else faces
     runner.unified = unified

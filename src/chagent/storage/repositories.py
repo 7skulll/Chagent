@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 from chagent.context.builder import BuiltContext
 from chagent.domain.codec import message_from_dict, message_to_dict
 from chagent.domain.json_types import JsonObject
+from chagent.domain.json_types import postgres_json_safe
 from chagent.domain.messages import AssistantMessage, Message, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.recovery import MAX_TARGET, SIDE_EFFECT_TOOLS, RecoveryFact
 from chagent.domain.runs import RunEndReason, RunStatus, StoredMessage, terminal_reason
@@ -459,7 +460,7 @@ class RunRepository:
             "  + row_number() OVER (ORDER BY t.ord), t.kind, t.payload::jsonb "
             "FROM unnest(%s::text[], %s::text[]) WITH ORDINALITY AS t(kind, payload, ord)",
             (run_id, run_id, [kind for kind, _ in items],
-             [json.dumps(payload, ensure_ascii=False) for _, payload in items]),
+             [json.dumps(postgres_json_safe(payload), ensure_ascii=False) for _, payload in items]),
         )
 
     async def _event(
@@ -605,7 +606,8 @@ class RunRepository:
             await connection.execute(
                 "INSERT INTO model_calls (id, run_id, iteration, request, context_snapshot) "
                 "VALUES (%s, %s, %s, %s, %s)",
-                (call_id, run_id, iteration, Jsonb(asdict(built.request)), Jsonb(asdict(built.snapshot))),
+                (call_id, run_id, iteration, Jsonb(postgres_json_safe(asdict(built.request))),
+                 Jsonb(postgres_json_safe(asdict(built.snapshot)))),
             )
             await self._event(connection, run_id, "model_started", {"model_call_id": str(call_id)}, locked=True)
         self.notifications.notify(run_id)
@@ -655,7 +657,8 @@ class RunRepository:
                 await connection.execute(
                     "INSERT INTO tool_calls (id, run_id, model_call_id, call_id, name, arguments, status, call_index) "
                     "VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s)",
-                    (identity, run_id, model_call_id, call.id, call.name, Jsonb(call.arguments), index))
+                    (identity, run_id, model_call_id, call.id, call.name,
+                     Jsonb(postgres_json_safe(call.arguments)), index))
                 await self._event(connection, run_id, "tool_queued", {"tool_call_id": call.id, "name": call.name},
                                   locked=True)
         self.notifications.notify(run_id)
@@ -695,7 +698,7 @@ class RunRepository:
                 "UPDATE tool_calls SET status = %s, result = %s, ended_at = now() "
                 "WHERE id = %s AND run_id = %s",
                 ("unknown" if result.outcome_unknown else "failed" if result.is_error else "completed",
-                 Jsonb(asdict(result)), record_id, run_id),
+                 Jsonb(postgres_json_safe(asdict(result))), record_id, run_id),
             )
             record = await self._message(connection, session_id, run_id, message)
             await self._event(connection, run_id, "tool_completed", {

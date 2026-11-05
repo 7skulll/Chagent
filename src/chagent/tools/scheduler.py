@@ -97,6 +97,8 @@ class ToolScheduler:
         two gates: a shape may allow one and still want the other. ``never``
         asks neither, which is what keeps an upgrade from blocking existing runs.
         """
+        if self.sandbox_mode == "managed-container":
+            return (HumanGate(self.policy, self.approvals, self.sandbox_mode),)
         if self.policy.mode == "never":
             return ()
         return (HumanGate(self.policy, self.approvals, self.sandbox_mode),

@@ -56,8 +56,11 @@ def running_here(port: int) -> bool:
     loopback request and the answer would come from somewhere else entirely.
     """
     try:
+        health = httpx.get(f"{base_url(port)}/health", timeout=PROBE_TIMEOUT, trust_env=False)
+        if health.status_code == 200 and health.json() == {"app": "chagent"}:
+            return True
         response = httpx.get(f"{base_url(port)}/api/info", timeout=PROBE_TIMEOUT, trust_env=False)
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError):
         return False
     if response.status_code != 200:
         return False
@@ -95,12 +98,29 @@ def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--host", default=HOST, help="监听地址；容器内可用 0.0.0.0")
     parser.add_argument("--demo", action="store_true", help="Use the deterministic offline model")
+    parser.add_argument("--host-controller", action="store_true",
+                        help="在本机运行网页主控，由每工作区 Docker 容器执行项目命令")
     parser.add_argument("--provider", choices=("openai", "deepseek", "anthropic", "qwen", "custom"))
     parser.add_argument("--model")
     parser.add_argument("--no-open", action="store_true", help="不要自动打开浏览器")
     parser.add_argument("--env-file", type=Path, default=Path(__file__).resolve().parents[3] / ".env")
     args = parser.parse_args()
     load_missing(args.env_file)
+    if args.host_controller:
+        if os.environ.get("CHAGENT_HOST_DB_COMPOSE") == "true":
+            from urllib.parse import quote
+            password = os.environ.get("CHAGENT_DB_PASSWORD")
+            if not password:
+                parser.error("CHAGENT_DB_PASSWORD is required for Compose database")
+            os.environ["CHAGENT_DATABASE_URL"] = (
+                f"postgresql://chagent:{quote(password, safe='')}@127.0.0.1:5433/chagent"
+            )
+        os.environ.update({"CHAGENT_EXECUTION_PROFILE": "host-controller", "CHAGENT_BOUNDARY": "container",
+                           "CHAGENT_CODE_MODE": "on", "CHAGENT_ALLOW_HOST_COMMANDS": "true",
+                           "CHAGENT_SANDBOX_NETWORK": "true", "CHAGENT_SANDBOX_WRITABLE": "true",
+                           "CHAGENT_CONTAINER_DECLARED": "false", "CHAGENT_APPROVAL": "on-request",
+                           "CHAGENT_HOST_EXEC": "off"})
+        os.environ.pop("CHAGENT_WORKSPACE_ROOT", None)
     if not 1 <= args.port <= 65535:
         parser.error("Port must be between 1 and 65535")
     if args.demo and (args.provider or args.model):
@@ -116,7 +136,11 @@ def main():
         except (httpx.HTTPError, ValueError):
             print("请在网页配置中核对现有服务的实际模式。", flush=True)
         if not args.no_open:
-            webbrowser.open(url)
+            if args.host_controller:
+                from chagent.web.auth import HostAuth
+                webbrowser.open(url + "/#auth=" + HostAuth().token)
+            else:
+                webbrowser.open(url)
         return
 
     if args.workspace is None:
@@ -148,7 +172,7 @@ def main():
         print(f"Warning: {warning}", flush=True)
     print(f"Chagent 网页：{url}（工作区 {Path(args.workspace).expanduser().resolve()}）", flush=True)
     if not args.no_open:
-        open_later(url)
+        open_later(url + "/#auth=" + app.state.host_auth.token if args.host_controller else url)
     # Bound the wait for open SSE responses before lifespan cancels agent tasks.
     uvicorn.run(app, host=args.host, port=port, workers=1, timeout_graceful_shutdown=3)
 

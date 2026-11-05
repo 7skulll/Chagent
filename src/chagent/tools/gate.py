@@ -10,6 +10,7 @@ from chagent.domain.messages import ToolCall
 from chagent.tools.context import ToolContext
 from chagent.tools.approvals import ApprovalBroker, UNAVAILABLE, WRITE_REFUSALS
 from chagent.tools.policy import ApprovalPolicy, FILE_WRITE_TOOLS, sensitive_path
+from chagent.tools.workspace import WorkspaceFS
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,10 +40,34 @@ class HumanGate:
             return GateDecision(True)
         if self.broker is None:
             return GateDecision(False, UNAVAILABLE, "unavailable")
+        subject = None
+        if self.sandbox_mode == "managed-container" and call.name == "host_exec":
+            fs = WorkspaceFS(context.workspace, expected_identity=context.workspace_identity)
+            try:
+                parts = fs.parts(call.arguments.get("workdir", "."))
+                with fs.directory(parts):
+                    pass
+            except (ValueError, OSError):
+                return GateDecision(False, "Native command directory is invalid; no approval was requested", "invalid")
+            async with self.broker.approvals.database.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT t.name, t.result FROM tool_calls t JOIN model_calls m ON m.id=t.model_call_id "
+                    "WHERE t.run_id=%s AND t.name IN ('exec_command','run_tests') AND t.status='completed' "
+                    "AND t.result->'details'->>'exit_code'='0' AND m.iteration < "
+                    "(SELECT current.iteration FROM tool_calls own JOIN model_calls current "
+                    "ON current.id=own.model_call_id WHERE own.id=%s) "
+                    "ORDER BY t.ended_at DESC LIMIT 1", (context.run_id, tool_record_id))
+                evidence = await cursor.fetchone()
+            if evidence is None:
+                return GateDecision(False, "First verify the operation in the container, then request native execution", "unverified")
+            cwd = fs.root.joinpath(*parts)
+            subject = (f"{call.arguments.get('command', '')}\nDirectory: {cwd}\n"
+                       f"Purpose: {call.arguments.get('purpose', '')}\n"
+                       f"Container verification: {evidence['name']} exit 0")
         outcome = await self.broker.request(
             run_id=context.run_id, tool_record_id=tool_record_id,
             tool_name=call.name, arguments=call.arguments,
-            cwd=str(context.workspace), signal=signal, budget=budget)
+            cwd=str(context.workspace), signal=signal, budget=budget, subject=subject)
         return GateDecision(outcome.approved and outcome.approval_id is not None,
                             outcome.message, outcome.reason, outcome.approval_id)
 

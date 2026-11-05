@@ -145,8 +145,14 @@ class ApprovalRepository:
         return status
 
     async def consume(self, approval_id: UUID, *, run_id: UUID, tool_record_id: UUID,
-                      fingerprint: str) -> bool:
+                      fingerprint: str | None = None, tool_name: str | None = None,
+                      arguments: dict | None = None, cwd: str | None = None) -> bool:
         """Claim an approved grant exactly once, for the invocation it was issued for."""
+        if fingerprint is None:
+            if tool_name is None or arguments is None or cwd is None:
+                raise ValueError("Approval consumption needs an exact invocation")
+            from chagent.tools.policy import fingerprint as invocation_fingerprint
+            fingerprint = invocation_fingerprint(tool_name, arguments, cwd)
         await self.runs.flush_events(run_id)
         async with self.database.transaction() as connection:
             try:

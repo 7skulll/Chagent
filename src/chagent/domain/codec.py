@@ -2,7 +2,7 @@
 
 from dataclasses import asdict
 
-from chagent.domain.json_types import JsonObject
+from chagent.domain.json_types import JsonObject, postgres_json_safe
 from chagent.domain.messages import (
     AssistantMessage, ImageContent, Message, SystemMessage, TextContent,
     ThinkingContent, ToolCall, ToolResultMessage, UserMessage,
@@ -13,7 +13,7 @@ from chagent.domain.artifacts import ArtifactReference
 
 
 def message_to_dict(message: Message) -> JsonObject:
-    return asdict(message)
+    return postgres_json_safe(asdict(message))
 
 
 def message_from_dict(payload: dict) -> Message:

@@ -171,6 +171,10 @@ class RunTestsTool(AgentTool):
         suite = params.get("suite", "auto")
         suite = detect_suite(workspace) if suite == "auto" else suite
         command = build_command(suite, workspace, params.get("selection"))
+        if self.sandbox is not None and self.sandbox.settings.host_controller and suite in {"pytest", "unittest"}:
+            project_venv = workspace / ".venv" / "pyvenv.cfg"
+            linux_venv = project_venv.is_file() and "/usr/local" in project_venv.read_text(errors="replace")
+            command[0] = str(workspace / ".venv/bin/python") if linux_venv else "python3"
         child_env = self.sandbox.environment(workspace, owner=context.run_id) if self.sandbox is not None else None
         if child_env is not None and suite in {"unittest", "pytest"}:
             child_env = {**child_env, "PYTHONPATH": str(workspace), "PYTHONDONTWRITEBYTECODE": "1",
@@ -178,7 +182,8 @@ class RunTestsTool(AgentTool):
         timeout = params.get("timeout_ms", 300_000 if suite in {"maven", "gradle"} else 120_000) / 1000
         argv, sandbox_record = ["/bin/sh", "-c", " ".join(_quote(part) for part in command)], {}
         if self.sandbox is not None:
-            argv, sandbox_record = await self.sandbox.wrap(argv, workspace, owner=context.run_id)
+            argv, sandbox_record = await self.sandbox.wrap(argv, workspace, owner=context.run_id,
+                timeout_seconds=params.get("timeout_ms", 300_000 if suite in {"maven", "gradle"} else 120_000) / 1000)
         started = monotonic()
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
             *argv, cwd=workspace, env=child_env,
@@ -216,6 +221,8 @@ class RunTestsTool(AgentTool):
         finally:
             _terminate(process.pid)
 
+        timed_out = timed_out or (self.sandbox is not None and self.sandbox.settings.host_controller
+                                   and process.returncode == 124)
         output = captured.decode("utf-8", errors="replace")
         duration = (monotonic() - started) * 1000
         counts, failures = (summarize_unittest(output) if suite == "unittest"

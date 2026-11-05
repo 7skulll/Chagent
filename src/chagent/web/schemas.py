@@ -25,6 +25,10 @@ class CancelRequest(InputModel):
     pass
 
 
+class HostLogin(InputModel):
+    token: Annotated[StrictStr, Field(min_length=32, max_length=128)]
+
+
 class SessionCreate(InputModel):
     title: Annotated[StrictStr, Field(max_length=200)] = "新会话"
     # Absent means the workspace the server was started in.
@@ -213,6 +217,7 @@ class ConfigView(BaseModel):
     boundary: str = "none"
     capability: str = "read-only"
     gate: str = "none"
+    controller: str = "configured"
     sandbox_network: bool
     workspace_writable: bool
     process_stdin: bool

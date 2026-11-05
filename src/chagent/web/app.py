@@ -43,10 +43,11 @@ from chagent.storage.memory_jobs import MemoryJobRepository
 from chagent.web.policy import validate_web_settings
 from chagent.web.deps import Current, MessageLimit, PageLimit, SequenceCursor, WorkspacePath
 from chagent.web.runtime import WebRuntime
+from chagent.web.auth import HostAuth, HostAuthBoundary, COOKIE, SESSION_SECONDS
 from chagent.web.schemas import MemoryJobState
 from chagent.sessions.errors import StateConflictError
 from chagent.web.schemas import (ActiveRunPage, AppInfo, ApprovalDecision, ArtifactPage, Cancellation,
-    CancelRequest, ConfigView, ContextView, DailyUsageView, ErrorResponse, MessagePage, RunAccepted, RunCreate, RunView, SessionCreate,
+    CancelRequest, ConfigView, ContextView, DailyUsageView, ErrorResponse, HostLogin, MessagePage, RunAccepted, RunCreate, RunView, SessionCreate,
     SessionDetail, SessionEdit, SessionPage, SessionSources, UsageView)
 from chagent.web.uploads import save as save_upload
 from chagent.boundaries import validate_workspace
@@ -68,6 +69,20 @@ def reply(value, status=200, headers=None):
 
 
 api = APIRouter(prefix="/api", responses={code: {"model": ErrorResponse} for code in (400, 403, 404, 409, 413, 415, 503)})
+
+
+@api.post("/auth", include_in_schema=False)
+async def host_login(value: HostLogin, request: Request):
+    auth = getattr(request.app.state, "host_auth", None)
+    if auth is None:
+        raise HTTPException(404)
+    session = auth.login(value.token)
+    if session is None:
+        raise HTTPException(401, "Invalid host UI token")
+    response = reply({"authenticated": True})
+    response.set_cookie(COOKIE, session, max_age=SESSION_SECONDS, httponly=True,
+                        samesite="strict", path="/")
+    return response
 
 
 @api.get("/info", response_model=AppInfo, tags=["本地 Agent"])
@@ -97,9 +112,11 @@ async def config(current: Current):
         "provider": current.runner.model.provider, "model": current.runner.model.id,
         "run_timeout": current.runner.timeout,
         "boundary": axes.boundary, "capability": axes.capability, "gate": axes.gate,
+        "controller": settings.execution_profile,
         "sandbox_network": settings.sandbox_network,
         "workspace_writable": work_writable,
-        "process_stdin": bool(getattr(current.runner.tools.registry.get("exec_command"), "process_stdin", False)),
+        "process_stdin": (settings.execution_profile != "host-controller" and
+                          bool(getattr(current.runner.tools.registry.get("exec_command"), "process_stdin", False))),
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
         "approval_grace": settings.approval_unwatched_grace,
         "host_commands": current.runner.tools.allow_host_commands,
@@ -109,7 +126,8 @@ async def config(current: Current):
         "web_key": "set" if settings.search_api_key.strip() else "missing",
         "compaction": policy.enabled, "tokenizer": tokenizer,
         "max_turns": settings.max_turns, "max_tool_concurrency": settings.max_tool_concurrency,
-        "max_processes": settings.max_processes, "process_timeout": settings.process_timeout,
+        "max_processes": 0 if settings.execution_profile == "host-controller" else settings.max_processes,
+        "process_timeout": settings.process_timeout,
         "code_mode": False, "programmable": current.programmable,
         "tools": tools,
         # Describe the actual work face; code capability is a separate field.
@@ -130,6 +148,34 @@ async def sessions(current: Current, limit: PageLimit = 50, before: UUID | None 
     """
     return await current.sessions.list(workspace=current.root(workspace), before=before, limit=limit,
                                        archived=archived, query=q)
+
+
+@api.get("/legacy/workspaces", tags=["会话"])
+async def legacy_workspaces(current: Current):
+    """Read-only inventory of old container-path workspaces awaiting proof of their host path."""
+    if current.settings.execution_profile != "host-controller":
+        raise HTTPException(404, "Only the host controller has legacy bindings")
+    async with current.runner.conversations.database.connection() as connection:
+        cursor = await connection.execute(
+            "SELECT w.id, w.root_path, b.state, count(s.id) AS sessions "
+            "FROM workspace_bindings b JOIN workspaces w ON w.id=b.workspace_id "
+            "LEFT JOIN sessions s ON s.workspace_id=w.id WHERE b.state='rebind_required' "
+            "GROUP BY w.id,b.state ORDER BY w.root_path")
+        return {"items": await cursor.fetchall()}
+
+
+@api.get("/legacy/sessions/{session_id}/messages", tags=["会话"])
+async def legacy_messages(session_id: UUID, current: Current, limit: MessageLimit = 100,
+                          before: int | None = None):
+    if current.settings.execution_profile != "host-controller":
+        raise HTTPException(404, "Only the host controller has legacy bindings")
+    async with current.runner.conversations.database.connection() as connection:
+        cursor = await connection.execute(
+            "SELECT 1 FROM sessions s JOIN workspace_bindings b ON b.workspace_id=s.workspace_id "
+            "WHERE s.id=%s AND b.state='rebind_required'", (session_id,))
+        if await cursor.fetchone() is None:
+            raise HTTPException(404, "Legacy session not found")
+    return await current.runner.conversations.message_page(session_id, before=before, limit=limit)
 
 
 @api.patch("/sessions/{session_id}", response_model=Session, tags=["会话"])
@@ -542,6 +588,10 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                injected_runtime: WebRuntime | None = None) -> FastAPI:
     """Injected runtime is caller-owned; production resources belong to lifespan."""
     workspace = validate_workspace(workspace)
+    effective_settings = settings or (injected_runtime.settings if injected_runtime is not None else Settings.from_env())
+    host_auth = HostAuth() if effective_settings.execution_profile == "host-controller" else None
+    if host_auth is not None:
+        host_auth.guard_workspace(workspace)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -576,7 +626,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                                 allow_workspace_writes=True, versioned_files=True)
                 else:
                     host_exec = None
-                    if os.environ.get("CHAGENT_HOST_EXEC", "off") == "approval":
+                    if configured.execution_profile != "host-controller" and os.environ.get("CHAGENT_HOST_EXEC", "off") == "approval":
                         endpoint = os.environ.get("CHAGENT_HOST_ENDPOINT", "")
                         token = os.environ.get("CHAGENT_HOST_TOKEN", "")
                         if not endpoint or len(token) < 32:
@@ -605,9 +655,12 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            approval_grace=configured.approval_unwatched_grace,
                                            process_wall_timeout=configured.process_timeout,
                                            max_processes=configured.max_processes, web=web,
-                                           host_exec=host_exec)
+                                           host_exec=host_exec,
+                                           native_host_exec=configured.execution_profile == "host-controller")
                 app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env(),
                                                programmable=not demo)
+                if host_auth is not None:
+                    app.state.runtime.auth_guard = host_auth.guard_workspace
                 try:
                     if not demo:
                         await app.state.runtime.require_programming(app.state.runtime.workspace)
@@ -630,6 +683,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                             LookupError: application_error, StateConflictError: application_error,
                             Exception: application_error},
     )
+    app.state.host_auth = host_auth
     app.include_router(api)
     from chagent.web.file_api import router as file_router
     from chagent.web.memory_api import router as memory_router
@@ -638,6 +692,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
     app.include_router(memory_router)
     app.include_router(workspace_router)
     app.add_api_route("/", asset, include_in_schema=False)
+    app.add_api_route("/health", lambda: {"app": "chagent"}, include_in_schema=False)
     # `path` because the page loads ES modules from subdirectories (`core/…`).
     # The allow-list below is still the only thing that decides what exists.
     app.add_api_route("/static/{name:path}", asset, include_in_schema=False)
@@ -657,5 +712,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
         return app.openapi_schema
     app.openapi = schema
     app.add_middleware(LocalBoundary)
+    if host_auth is not None:
+        app.add_middleware(HostAuthBoundary, auth=host_auth)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])
     return app
