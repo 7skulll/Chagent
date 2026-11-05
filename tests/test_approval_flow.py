@@ -268,6 +268,9 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
 
         broker.audience = audience
         broker.grace = 0.4
+        # The audience is consulted once per tick, so this test sets the cadence
+        # it counts on instead of inheriting the product's recovery interval.
+        broker.poll = 0.1
         session = await runner.conversations.create_session(self.workspace)
         identities = []
         task = asyncio.create_task(runner.run(session, "刷新一下", on_started=identities.append))

@@ -23,7 +23,12 @@ from chagent.storage.repositories import RunRepository
 from chagent.tools.policy import fingerprint, subject as subject_of
 
 
-POLL_SECONDS = 0.25
+#: How long a waiter sleeps before looking at the database again. A decision in
+#: this process arrives as an in-process wakeup and a decision from another
+#: process arrives over LISTEN/NOTIFY, so this is not how the wait works any
+#: more: it is the bound on how long a *lost* notification can go unnoticed. It
+#: was 0.25 s when polling was the mechanism.
+POLL_SECONDS = 1.0
 
 # A refusal is a policy decision, not a failure. Saying so is the difference
 # between a model that explains the block and one that retries with new flags.

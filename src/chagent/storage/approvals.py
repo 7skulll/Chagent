@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from psycopg.rows import DictRow
 
 from chagent.domain.json_types import JsonObject
+from chagent.events.notify import CHANNEL as WAKEUP_CHANNEL, notify_sql
 from chagent.storage.database import Database
 from chagent.storage.repositories import RunOwnershipLost, RunRepository
 
@@ -71,6 +72,7 @@ class ApprovalRepository:
                     "approval_id": str(row["id"]), "tool_call_id": str(tool_record_id),
                     "tool_name": tool_name, "subject": subject, "cwd": cwd,
                 }, locked=True)
+                await self._wake(connection, run_id)
         self.runs.notifications.notify(run_id)
         if row is not None:
             return ApprovalRequest.of(row)
@@ -112,6 +114,7 @@ class ApprovalRepository:
                 if row is None:
                     raise RuntimeError("Pending approval disappeared while creating its batch")
                 rows.append(row)
+            await self._wake(connection, run_id)
             # One event for the whole batch: the page shows one card, and three
             # events would draw three. The per-call rows are the audit record.
             first = rows[0]
@@ -123,6 +126,15 @@ class ApprovalRepository:
             }, locked=True)
         self.runs.notifications.notify(run_id)
         return [ApprovalRequest.of(row) for row in rows]
+
+    @staticmethod
+    async def _wake(connection, run_id: UUID) -> None:
+        """Ring the cross-process doorbell inside the same transaction.
+
+        ``pg_notify`` delivers on commit, so a decision that rolls back wakes
+        nobody and a waiter that wakes always finds the committed row.
+        """
+        await connection.execute(notify_sql(), (WAKEUP_CHANNEL, str(run_id)))
 
     async def get(self, approval_id: UUID) -> ApprovalRequest | None:
         async with self.database.connection() as connection:
@@ -158,6 +170,8 @@ class ApprovalRepository:
             for row in rows:
                 await self.runs._event(connection, row["run_id"], "approval_expired",
                                        {"approval_id": str(row["id"])}, locked=False)
+            for run_id in {row["run_id"] for row in rows}:
+                await self._wake(connection, run_id)
         for row in rows:
             self.runs.notifications.notify(row["run_id"])
         return len(rows)
@@ -172,6 +186,8 @@ class ApprovalRepository:
             for row in rows:
                 await self.runs._event(connection, run_id, "approval_cancelled",
                                        {"approval_id": str(row["id"]), "reason": note}, locked=False)
+            if rows:
+                await self._wake(connection, run_id)
         self.runs.notifications.notify(run_id)
         return len(rows)
 
@@ -215,6 +231,8 @@ class ApprovalRepository:
                 await self.runs._event(connection, decided_row["run_id"], "approval_decided", {
                     "approval_id": str(decided_row["id"]), "decision": status, "note": note,
                 }, locked=False)
+            for run_id in {row["run_id"] for row in decided}:
+                await self._wake(connection, run_id)
         self.runs.notifications.notify(decided[0]["run_id"])
         return status
 

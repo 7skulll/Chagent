@@ -1,4 +1,13 @@
-"""Loop-local broadcast wakeups without per-client event queues."""
+"""Broadcast wakeups for a run, in process and across processes.
+
+The in-process bus is the fast path. When the process owns a database, a
+LISTEN/NOTIFY listener is attached as well, so a decision made by another
+process (a second controller, a CLI, a script) wakes this one instead of waiting
+for the next poll tick.
+
+Neither path carries state: both only say "look again". ``Subscription.wait``
+therefore always times out eventually, and a lost notification costs latency.
+"""
 
 import asyncio
 from contextlib import contextmanager
@@ -25,15 +34,39 @@ class Subscription:
             async with asyncio.timeout(timeout):
                 await changed.wait()
         except TimeoutError:
-            pass  # Lost or cross-process notifications are recovered by polling.
+            # A missed notification (listener reconnecting) is recovered by the
+            # caller re-reading its rows; the timeout is that recovery bound.
+            pass
 
 
 class RunNotifications:
     def __init__(self):
         self._subscriptions: dict[UUID, Subscription] = {}
+        self._database = None
+        self._wakeups = None
+
+    def attach(self, database) -> None:
+        """Offer cross-process wakeups through this database, once it is open."""
+        self._database = database
+
+    def _ensure_listener(self) -> None:
+        if self._wakeups is not None or self._database is None:
+            return
+        if not getattr(self._database, "connected", False):
+            return
+        from chagent.events.notify import PostgresWakeups
+
+        self._wakeups = PostgresWakeups(self._database.conninfo, self.notify)
+        self._wakeups.start()
+
+    async def close(self) -> None:
+        wakeups, self._wakeups = self._wakeups, None
+        if wakeups is not None:
+            await wakeups.stop()
 
     @contextmanager
     def subscribe(self, run_id: UUID):
+        self._ensure_listener()
         subscription = self._subscriptions.setdefault(run_id, Subscription())
         subscription.users += 1
         try:
