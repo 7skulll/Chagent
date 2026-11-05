@@ -113,4 +113,43 @@ check(once.status.textContent !== "等待确认操作…", "the status line stil
 check(once.root.children.length === once.state.items.length,
       `live column has ${once.root.children.length} rows for ${once.state.items.length} items`);
 
+// 8. A batch decision is ONE card that lists every file it covers, because one
+//    click answers all of them on the server.
+const batchRoot = document.createElement("div");
+const batchRenderer = createRunRenderer({root: batchRoot, status: document.createElement("span"),
+                                         decide: () => {}});
+let batchState = reduce(initialRunState("run-2"), event("approval_requested", {}));
+batchState = reduce(batchState, event("approval_loaded", {request: {
+  id: "a1", tool_name: "write_file", subject: "overwrite a.txt", cwd: "/w",
+  expires_at: "2026-11-05T10:00:00Z",
+  items: [{id: "a1", subject: "overwrite a.txt"},
+          {id: "a2", subject: "overwrite b.txt"},
+          {id: "a3", subject: "overwrite c.txt"}],
+}}));
+batchRenderer.flush(batchState);
+const batchHtml = JSON.stringify(batchRoot);
+check(batchHtml.includes("需要确认：3 处文件改动"), "a batch card did not name the batch: " + batchHtml.slice(0, 200));
+for (const name of ["a.txt", "b.txt", "c.txt"]) {
+  check(batchHtml.includes("overwrite " + name), "the batch card lost " + name);
+}
+check(batchHtml.includes("批准这 3 处"), "the batch button does not say what it approves");
+const batchCard = batchRoot.children[0];
+const batchList = batchCard && batchCard.children.find(child => child.tagName === "UL");
+check(Boolean(batchList) && batchList.children.length === 3,
+      "the batch card did not list every file separately: " +
+      (batchList ? batchList.children.length + " rows" : "no list"));
+
+// 9. A single question keeps the old shape: no list, one subject, "批准这一次".
+const singleRoot = document.createElement("div");
+const singleRenderer = createRunRenderer({root: singleRoot, status: document.createElement("span"),
+                                          decide: () => {}});
+let singleState = reduce(initialRunState("run-3"), event("approval_requested", {}));
+singleState = reduce(singleState, event("approval_loaded", {request: {
+  id: "b1", tool_name: "exec_command", subject: "uname -s", cwd: "/w",
+  expires_at: "2026-11-05T10:00:00Z", items: [{id: "b1", subject: "uname -s"}]}}));
+singleRenderer.flush(singleState);
+const singleHtml = JSON.stringify(singleRoot);
+check(singleHtml.includes("批准这一次"), "a single question lost its button label");
+check(!singleHtml.includes("approval-item"), "a single question was rendered as a batch");
+
 process.stdout.write(JSON.stringify(problems));

@@ -389,7 +389,11 @@ async def run_approvals(run_id: UUID, current: Current):
     return {"waiting_for": "approval" if pending else None,
             "pending": [{"id": str(item.id), "tool_name": item.tool_name, "subject": item.subject,
                          "cwd": item.cwd, "expires_at": item.expires_at.isoformat(),
-                         "status": item.status} for item in pending]}
+                         "status": item.status,
+                         # A page shows one card per batch; the ids and the order
+                         # are what let it describe one decision over N calls.
+                         "batch_id": str(item.batch_id) if item.batch_id else None,
+                         "batch_index": item.batch_index} for item in pending]}
 
 
 @api.post("/approvals/{approval_id}/decide", tags=["运行"])

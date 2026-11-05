@@ -96,6 +96,14 @@ export function reduce(state, event) {
 
     case "approval_requested": {
       const next = copy(state);
+      // A batch sends one event, but a re-delivered event must not draw a second
+      // card: one question is on screen until it is answered.
+      const existing = findItem(next, entry => entry.kind === "approval");
+      if (existing) {
+        next.approvalId = existing.id;
+        next.status = "等待确认操作…";
+        return next;
+      }
       const item = {kind: "approval", id: ++next.seq, state: "loading", request: null};
       next.items.push(item);
       next.approvalId = item.id;

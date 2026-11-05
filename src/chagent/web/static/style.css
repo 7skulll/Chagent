@@ -907,3 +907,7 @@ textarea#input::placeholder{color:#a2a29c}
   .rail-icon{width:40px;height:40px}
   .file-panel-tabs button{min-height:40px}
 }
+
+/* 批量写审批：一张卡里列出每个文件 */
+.approval-items{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:2px}
+.approval-item code{font-size:var(--text-label)}

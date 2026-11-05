@@ -231,12 +231,29 @@ class WriteGate:
     def __init__(self, policy: ApprovalPolicy, broker: ApprovalBroker | None):
         self.policy, self.broker = policy, broker
 
+    def intent(self, call: ToolCall, context: ToolContext) -> "WriteIntent | None":
+        """Whether this call needs a page decision, without asking for one.
+
+        The scheduler uses this to collect every write of a model turn and ask
+        once; the write gate itself still answers single questions the same way.
+        """
+        if self.policy.mode == "never":
+            return None
+        graded = grade_write(call.name, call.arguments, context.workspace)
+        return graded if graded.reason else None
+
+    def grant(self, outcome) -> GateDecision:
+        return GateDecision(True, "", outcome.reason, outcome.approval_id, outcome.note)
+
+    def refusal(self, outcome) -> GateDecision:
+        return GateDecision(False, _with_note(WRITE_REFUSALS.get(outcome.reason, outcome.message),
+                                              outcome.note),
+                            outcome.reason or "denied")
+
     async def check(self, call: ToolCall, *, context: ToolContext,
                     tool_record_id: UUID, signal: asyncio.Event, budget) -> GateDecision:
-        if self.policy.mode == "never":
-            return GateDecision(True)
-        intent = grade_write(call.name, call.arguments, context.workspace)
-        if not intent.reason:
+        intent = self.intent(call, context)
+        if intent is None:
             return GateDecision(True)
         if self.broker is None:
             return GateDecision(False, WRITE_REFUSALS["unavailable"], "unavailable")
@@ -245,8 +262,5 @@ class WriteGate:
             tool_name=call.name, arguments=call.arguments,
             cwd=str(context.workspace), signal=signal, budget=budget,
             subject=intent.subject)
-        if outcome.approved and outcome.approval_id is not None:
-            return GateDecision(True, "", outcome.reason, outcome.approval_id, outcome.note)
-        return GateDecision(False, _with_note(WRITE_REFUSALS.get(outcome.reason, outcome.message),
-                                              outcome.note),
-                            outcome.reason or "denied")
+        return self.grant(outcome) if outcome.approved and outcome.approval_id is not None \
+            else self.refusal(outcome)

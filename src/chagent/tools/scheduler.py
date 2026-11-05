@@ -316,11 +316,18 @@ class ToolScheduler:
         gate = self._gates.setdefault(workspace, _WorkspaceGate())
         gate.users += 1
         try:
+            # Writes are asked once per model turn, before any group runs: three
+            # sequential `write_file` calls are one card, not three. The `asked`
+            # set keeps `_ask` from opening a second question for them.
+            batch_refused, batch_grants = await self._ask_writes(calls, context, identities, signal, budget)
+            asked: set[int] = set(batch_refused) | set(batch_grants)
             for parallel, indices in self._groups(calls, executor):
                 # Questions are asked before a slot, the workspace gate or an
                 # execution slot is taken, so an unanswered one blocks only this run.
                 refused, grants = await self._ask(calls, indices, context, executor, identities,
-                                                  signal, budget)
+                                                  signal, budget, skip=asked)
+                refused = {**batch_refused, **refused}
+                grants = {**batch_grants, **grants}
                 async with gate.hold(parallel):
                     # Cleanup must finish while still holding the gate: cancelled
                     # read threads may still be accessing this workspace.
@@ -333,12 +340,16 @@ class ToolScheduler:
         return ToolBatchResult([outcomes[i].result for i in range(len(calls))],
                                [committed[i].message for i in range(len(calls))], stalled)
 
-    async def _ask(self, calls, indices, context, executor, identities, signal, budget):
+    async def _ask(self, calls, indices, context, executor, identities, signal, budget, skip=frozenset()):
         """Run optional gates before taking execution resources."""
         refused: dict[int, object] = {}
         grants: dict[int, Grant] = {}
         gates = self.gates if self.gates is not None else self.default_gates()
         for index in indices:
+            if index in skip:
+                # Already answered by the write batch; asking again would be a
+                # second question for one decision.
+                continue
             call = calls[index]
             for gate in gates:
                 try:
@@ -358,6 +369,53 @@ class ToolScheduler:
                     break
                 if decision.approval_id is not None:
                     grants[index] = Grant(decision.approval_id, decision.note)
+        return refused, grants
+
+
+    async def _ask_writes(self, calls, context, identities, signal, budget):
+        """One page question for every write this model turn wants to make.
+
+        The batch spans the whole turn rather than one parallel group: writes are
+        sequential, so a per-group batch would still show three cards. Each call
+        keeps its own approval row, fingerprint and single-use consumption; only
+        the decision is shared.
+        """
+        refused: dict[int, object] = {}
+        grants: dict[int, Grant] = {}
+        gates = self.gates if self.gates is not None else self.default_gates()
+        gate = next((item for item in gates if isinstance(item, WriteGate)), None)
+        if gate is None or self.approvals is None:
+            return refused, grants
+        items: list[dict] = []
+        indexes: list[int] = []
+        for index, call in enumerate(calls):
+            intent = gate.intent(call, context)
+            if intent is None:
+                continue
+            items.append({"tool_record_id": identities[index], "tool_name": call.name,
+                          "arguments": call.arguments, "cwd": str(context.workspace),
+                          "subject": intent.subject})
+            indexes.append(index)
+        if not items:
+            return refused, grants
+        try:
+            outcomes = await self.approvals.request_batch(
+                run_id=context.run_id, items=items, signal=signal, budget=budget)
+        except Exception as error:
+            for index, call in zip(indexes, (calls[i] for i in indexes)):
+                refused[index] = approval_result(
+                    "Tool gate is unavailable; the tool was not executed.", None, "unavailable")
+                await self.runs.event(context.run_id, "tool_call_refused", {
+                    "tool_call_id": call.id, "name": call.name, "gate": "write",
+                    "reason": "unavailable", "error_type": type(error).__name__,
+                })
+            return refused, grants
+        for index, outcome in zip(indexes, outcomes):
+            if outcome.approved and outcome.approval_id is not None:
+                grants[index] = Grant(outcome.approval_id, outcome.note)
+            else:
+                decision = gate.refusal(outcome)
+                refused[index] = approval_result(decision.reason, decision.approval_id, decision.code)
         return refused, grants
 
 

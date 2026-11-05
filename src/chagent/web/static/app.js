@@ -67,7 +67,16 @@ async function loadApproval(runId) {
       runStore.update(current => reduce(current, {type: "approval_decided"}));
       return;
     }
-    runStore.update(current => reduce(current, {type: "approval_loaded", payload: {request: data.pending[0]}}));
+    // One card per batch: the server decides every row of the batch together,
+    // so the card must show them together.
+    const first = data.pending[0];
+    const items = first.batch_id
+      ? data.pending.filter(row => row.batch_id === first.batch_id)
+        .sort((left, right) => (left.batch_index ?? 0) - (right.batch_index ?? 0))
+      : [first];
+    const request = {...first, items: items.map(row => ({id: row.id, tool_name: row.tool_name,
+                                                         subject: row.subject}))};
+    runStore.update(current => reduce(current, {type: "approval_loaded", payload: {request}}));
   } catch (error) {
     runStore.update(current => reduce(current, {type: "approval_loaded", payload: {error: error.message}}));
   }

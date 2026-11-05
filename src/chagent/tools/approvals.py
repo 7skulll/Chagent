@@ -175,6 +175,81 @@ class ApprovalBroker:
             if budget is not None:
                 budget.resume()
 
+    async def request_batch(self, *, run_id: UUID, items: list[dict],
+                            signal: asyncio.Event | None = None, budget=None) -> list[ApprovalOutcome]:
+        """Ask one question about several writes, and answer it for all of them.
+
+        ``items`` is ``[{tool_record_id, tool_name, arguments, cwd, subject}]``,
+        one entry per call the model wants to make in this turn. Each row keeps
+        its own fingerprint and is consumed separately; the decision is shared,
+        because a page that showed three files and got one answer must not apply
+        it to two of them.
+
+        The outcome is per row: a sibling that expired before the decision stays
+        refused as expired, which is the only state that can differ inside one
+        batch.
+        """
+        requests = await self.approvals.create_batch(
+            run_id=run_id, ttl=self.timeout,
+            items=[{**item, "fingerprint": fingerprint(item["tool_name"], item["arguments"], item["cwd"])}
+                   for item in items])
+        batch_id = requests[0].batch_id
+        asked = False
+        unwatched_since: float | None = None
+        if budget is not None:
+            budget.pause(capped=False)
+        try:
+            with self.runs.notifications.subscribe(run_id) as subscription:
+                while True:
+                    version = subscription.version
+                    rows = await self.approvals.batch(batch_id)
+                    if signal is not None and signal.is_set():
+                        await self.approvals.cancel_pending(run_id, "run_cancelled")
+                        return [ApprovalOutcome(False, row.id, CANCELLED, "cancelled") for row in rows]
+                    pending = [row for row in rows if row.status == "pending"]
+                    if not pending:
+                        return [self._outcome(row) for row in rows]
+                    if pending[0].expires_at <= datetime.now(timezone.utc):
+                        await self.approvals.expire_due(run_id=run_id)
+                        continue
+                    if self.remote and self.audience is not None and self.grace > 0:
+                        if self.audience(run_id):
+                            unwatched_since = None
+                        elif unwatched_since is None:
+                            unwatched_since = monotonic()
+                        elif monotonic() - unwatched_since >= self.grace:
+                            if await self.approvals.decide(pending[0].id, approve=False,
+                                                           note="no viewer") == "conflict":
+                                continue
+                            continue
+                    if self.decider is not None and not asked:
+                        asked = True
+                        answer = await self.decider(pending[0])
+                        if answer is None and not self.remote:
+                            await self.approvals.decide(pending[0].id, approve=False,
+                                                        note="no interactive approver")
+                            continue
+                        if answer is not None:
+                            await self.approvals.decide(pending[0].id, approve=answer, note="local prompt")
+                            continue
+                    await subscription.wait(version, timeout=self.poll)
+        finally:
+            if budget is not None:
+                budget.resume()
+
+    @staticmethod
+    def _outcome(row: ApprovalRequest) -> ApprovalOutcome:
+        note = public_note(row.note)
+        if row.status == "approved":
+            return ApprovalOutcome(True, row.id, note=note)
+        if row.status == "denied":
+            return ApprovalOutcome(False, row.id, DENIED, "denied", note)
+        if row.status == "expired":
+            return ApprovalOutcome(False, row.id, EXPIRED, "expired")
+        if row.status == "cancelled":
+            return ApprovalOutcome(False, row.id, CANCELLED, "cancelled")
+        return ApprovalOutcome(False, row.id, UNAVAILABLE, "unavailable")
+
     async def cancel(self, run_id: UUID, note: str = "run_ended") -> int:
         return await self.approvals.cancel_pending(run_id, note)
 
