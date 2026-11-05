@@ -266,6 +266,11 @@ class HostWorkspaceIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(replay.is_error)
         self.assertTrue(replay.outcome_unknown)
         self.assertIn("already been used", replay.content[0].text)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT count(*) AS rows FROM native_stdin_writes WHERE run_id=%s AND process_id=%s",
+                (run, process_id))
+            self.assertEqual((await cursor.fetchone())["rows"], 1)
 
         # EOF is its own one-time approval; cat then exits and the audit row
         # settles to its terminal status without any further tool call.
