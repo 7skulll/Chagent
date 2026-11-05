@@ -11,9 +11,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  approvalTitle, attachmentPrompt, configValue, formatRate, formatSize, formatTokens,
-  hostOf, isTerminal, locatorLabel, plainText, readableName, runStatusText, uploadStatusLabel,
-  workspaceName, workspaceParent,
+  approvalTitle, attachmentPrompt, configValue, diffSummary, formatRate, formatSize, formatTokens,
+  hostOf, isTerminal, locatorLabel, networkSummary, plainText, readableName, runStatusText,
+  uploadStatusLabel, workspaceName, workspaceParent,
 } from "../../src/chagent/web/static/core/format.js";
 import { initialRunState, reduce } from "../../src/chagent/web/static/run/run-reducer.js";
 
@@ -195,6 +195,30 @@ test("the final file notice uses persisted diff counts and paths", () => {
       added: [{path: "index.html"}], modified: [], deleted: []},
   }));
   assert.match(state.items[0].text, /新增 1，修改 0，删除 0：index.html/);
+});
+
+test("network notice reads observed destinations and bytes", () => {
+  const state = reduce(initialRunState("r1"), event("network_observed", {
+    complete: true, sent_bytes: 2723, targets: [{ip: "104.20.23.154", port: 443}],
+  }));
+  assert.match(state.items[0].text, /2723 字节；目标 104\.20\.23\.154:443/);
+});
+
+test("the closing record names the changed files", () => {
+  const diff = {complete: true, added: [{path: "a.txt"}], modified: [{path: "b.txt"}], deleted: [],
+                counts: {added: 1, modified: 1, deleted: 0}};
+  assert.equal(diffSummary(diff), "工作区改动：新增 1，修改 1，删除 0：a.txt、b.txt");
+  assert.equal(diffSummary({...diff, complete: false}).endsWith("；扫描不完整"), true);
+  assert.equal(diffSummary(null), "");
+});
+
+test("the closing record names the destinations and bytes", () => {
+  assert.equal(networkSummary({complete: true, sent_bytes: 2723,
+    targets: [{ip: "104.20.23.154", port: 443}, {ip: "192.168.65.7", port: 53}]}),
+    "容器出网：2723 字节；目标 104.20.23.154:443、192.168.65.7:53");
+  assert.equal(networkSummary({complete: true, sent_bytes: 0, targets: []}), "容器出网：0 字节；目标 无");
+  assert.match(networkSummary({complete: false}), /不完整/);
+  assert.equal(networkSummary(null), "");
 });
 
 test("the same events always produce the same state", () => {

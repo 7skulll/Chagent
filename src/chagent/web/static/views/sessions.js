@@ -9,6 +9,7 @@
 import { $, el, on, textNode } from "../core/dom.js";
 import { api, patch, post } from "../core/api.js";
 import { ARCHIVED_HINT, isTerminal, workspaceName } from "../core/format.js";
+import { runSummaryView } from "../render/run-summary.js";
 
 export function createSessionsView(ui) {
   const state = ui.state;
@@ -213,6 +214,9 @@ export function createSessionsView(ui) {
       else if (session.latest_run) {
         ui.showRunStatus(session.latest_run);
         ui.watchMemoryJob(session.latest_run.id, version);
+        // The live column is cleared when the run ends; read the closing record
+        // back so a fast run's last notice is still there after a refresh.
+        ui.appendRunSummary(session.latest_run.id, version);
       }
       ui.loadUsagePill();
       ui.loadGeneratedFiles().catch(ui.showError);

@@ -803,6 +803,14 @@ class RunRepository:
             row = await cursor.fetchone()
             return row["payload"].get("diff") if row is not None else None
 
+    async def network_observation(self, run_id: UUID) -> dict | None:
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT payload FROM run_events WHERE run_id = %s "
+                "AND type = 'network_observed' ORDER BY sequence DESC LIMIT 1", (run_id,))
+            row = await cursor.fetchone()
+            return row["payload"] if row is not None else None
+
     async def terminal_sequence(self, run_id: UUID) -> int | None:
         async with self.database.connection() as connection:
             cursor = await connection.execute(

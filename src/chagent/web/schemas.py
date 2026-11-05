@@ -320,6 +320,7 @@ class RunView(BaseModel):
     approval_id: UUID | None = None
     approval: dict | None = None
     file_diff: dict | None = None
+    network_observation: dict | None = None
 
 
 class ApprovalDecision(BaseModel):

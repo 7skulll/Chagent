@@ -344,6 +344,12 @@ body.sidebar-collapsed .sidebar{display:none}
   font-size:var(--text-label);color:var(--ink-2)}
 .tool-status.failed{border-left-color:var(--danger-line);color:var(--danger)}
 
+/* 运行收尾记录：终态后仍在转录里的一段事实，不是实时提示 */
+.run-summary{margin:var(--sp-3) 0;padding:var(--sp-2) var(--sp-3);border:1px solid var(--line);
+  border-radius:var(--radius);background:var(--surface-2);font-size:var(--text-label)}
+.run-summary-title{margin:0 0 var(--sp-1);font-size:var(--text-meta);color:var(--ink-3);font-weight:600}
+.run-summary-facts{margin:0;padding-left:1.1em;color:var(--ink-2);line-height:var(--leading-ui)}
+
 /* 审批 */
 .approval{display:flex;flex-direction:column;gap:var(--sp-1);margin:var(--sp-3) 0;padding:var(--sp-3);
   border:1px solid var(--warn-line);border-radius:var(--r-2);background:var(--warn-soft)}

@@ -9,6 +9,7 @@ import { $, el, on, textNode } from "../core/dom.js";
 import { api, post } from "../core/api.js";
 import { ARCHIVED_HINT, NEAR_BOTTOM, formatRate, formatTokens, isPendingUpload, runStatusText } from "../core/format.js";
 import { usageTable } from "../render/usage.js";
+import { runSummaryView } from "../render/run-summary.js";
 
 // The empty state's openers. Each is a task the base tool surface can finish
 // (read, search, explain), so nothing here promises a network call or a host
@@ -187,6 +188,16 @@ export function createChatView(ui) {
     await refresh();
   }
 
+  /* The run's closing record, read from the row rather than replayed from the
+   * event stream: the stream is gone by the time this matters. */
+  async function appendRunSummary(runId, version) {
+    if (!runId) return;
+    const run = await api(`/api/runs/${runId}`);
+    if (version !== state.version) return;
+    const block = runSummaryView(run);
+    if (block && !$("messages").querySelector(".run-summary")) $("messages").append(block);
+  }
+
   /* ---------- 用量（只报 token，不报钱） ---------- */
   async function loadUsagePill() {
     const pill = $("usage-pill");
@@ -238,7 +249,7 @@ export function createChatView(ui) {
 
   return {
     setBusy, updateComposer, resizeComposer, scrollBottom, requestRun,
-    showRunStatus, watchMemoryJob, loadUsagePill,
+    showRunStatus, watchMemoryJob, loadUsagePill, appendRunSummary,
     // Test seam: tests/js/render-page.mjs drives the same scroll policy a reader
     // would by scrolling. Nothing in the page reads this.
     setFollow(value) { follow = value; },

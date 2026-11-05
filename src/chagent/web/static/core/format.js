@@ -186,3 +186,28 @@ export const MEMORY_JOB = {
 export const ARCHIVED_HINT = "已归档，恢复后才能继续对话";
 //: How close to the bottom still counts as "following the stream".
 export const NEAR_BOTTOM = 96;
+
+/* ---------- run closing summary ----------
+ * The same two facts the live notice shows, phrased for a record that stays in
+ * the transcript. The live area is cleared when a run ends, so a fast run can
+ * finish before the frame that would have painted its last notice; the summary
+ * is read from the run row instead of from the event stream. */
+
+export function diffSummary(diff) {
+  if (!diff) return "";
+  const counts = diff.counts || {added: 0, modified: 0, deleted: 0};
+  const paths = [...(diff.added || []), ...(diff.modified || []), ...(diff.deleted || [])]
+    .slice(0, 12).map(item => item.path);
+  const suffix = paths.length ? `：${paths.join("、")}` : "";
+  const incomplete = diff.complete === false ? "；扫描不完整" : "";
+  return `工作区改动：新增 ${counts.added}，修改 ${counts.modified}，删除 ${counts.deleted}${suffix}${incomplete}`;
+}
+
+export function networkSummary(observation) {
+  if (!observation) return "";
+  if (observation.complete !== true) return "命令网络观测不完整，请查看运行记录";
+  const targets = (observation.targets || []).map(item => `${item.ip}:${item.port}`);
+  const shown = targets.slice(0, 12).join("、");
+  const more = targets.length > 12 ? ` 等 ${targets.length} 个目标` : "";
+  return `容器出网：${observation.sent_bytes ?? 0} 字节；目标 ${shown || "无"}${more}`;
+}

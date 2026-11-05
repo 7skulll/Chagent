@@ -165,6 +165,13 @@ export function reduce(state, event) {
     case "workspace_manifest_error":
       return notice(state, "工作区文件清单未能完整记录，请查看运行记录。", true);
 
+    case "network_observed": {
+      if (!payload.complete) return notice(state, "本次命令网络观测不完整，请查看运行记录。", true);
+      const destinations = payload.targets.slice(0, 12).map(item => `${item.ip}:${item.port}`).join("、");
+      const more = payload.targets.length > 12 ? ` 等 ${payload.targets.length} 个目标` : "";
+      return notice(state, `工作区容器出网：${payload.sent_bytes} 字节；目标 ${destinations || "无"}${more}`);
+    }
+
     default:
       // Unknown event types are ignored rather than fatal: the server owns the
       // event vocabulary, and a page that throws on a new one loses the run.

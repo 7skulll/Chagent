@@ -30,6 +30,7 @@ from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
 from chagent.tools.scheduler import ToolScheduler
 from chagent.workspace_manifest import snapshot, diff
+from chagent.hostexec.network_audit import NetworkAudit
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ class AgentRunner:
         self.processes = None
         self._workspace_identities = {}
         self._manifest_after_recorded: set[UUID] = set()
+        self._network_after_recorded: set[UUID] = set()
 
     def cancel(self, run_id: UUID) -> bool:
         task = self._tasks.get(run_id)
@@ -143,6 +145,7 @@ class AgentRunner:
                            wall_seconds=self.wall_timeout)
         manifest_root = None
         manifest_before = None
+        network_audit = None
         try:
             budget.start()
             if on_started is not None:
@@ -151,6 +154,12 @@ class AgentRunner:
             self._states[run_id] = state
             manifest_root = state.session.workspace
             manifest_before = await self._record_manifest_before(run_id, manifest_root)
+            if self.sandbox is not None and self.sandbox.settings.host_controller:
+                network_audit = NetworkAudit(self.sandbox, manifest_root, run_id)
+                available = await network_audit.start()
+                await self.runs.event(run_id, "network_monitor_started", {"available": available})
+                if not available:
+                    raise RunExecutionError("Workspace network monitor is unavailable", "execution_error")
             command = (self.memory_service.explicit_command(state)
                        if self.memory_service is not None else None)
             result = (await self._explicit_memory(state, command) if command is not None
@@ -160,6 +169,7 @@ class AgentRunner:
                 # enqueues a job so this answer never waits for a second model call.
                 await self.memory_service.on_completed(
                     connection, session_id, run_id, state=state, has_answer=result.message is not None)
+            await self._record_network_after(run_id, network_audit)
             await self._record_manifest_after(run_id, manifest_root, manifest_before)
             await self.runs.finish(run_id, "completed", end_reason=result.end_reason,
                                    on_completed=commit if self.memory_service is not None else None)
@@ -170,10 +180,10 @@ class AgentRunner:
                 raise RunFailedError(run_id, "Run heartbeat failed; ownership is uncertain", "storage_error") from heartbeat_error
             if budget.expired:
                 await self._close_if_running(run_id, "failed", "Run exceeded its time budget", "run_timeout",
-                                             manifest_root, manifest_before)
+                                             manifest_root, manifest_before, network_audit)
                 raise RunFailedError(run_id, "Run exceeded its time budget", "run_timeout") from None
             await self._close_if_running(run_id, "cancelled", "Run cancelled", "user_cancelled",
-                                         manifest_root, manifest_before)
+                                         manifest_root, manifest_before, network_audit)
             raise
         except RunOwnershipLost as error:
             raise RunFailedError(run_id, str(error), "storage_error") from error
@@ -190,12 +200,15 @@ class AgentRunner:
             else:
                 end_reason = "execution_error"
             status = "cancelled" if end_reason == "model_aborted" else "failed"
-            await self._close_if_running(run_id, status, reason, end_reason, manifest_root, manifest_before)
+            await self._close_if_running(run_id, status, reason, end_reason,
+                                         manifest_root, manifest_before, network_audit)
             raise RunFailedError(run_id, reason, end_reason) from error
         else:
             return result
         finally:
             budget.stop()
+            if network_audit is not None and network_audit.finished is None:
+                await network_audit.stop()
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
             processes_reaped = self.processes is None
@@ -227,6 +240,7 @@ class AgentRunner:
             self._tasks.pop(run_id, None)
             self._states.pop(run_id, None)
             self._manifest_after_recorded.discard(run_id)
+            self._network_after_recorded.discard(run_id)
             if self.context_manager is not None:
                 self.context_manager.release(run_id)
             try:
@@ -283,8 +297,16 @@ class AgentRunner:
             await self.runs.event(run_id, "workspace_manifest_error",
                                   {"phase": "after", "reason": type(error).__name__})
 
+    async def _record_network_after(self, run_id: UUID, audit: NetworkAudit | None) -> None:
+        if audit is None or run_id in self._network_after_recorded:
+            return
+        data = await audit.stop()
+        await self.runs.event(run_id, "network_observed", data)
+        self._network_after_recorded.add(run_id)
+
     async def _close_if_running(self, run_id: UUID, status: str, reason: str, end_reason: RunEndReason,
-                                manifest_root=None, manifest_before: dict | None = None) -> None:
+                                manifest_root=None, manifest_before: dict | None = None,
+                                network_audit: NetworkAudit | None = None) -> None:
         """Close a run from an exception handler without leaking storage errors.
 
         ``finish`` re-checks ownership, and an exception raised inside an
@@ -298,6 +320,7 @@ class AgentRunner:
             return
         try:
             try:
+                await self._record_network_after(run_id, network_audit)
                 await self._record_manifest_after(run_id, manifest_root, manifest_before)
             except (DatabaseError, PoolTimeout):
                 # An already failed event buffer can still be dropped by finish.

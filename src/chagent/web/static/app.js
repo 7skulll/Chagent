@@ -139,6 +139,7 @@ Object.assign(ui, {
   setBusy: chat.setBusy, updateComposer: chat.updateComposer, resizeComposer: chat.resizeComposer,
   scrollBottom: chat.scrollBottom, nearBottom: chat.nearBottom, requestRun: chat.requestRun,
   showRunStatus: chat.showRunStatus, watchMemoryJob: chat.watchMemoryJob,
+  appendRunSummary: chat.appendRunSummary,
   loadUsagePill: chat.loadUsagePill, isFollowing: () => chat.following,
   setFollow: value => chat.setFollow(value),
 });

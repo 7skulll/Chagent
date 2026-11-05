@@ -53,6 +53,11 @@ const ROUTES = {
   "/api/workspaces": {path: "/tmp", items: [{id: "w1", path: "/tmp", available: true, sessions: 1}]},
   "/api/sessions": {items: [], next_cursor: null, archived_count: 0},
   "/api/runs?active=true": {items: []},
+  ["/api/runs/" + RUN2]: {id: RUN2, status: "completed", end_reason: "model_stop",
+    file_diff: {complete: true, added: [{path: "故事.md"}], modified: [], deleted: [],
+                counts: {added: 1, modified: 0, deleted: 0}},
+    network_observation: {complete: true, sent_bytes: 2723, packets: 9,
+                          targets: [{ip: "104.20.23.154", port: 443}]}},
 };
 const CALLS = [];
 globalThis.fetch = async (path, options) => {
@@ -91,6 +96,15 @@ setTimeout(() => {
   check(text.includes("docs.example.org/page"), "a fetched page is not cited");
   check(text.includes("project.db"), "the injected memory is not cited");
   check(!text.includes("<script"), "model output produced a script tag");
+  const summary = messages.querySelector(".run-summary");
+  check(Boolean(summary), "the finished run's closing record is missing");
+  if (summary) {
+    // The stub's textContent only holds a node's own text, so serialize the
+    // subtree — the same way the message assertions above do.
+    const facts = JSON.stringify(summary, (key, value) => (key === "listeners" ? undefined : value));
+    check(facts.includes("故事.md"), "the closing record lost the changed file: " + facts);
+    check(facts.includes("104.20.23.154:443"), "the closing record lost the destination: " + facts);
+  }
   const artifactList = document.getElementById("artifacts-list");
   check(artifactList.children.length === 1, "sidebar should list only generated files");
   check(document.getElementById("artifacts-count").textContent === "1", "sidebar count is wrong");
