@@ -160,9 +160,7 @@ class Sandbox:
                         raise RuntimeError("Container identity does not match this workspace")
                     if details.get("State", {}).get("Running") and await self._site_worker_running(name):
                         raise RuntimeError("Stop the website before rebuilding")
-                    code, output = await self._docker("rm", "-f", name)
-                    if code:
-                        raise RuntimeError("Could not remove old workspace container: " + output[-200:])
+                    await self._remove_container(name, "Could not remove old workspace container: ")
                 async with database.connection() as connection:
                     await connection.execute("UPDATE workspace_containers SET state='reaped' WHERE workspace_id=%s",
                                              (workspace_id,))
@@ -335,6 +333,23 @@ class Sandbox:
         async with self._lease_lock(name):
             self._run_containers.pop(str(owner), None)
 
+    async def _remove_container(self, name: str, failure: str) -> None:
+        """Delete a container; absence afterwards is the success condition.
+
+        Two controllers share one Docker daemon. The loser of a race sees either
+        "no such container" or "removal already in progress", and neither is a
+        failure of its own cycle. Only a container that survives the wait is.
+        """
+        code, output = await self._docker("rm", "-f", name)
+        if code == 0:
+            return
+        for _ in range(10):
+            status, _ = await self._docker("inspect", name, "--format", "{{.Id}}")
+            if status != 0:
+                return
+            await asyncio.sleep(0.2)
+        raise RuntimeError(failure + output[-200:])
+
     async def reap_terminal_scratch(self, database) -> int:
         """Remove only scratch directories belonging to terminal database runs.
 
@@ -438,9 +453,7 @@ class Sandbox:
                         code, processes = await self._docker("top", name)
                         if code or len(processes.splitlines()) > 2:
                             continue
-                    code, output = await self._docker("rm", "-f", name)
-                    if code:
-                        raise RuntimeError("Could not reap workspace container: " + output[-200:])
+                    await self._remove_container(name, "Could not reap workspace container: ")
                     async with database.connection() as connection:
                         await connection.execute("UPDATE workspace_containers SET state='reaped' WHERE workspace_id=%s",
                                                  (row["workspace_id"],))
@@ -529,9 +542,7 @@ class Sandbox:
                         if code or len(processes.splitlines()) > 2:
                             # The managed base container has only sleep infinity.
                             continue
-                    code, message = await self._docker("rm", "-f", name)
-                    if code:
-                        raise RuntimeError("Could not reap orphan container: " + message[-200:])
+                    await self._remove_container(name, "Could not reap orphan container: ")
                     removed += 1
         return removed
 

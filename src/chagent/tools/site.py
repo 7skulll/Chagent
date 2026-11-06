@@ -35,12 +35,21 @@ class SiteTool(AgentTool):
         return 60.0
 
     async def _state(self, name: str):
-        code, output = await self.sandbox._docker("exec", name, "cat", "/cache/site/chagent-site.json")
-        if code:
-            return None
-        try:
-            state = json.loads(output)
-        except ValueError:
+        # Containers created before the state moved to /cache/site keep the same
+        # file in /tmp. The GC protection already reads both, so status must too;
+        # otherwise a live pre-upgrade site is reported unknown and offered a
+        # restart that would collide on its port.
+        state = None
+        for path in ("/cache/site/chagent-site.json", "/tmp/chagent-site.json"):
+            code, output = await self.sandbox._docker("exec", name, "cat", path)
+            if code:
+                continue
+            try:
+                state = json.loads(output)
+            except ValueError:
+                continue
+            break
+        if state is None:
             return None
         pid = str(state.get("worker_pid", ""))
         if state.get("state") in {"running", "starting"} and pid.isdigit():
@@ -50,7 +59,9 @@ class SiteTool(AgentTool):
                 start = observed.rsplit(") ", 1)[1].split()[19] if alive == 0 else None
             except (IndexError, ValueError):
                 start = None
-            if start != state.get("worker_start"):
+            # No start time in the file means the process itself is the only
+            # evidence; a recorded one also catches PID reuse.
+            if start is None or (state.get("worker_start") and start != state["worker_start"]):
                 state["state"] = "stopped"
         return state
 
@@ -149,7 +160,8 @@ class SiteTool(AgentTool):
             with fs.directory(parts):
                 pass
             cwd = fs.root.joinpath(*parts)
-            await self.sandbox._docker("exec", name, "rm", "-f", "/cache/site/chagent-site.json")
+            for stale in ("/cache/site/chagent-site.json", "/tmp/chagent-site.json"):
+                await self.sandbox._docker("exec", name, "rm", "-f", stale)
             code, output = await self.sandbox._docker("exec", "--detach", "--workdir", str(cwd),
                 "--env", "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin",
                 "--env", "HOME=/tmp", "--env", "PYTHONPATH=" + str(fs.root),

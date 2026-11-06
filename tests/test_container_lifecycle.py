@@ -1,6 +1,9 @@
 """Focused checks for per-run scratch and persistent site identity."""
 
 import asyncio
+import hashlib
+import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -37,6 +40,20 @@ class ContainerLifecycleTests(TestCase):
                     self.assertEqual(argv[-3:], ["chagent-run", scratch, "true"])
                     await sandbox.release(owner)
                     docker.assert_awaited_once_with("exec", "chagent-ws-test", "rm", "-rf", "--", scratch)
+        asyncio.run(check())
+
+    def test_site_state_falls_back_to_pre_upgrade_location(self):
+        async def check():
+            sandbox = Sandbox(SandboxSettings(containerized=True, host_controller=True))
+            tool = SiteTool(sandbox, None)
+            payload = '{"state":"running","worker_pid":39,"actual_port":8000}'
+            stat = "39 (python) S " + "0 " * 18 + "999 "
+            with patch.object(sandbox, "_docker", AsyncMock(side_effect=[
+                    (1, "No such file or directory"),   # /cache/site/... is absent
+                    (0, payload),                        # the old /tmp file is not
+                    (0, stat)])):
+                state = await tool._state("chagent-ws-test")
+            self.assertEqual(state["state"], "running")
         asyncio.run(check())
 
     def test_site_pid_reuse_is_stopped(self):
@@ -209,6 +226,79 @@ class ContainerLifecycleTests(TestCase):
                     proceed.set()
                     await startup
                     await sandbox.release(owner)
+        asyncio.run(check())
+
+    def test_container_deleted_by_another_controller_is_not_an_error(self):
+        async def check():
+            sandbox = Sandbox(SandboxSettings(containerized=True, host_controller=True))
+            name = "chagent-ws-" + "a" * 20
+            failure = "Could not reap orphan container: "
+            with patch.object(sandbox, "_docker", AsyncMock(side_effect=[
+                    (1, f"Error: No such container: {name}"), (1, "no such object")])):
+                await sandbox._remove_container(name, failure)
+            # The other controller is mid-removal: the container survives one look
+            # and is gone on the next, which is not a failure of this cycle.
+            with patch.object(sandbox, "_docker", AsyncMock(side_effect=[
+                    (1, "removal of container is already in progress"),
+                    (0, "sha256:abc"), (1, "no such object")])), \
+                 patch("chagent.tools.sandbox.asyncio.sleep", AsyncMock()) as sleep:
+                await sandbox._remove_container(name, failure)
+            sleep.assert_awaited_once()
+            # A container that is still there after the wait is a real failure.
+            with patch.object(sandbox, "_docker", AsyncMock(side_effect=[
+                    (1, "device or resource busy")] + [(0, "sha256:abc")] * 10)), \
+                 patch("chagent.tools.sandbox.asyncio.sleep", AsyncMock()):
+                with self.assertRaisesRegex(RuntimeError, "Could not reap orphan container"):
+                    await sandbox._remove_container(name, failure)
+        asyncio.run(check())
+
+    def test_orphan_cycle_continues_after_losing_the_delete_race(self):
+        async def check():
+            sandbox = Sandbox(SandboxSettings(containerized=True, host_controller=True))
+
+            def details(path):
+                h = hashlib.sha256(os.fsencode(path)).hexdigest()
+                return h, json.dumps({
+                    "Mounts": [{"Type": "bind", "Source": path, "Destination": path, "RW": True},
+                               {"Type": "volume", "Destination": "/cache"}],
+                    "Config": {"Labels": {"chagent.workspace": h}}, "State": {"Running": True}})
+
+            first_hash, first = details("/private/tmp/orphan-first")
+            second_hash, second = details("/private/tmp/orphan-second")
+            names = ["chagent-ws-" + first_hash[:20], "chagent-ws-" + second_hash[:20]]
+            inspections = {names[0]: first, names[1]: second}
+            gone = set()
+
+            async def docker(*args):
+                if args[:2] == ("ps", "-a"):
+                    return 0, "\n".join(names)
+                if args[0] == "inspect":
+                    return (1, "no such object") if args[1] in gone else (0, inspections[args[1]])
+                if args[0] == "exec" and args[-2:] == ("-1", "/tmp"):
+                    return 0, ""
+                if args[0] == "exec":
+                    return 1, ""
+                if args[0] == "top":
+                    return 0, "PID CMD\n1 sleep infinity"
+                if args[0] == "rm":
+                    gone.add(args[-1])
+                    # The first delete loses to a faster controller.
+                    return (1, "Error: No such container") if args[-1] == names[0] else (0, "")
+                raise AssertionError(args)
+
+            class Cursor:
+                async def fetchone(self): return None
+
+            class Connection:
+                async def __aenter__(self): return self
+                async def __aexit__(self, *args): return None
+                async def execute(self, *args): return Cursor()
+
+            class Database:
+                def connection(self): return Connection()
+
+            with patch.object(sandbox, "_docker", AsyncMock(side_effect=docker)):
+                self.assertEqual(await sandbox.reap_orphan_containers(Database()), 2)
         asyncio.run(check())
 
     def test_orphans_are_previewed_for_one_gc_interval(self):
