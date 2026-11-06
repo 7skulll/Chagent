@@ -28,12 +28,14 @@ from chagent.tools.base import AgentTool, AgentToolResult
 from chagent.tools.context import ToolContext
 
 
-# Six 2.4 KB tool results force compaction inside this window; the window also has
-# to hold the run-static environment snapshot, so it is not the bare minimum.
-# Sized so a 2.4 KB tool result plus the fixed prompt still leaves room for the
-# retained input. The named system sections added ~150 bytes of prefix; the
-# fixture follows the prompt rather than the prompt being trimmed to the fixture.
-LONG_RUN_WINDOW = 14_500
+# Six ~1.6 k-token tool results force compaction inside this window. The window is
+# sized in the estimator's units, which are tokens rather than UTF-8 bytes: a
+# result larger than eight kilobytes becomes an artifact reference instead of
+# inline text, so six results can only fill a window this size while each one
+# stays below that threshold. The fixed prompt and the 2 k-token summary have to
+# fit alongside them.
+LONG_RUN_WINDOW = 9_000
+LONG_TOOL_RESULT_CHARS = 6_600
 
 
 class EmitTool(AgentTool):
@@ -88,7 +90,7 @@ class LongRunTests(unittest.IsolatedAsyncioTestCase):
         await migrate(self.database)
         self.runner = create_demo_runner(self.database, compaction_policy=CompactionPolicy())
         self.runner.model.context_window = LONG_RUN_WINDOW
-        self.runner.tools.registry.register(EmitTool("tool result\n" + "x" * 2400))
+        self.runner.tools.registry.register(EmitTool("tool result\n" + "x" * LONG_TOOL_RESULT_CHARS))
         self.client = LongClient()
         self.runner.client = self.client
         # An empty workspace keeps the run-static environment snapshot small; these

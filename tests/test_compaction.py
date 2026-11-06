@@ -94,7 +94,19 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
     async def drop_schema(self):
         await self.admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(self.schema)))
 
-    async def seed(self, count=4, size=900):
+    def summary_only(self):
+        """Pin the summary implementation by turning the fresh-window fallback off.
+
+        ``CompactionPolicy`` now falls back to a host-authored checkpoint when the
+        summarizer fails. These cases are about what the *summary* path guarantees,
+        so the fallback is disabled at the point of the assertion rather than in
+        the shared runner; the fallback itself is covered in
+        ``test_compaction_fresh_window.py``.
+        """
+        manager = self.runner.context_manager
+        manager.policy = replace(manager.policy, fresh_window="off")
+
+    async def seed(self, count=4, size=2400):
         self.runner.model.context_window = 100_000
         for index in range(count):
             await self.runner.run(self.session, f"old turn {index}: " + "x" * size)
@@ -178,7 +190,7 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         await self.seed()
         await self.runner.run(self.session, "first compact")
         previous = await self.summaries.latest(self.session)
-        await self.seed(count=3, size=1000)
+        await self.seed(count=3, size=2600)
         await self.runner.run(self.session, "second compact")
         summary = await self.summaries.latest(self.session)
         self.assertEqual(summary.revision, 2)
@@ -193,7 +205,7 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await self.summaries.list(self.session)), 2)
 
     async def test_multiple_bounded_summary_calls_create_one_checkpoint(self):
-        await self.seed(count=7, size=1200)
+        await self.seed(count=7, size=3000)
         result = await self.runner.run(self.session, "compact a backlog")
         summary = await self.summaries.latest(self.session)
         self.assertIsNotNone(summary)
@@ -207,6 +219,7 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(json.loads(requests[1].messages[1].content)["previous_summary"])
 
     async def test_failed_summary_never_activates_and_credentials_are_not_logged(self):
+        self.summary_only()
         for mode in ("empty", "length", "oversize", "tool", "incomplete", "exception"):
             with self.subTest(mode=mode):
                 self.session = await self.runner.conversations.create_session(Path(self.temporary.name))
@@ -280,10 +293,11 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.message.stop_reason, "stop")
 
     async def test_timeout_and_call_limit_leave_previous_checkpoint_active(self):
+        self.summary_only()
         await self.seed()
         await self.runner.run(self.session, "initial checkpoint")
         previous = await self.summaries.latest(self.session)
-        await self.seed(count=7, size=1200)
+        await self.seed(count=7, size=3000)
         manager = self.runner.context_manager
         manager.policy = replace(manager.policy, max_calls=1)
         manager.compactor.policy = manager.policy
@@ -300,7 +314,8 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("compaction_failed", [event["type"] for event in await self.runner.runs.events(result.run_id)])
 
     async def test_single_oversized_old_turn_is_not_silently_truncated(self):
-        await self.seed(count=1, size=10_000)
+        self.summary_only()
+        await self.seed(count=1, size=45_000)
         result = await self.runner.run(self.session, "continue past huge old turn")
         self.assertIsNone(await self.summaries.latest(self.session))
         self.assertEqual(await self.calls(result.run_id), [])

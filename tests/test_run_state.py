@@ -2,6 +2,7 @@
 
 import asyncio
 from copy import deepcopy
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import tempfile
@@ -17,12 +18,13 @@ from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
 from chagent.domain.memories import MemoryPolicy
 from chagent.domain.messages import AssistantMessage, ToolCall, UserMessage
+from chagent.domain.runs import StoredMessage
 from chagent.models.events import DoneEvent, ErrorEvent, StartEvent
 from chagent.models.fake import FakeModelClient
 from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
 from chagent.tools.echo import EchoTool
-from test_long_runs import LONG_RUN_WINDOW, EmitTool, LongClient
+from test_long_runs import LONG_RUN_WINDOW, LONG_TOOL_RESULT_CHARS, EmitTool, LongClient
 
 
 class StopTool(EchoTool):
@@ -288,7 +290,7 @@ class RunStateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_compaction_reuses_committed_checkpoint_without_history_reload(self):
         self.runner.model.context_window = LONG_RUN_WINDOW
-        self.runner.tools.registry.register(EmitTool("tool output " + "x" * 2400))
+        self.runner.tools.registry.register(EmitTool("tool output " + "x" * LONG_TOOL_RESULT_CHARS))
         self.runner.client = LongClient(steps=6)
         original = self.runner.conversations.messages
         self.runner.conversations.messages = AsyncMock(wraps=original)
@@ -341,3 +343,48 @@ class RunStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.runner.runs.get(identity))["status"], "running")
         await self.runner.runs.finish(identity, "cancelled")
 
+
+
+class ObservedUsageStateTests(unittest.TestCase):
+    """The provider's count is per-run state, dropped when the prompt changes shape."""
+
+    def state(self):
+        from chagent.agent.types import RunState
+        from chagent.domain.sessions import Session, TaskState
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        return RunState(run_id=uuid4(),
+                        session=Session(uuid4(), uuid4(), Path("/tmp"), "t", now, now),
+                        history=[StoredMessage(uuid4(), 7, UserMessage("hi", 0), None)],
+                        task_state=TaskState())
+
+    def test_usage_anchors_the_sequence_that_produced_it(self):
+        from chagent.domain.usage import Usage
+        state = self.state()
+        state.record_usage(Usage(input=800, output=200, cache_read=0, cache_write=0, total_tokens=1_000),
+                           after_sequence=7)
+        self.assertEqual((state.observed.prompt_tokens, state.observed.after_sequence), (1_000, 7))
+        self.assertEqual(state.observed.input_tokens, 800, "the prompt half calibrates the heuristic")
+
+    def test_the_recalled_memory_block_is_not_counted_twice(self):
+        """It is re-added by enrich on every turn, so it cannot stay in the anchor."""
+        from chagent.domain.usage import Usage
+        state = self.state()
+        state.record_usage(Usage(input=800, output=200, cache_read=0, cache_write=0, total_tokens=1_000),
+                           after_sequence=7, memory_tokens=250)
+        self.assertEqual(state.observed.prompt_tokens, 750)
+
+    def test_a_response_without_usage_clears_the_anchor(self):
+        from chagent.domain.usage import Usage
+        state = self.state()
+        state.record_usage(Usage(input=1, output=1, cache_read=0, cache_write=0, total_tokens=2), after_sequence=7)
+        state.record_usage(None, after_sequence=8)
+        self.assertIsNone(state.observed)
+        state.record_usage(Usage(input=0, output=0, cache_read=0, cache_write=0, total_tokens=0), after_sequence=8)
+        self.assertIsNone(state.observed)
+
+    def test_committing_a_message_does_not_move_the_anchor(self):
+        from chagent.domain.usage import Usage
+        state = self.state()
+        state.record_usage(Usage(input=1, output=1, cache_read=0, cache_write=0, total_tokens=2), after_sequence=7)
+        state.append_committed(StoredMessage(uuid4(), 8, UserMessage("more", 1), state.run_id))
+        self.assertEqual(state.observed.after_sequence, 7)

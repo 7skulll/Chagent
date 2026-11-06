@@ -45,9 +45,9 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
         sections["budgets"] = (f"context_window={model.context_window} max_tokens={model.max_tokens} "
                                f"request_timeout={model.request_timeout:g} run_timeout={model.run_timeout:g} "
                                f"retries={model.retry_attempts}")
-        # Which counter is in effect decides when compaction triggers; a fallback
-        # here is invisible in every other output.
-        sections["tokenizer"] = select_counter(model.model(), env).name
+        # Which counter is in effect decides when compaction triggers; it is the
+        # only place the estimator shows up in a configuration dump.
+        sections["tokenizer"] = select_counter(model.model()).name
     except ModelConfigurationError as error:
         problems.append(f"model: {error}")
     if settings is not None:
@@ -77,7 +77,10 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
                                   f"keep_recent={compaction.keep_recent_ratio:g} "
                                   f"summary_tokens={compaction.max_summary_tokens} "
                                   f"max_calls={compaction.max_calls} timeout={compaction.timeout:g} "
-                                  f"max_per_run={compaction.max_compactions_per_run}")
+                                  f"max_per_run={compaction.max_compactions_per_run} "
+                                  f"speculative={str(compaction.speculative).lower()}"
+                                  + (f"/{compaction.speculative_trigger:g}" if compaction.speculative else "")
+                                  + f" fresh_window={compaction.fresh_window}")
     sections["env_file"] = (f"{env_file.resolve()} ({len(file_env)} keys)" if file_env
                             else f"none ({env_file})")
     sections["shadowed"] = dotenv.describe(dotenv.shadowed(env, file_env))

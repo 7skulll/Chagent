@@ -4,12 +4,14 @@ from dataclasses import dataclass, field, replace
 from typing import Literal
 from uuid import UUID
 
+from chagent.domain.context import ObservedUsage
 from chagent.domain.messages import ImageContent, ToolResultMessage, UserMessage
 from chagent.domain.recovery import RecoveryNote
 from chagent.domain.runs import RunEndReason, StoredMessage
 from chagent.domain.sessions import Session, TaskState
 from chagent.domain.summaries import SessionSummary
 from chagent.domain.tools import Tool
+from chagent.domain.usage import Usage
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +39,11 @@ class RunState:
     # start. It is part of the prompt prefix, so it must not change mid-run.
     environment: str | None = None
     workspace_identity: tuple[int, int] | None = None
+    # The provider's own count for the last prompt of this run, if it reported
+    # one. It is dropped whenever a structural part of the prompt changes (tool
+    # declarations, an installed summary), because then it no longer describes
+    # what the next request will contain.
+    observed: ObservedUsage | None = None
 
     @property
     def current_input(self) -> StoredMessage:
@@ -60,3 +67,28 @@ class RunState:
                              content=[block for block in message.content if isinstance(block, ImageContent)]))
         self.history.append(record)
         self.context_revision += 1
+
+    def record_usage(self, usage: Usage | None, *, after_sequence: int, memory_tokens: int = 0,
+                     coarse_tokens: int = 0) -> None:
+        """Anchor the next turn's estimate on what the provider actually charged.
+
+        ``memory_tokens`` is removed because the recalled reference is rebuilt on
+        every turn and charged again by ``MemoryService.enrich``; keeping it in
+        the anchor would count the same block twice in every later turn.
+        ``coarse_tokens`` is the heuristic's count of the same request, so the
+        pair records how far the heuristic reads off on this content.
+        """
+        if usage is None or usage.total_tokens <= 0:
+            self.observed = None
+            return
+        memory = max(0, memory_tokens)
+        # ``total_tokens`` is prompt plus completion: the completion becomes part
+        # of the next prompt, so both halves belong to the anchor. ``input`` is
+        # only the prompt half, which is what the heuristic is compared against.
+        input_tokens = usage.input + usage.cache_read + usage.cache_write
+        self.observed = ObservedUsage(
+            prompt_tokens=max(1, usage.total_tokens - memory),
+            input_tokens=max(0, input_tokens - memory),
+            after_sequence=after_sequence,
+            coarse_prompt_tokens=max(0, coarse_tokens - memory),
+        )

@@ -1,23 +1,33 @@
 """Budgeted orchestration, including checkpoints within a long-running task."""
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+import logging
 from time import monotonic_ns
 from uuid import UUID, uuid4
 
 from chagent.agent.types import RunState
 from chagent.context.builder import BasicContextBuilder, BuiltContext, ContextBudgetError
-from chagent.context.compactor import ContextCompactor, CompactionError, PROMPT_VERSION
+from chagent.context.compactor import (
+    COMPACTION_FRESH_WINDOW, COMPACTION_SUMMARY, ContextCompactor, CompactionError, MemoryCalls,
+    PROMPT_VERSION, FRESH_WINDOW_MODEL, FRESH_WINDOW_VERSION, fresh_window_content,
+)
 from chagent.context.projection import ProjectionCache
 from chagent.context.segments import exchanges
+from chagent.domain.context import ObservedUsage
 from chagent.domain.messages import SystemMessage, UserMessage
 from chagent.domain.recovery import RecoveryNote
 from chagent.domain.runs import StoredMessage
 from chagent.domain.sessions import TaskState
-from chagent.domain.summaries import CompactionPolicy, SessionSummary
+from chagent.domain.summaries import (
+    CompactionPolicy, FRESH_WINDOW_ALWAYS, FRESH_WINDOW_FALLBACK, SessionSummary,
+)
 from chagent.models.base import Model, ModelClient
 from chagent.storage.repositories import ConversationRepository, RunRepository
 from chagent.storage.summaries import SummaryRepository
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -29,6 +39,49 @@ class _Inputs:
     previous: SessionSummary | None
     recovery: RecoveryNote | None
     environment: str | None
+    observed: ObservedUsage | None
+
+
+@dataclass(slots=True)
+class _Candidate:
+    """A summary computed in the background and not yet published.
+
+    Nothing here has touched the database: the checkpoint carries a throwaway
+    revision and only receives a real one when the foreground adopts it.
+    """
+
+    summary: SessionSummary
+    tokens_before: int
+
+
+@dataclass(slots=True)
+class _Speculation:
+    """The in-flight background summary for one run, plus what would invalidate it."""
+
+    identity: UUID
+    model_id: str
+    provider: str
+    tool_revision: int
+    previous_id: UUID | None
+    previous_revision: int | None
+    progress: int
+    tokens_before: int
+    recorder: MemoryCalls = field(default_factory=MemoryCalls)
+    task: asyncio.Task | None = None
+
+    def valid(self, *, model: Model, previous: SessionSummary | None, tool_revision: int) -> bool:
+        """Whether the candidate still describes the request it would replace.
+
+        History only grows within a run and the candidate covers a prefix of it,
+        so a covered span cannot go stale; covering less than it could is the
+        ordinary case and is allowed. What can change is the shape of the prompt
+        around it: the tool declarations, the model, or the summary the candidate
+        was built on top of.
+        """
+        return (self.model_id == model.id and self.provider == model.provider
+                and self.tool_revision == tool_revision
+                and self.previous_id == (previous.id if previous else None)
+                and self.previous_revision == (previous.revision if previous else None))
 
 
 class ContextManager:
@@ -45,13 +98,28 @@ class ContextManager:
         # One projection cache per run: appended messages are projected and
         # counted once, not once per model turn.
         self._projections: dict[UUID, ProjectionCache] = {}
+        # Speculative summaries in flight, keyed by run.
+        self._speculations: dict[UUID, _Speculation] = {}
 
-    def release(self, run_id: UUID):
+    async def release(self, run_id: UUID):
+        speculation = self._speculations.pop(run_id, None)
         self._attempted.pop(run_id, None)
         self._projections.pop(run_id, None)
+        if speculation is not None and speculation.task is not None:
+            # The run is already terminal, so this work can only be discarded. It
+            # owns no database state by construction, which is what makes a plain
+            # cancel safe; the bounded wait keeps a wedged socket from delaying
+            # teardown.
+            speculation.task.cancel()
+            _, pending = await asyncio.wait({speculation.task},
+                                            timeout=self.policy.speculative_shutdown_timeout)
+            if pending:
+                logger.warning("speculative compaction %s did not unwind after run %s",
+                               speculation.identity, run_id)
 
     def _cache(self, run_id: UUID) -> ProjectionCache:
-        return self._projections.setdefault(run_id, ProjectionCache())
+        return self._projections.setdefault(
+            run_id, ProjectionCache(max_tool_result_tokens=self.builder.policy.max_tool_result_tokens))
 
     @staticmethod
     def _checked(built):
@@ -66,10 +134,14 @@ class ContextManager:
                       *, state: RunState | None = None, prompt_mode: str | None = None) -> BuiltContext:
         """Build the request, compacting first when the budget demands it.
 
-        The method reads as a guard sequence: load, try the baseline, decide
-        whether compaction is worth paying for, then hand the actual work to
-        ``_compact``. Every early return is a case where keeping the previous
-        context is the correct answer.
+        The method reads as a guard sequence: load, try the baseline, adopt a
+        summary that is already paid for, decide whether compaction is worth
+        paying for, then hand the actual work to ``_compact``. Every early return
+        is a case where keeping the previous context is the correct answer.
+
+        Speculation sits beside the sequence rather than inside it: a summary that
+        is not needed yet is started in the background so the model calls overlap
+        with the tool calls that follow, and it is adopted by a later turn.
         """
         inputs = await self._inputs(session_id, run_id, state)
         # Run-static facts; absent only when a caller drives the builder without
@@ -80,16 +152,34 @@ class ContextManager:
         other_modes = tuple(name for name in self.modes if name != prompt_mode)
         current_input = next(item for item in reversed(inputs.history) if isinstance(item.message, UserMessage))
         owned = any(item.run_id == run_id for item in inputs.history)
+        # One correction factor for the whole call: a candidate checkpoint has a
+        # different shape but the same content, so it is measured the same way.
+        scale = inputs.observed.scale if inputs.observed is not None else 1.0
 
-        async def build(summary):
-            return await self.builder.build(inputs.history, model, tools, task_state=inputs.task_state,
-                                            current_run_id=run_id, summary=summary, allow_over_budget=True,
-                                            cache=self._cache(run_id), recovery=inputs.recovery,
-                                            environment=inputs.environment, mode=prompt_mode,
-                                            other_modes=other_modes)
+        build = self._build_for(history=inputs.history, model=model, tools=tools, inputs=inputs,
+                                run_id=run_id, prompt_mode=prompt_mode, other_modes=other_modes, scale=scale)
 
-        baseline = await build(inputs.previous)
-        if not self._should_compact(baseline):
+        baseline = await build(inputs.previous, inputs.observed)
+        forced = self._should_compact(baseline)
+
+        # A summary computed in the background is already paid for. It is adopted
+        # exactly when the synchronous path would have compacted, so speculation
+        # changes *when* the work happens, never *whether* it happens. Otherwise
+        # every turn above the speculative trigger would compact again.
+        speculation = self._speculations.get(run_id)
+        if forced and speculation is not None:
+            adopted = await self._adopt(
+                speculation, session_id=session_id, run_id=run_id, state=state, inputs=inputs,
+                model=model, baseline=baseline, build=build,
+            )
+            if adopted is not None:
+                return self._checked(adopted)
+
+        if not forced:
+            await self._speculate(session_id=session_id, run_id=run_id, model=model, client=client,
+                                  tools=tools, state=state, inputs=inputs, baseline=baseline,
+                                  owned=owned, current_input=current_input, prompt_mode=prompt_mode,
+                                  other_modes=other_modes, scale=scale)
             return self._checked(baseline)
         eligible = self._eligible(inputs.history, run_id, inputs.previous, owned, current_input)
         if not eligible:
@@ -107,7 +197,9 @@ class ContextManager:
             eligible=eligible,
         )
         # Do not pay for summarization when even the smallest legal suffix cannot fit.
-        smallest = await build(checkpoint(len(eligible)))
+        # A candidate checkpoint changes the prompt's structure, so the previous
+        # provider anchor no longer describes it: count it from scratch.
+        smallest = await build(checkpoint(len(eligible)), None)
         if smallest.snapshot.token_estimate + limit > smallest.snapshot.input_budget:
             return self._checked(baseline)
         self._attempted[run_id] = (progress, count + 1)
@@ -121,14 +213,193 @@ class ContextManager:
             checkpoint=checkpoint, current_input=current_input,
         )
 
+    def _build_for(self, *, history, model: Model, tools, inputs: _Inputs, run_id: UUID,
+                   prompt_mode: str | None, other_modes: tuple[str, ...], scale: float):
+        """Bind one build to one history.
+
+        Background work gets its own list: the run keeps appending to
+        ``state.history`` while a speculative summary is in flight, and a build
+        that silently observed those appends would price a request nobody makes.
+        """
+
+        async def build(summary, observed):
+            return await self.builder.build(history, model, tools, task_state=inputs.task_state,
+                                            current_run_id=run_id, summary=summary, allow_over_budget=True,
+                                            cache=self._cache(run_id), recovery=inputs.recovery,
+                                            environment=inputs.environment, mode=prompt_mode,
+                                            other_modes=other_modes, observed=observed, scale=scale)
+
+        return build
+
+    async def _speculate(self, *, session_id: UUID, run_id: UUID, model: Model, client: ModelClient,
+                         tools, state: RunState | None, inputs: _Inputs, baseline: BuiltContext,
+                         owned: bool, current_input: StoredMessage, prompt_mode: str | None,
+                         other_modes: tuple[str, ...], scale: float) -> None:
+        """Start a summary before the budget forces it, when it is worth the risk.
+
+        The calls overlap with the tool work that follows this request, which is
+        where the pause used to land. A candidate that is never adopted has cost
+        only those calls; nothing is written until it is adopted, so an abandoned
+        candidate leaves no audit row and no checkpoint behind.
+        """
+        if not (self.policy.enabled and self.policy.speculative and state is not None):
+            return
+        if self.policy.fresh_window == FRESH_WINDOW_ALWAYS:
+            # Nothing to hide: a fresh window costs a build, not a model call.
+            return
+        if run_id in self._speculations:
+            return
+        if baseline.snapshot.projected_token_estimate < (
+                baseline.snapshot.input_budget * self.policy.speculative_trigger):
+            return
+        last_progress, count = self._attempted.get(run_id, (0, 0))
+        if count >= self.policy.max_compactions_per_run:
+            return
+        eligible = self._eligible(inputs.history, run_id, inputs.previous, owned, current_input)
+        if not eligible:
+            return
+        progress = eligible[-1][-1].sequence
+        if progress <= last_progress:
+            return
+        limit = min(self.policy.max_summary_tokens, baseline.snapshot.input_budget // 4)
+        identity = uuid4()
+        # The task reads this list and its build is bound to it; nothing it looks
+        # at may change after this point.
+        frozen = list(inputs.history)
+        build = self._build_for(history=frozen, model=model, tools=tools, inputs=inputs, run_id=run_id,
+                                prompt_mode=prompt_mode, other_modes=other_modes, scale=scale)
+        # Revision 0 is a placeholder: the real one can only come from the
+        # database, and it is assigned at adoption.
+        checkpoint = self._checkpoint_maker(
+            session_id=session_id, run_id=run_id, model=model, previous=inputs.previous, revision=0,
+            identity=identity, history=frozen, owned=owned, current_input=current_input,
+            eligible=eligible,
+        )
+        speculation = _Speculation(
+            identity=identity, model_id=model.id, provider=model.provider,
+            tool_revision=state.tool_revision,
+            previous_id=inputs.previous.id if inputs.previous else None,
+            previous_revision=inputs.previous.revision if inputs.previous else None,
+            progress=progress, tokens_before=baseline.snapshot.projected_token_estimate,
+        )
+        self._speculations[run_id] = speculation
+        # Claim the attempt now. A discarded candidate has already spent its
+        # calls, and re-running the same range on the next turn is what the
+        # synchronous path explicitly refuses to do.
+        self._attempted[run_id] = (progress, count + 1)
+        speculation.task = asyncio.create_task(
+            self._compute(identity=identity, run_id=run_id, model=model, client=client,
+                          previous=inputs.previous, eligible=eligible, limit=limit, baseline=baseline,
+                          checkpoint=checkpoint, build=build, recorder=speculation.recorder,
+                          current_input=current_input),
+            name=f"speculative-compaction-{run_id}",
+        )
+        await self.runs.event(run_id, "compaction_started", {
+            "compaction_id": str(identity), "tokens_before": speculation.tokens_before,
+            "previous_summary_id": str(inputs.previous.id) if inputs.previous else None,
+            "speculative": True,
+        })
+
+    async def _compute(self, *, identity: UUID, run_id: UUID, model: Model, client: ModelClient,
+                       previous: SessionSummary | None, eligible: list[list[StoredMessage]], limit: int,
+                       baseline: BuiltContext, checkpoint, build, recorder: MemoryCalls,
+                       current_input: StoredMessage) -> _Candidate:
+        """The same work as ``_compact`` with the database writes left out."""
+        length = await self._fit_length(eligible, limit, baseline, build, checkpoint)
+        candidate = checkpoint(length)
+        task_input = self._task_input(current_input, candidate)
+        candidate.content, candidate.usage = await self.compactor.compact(
+            model=model, client=client, turns=eligible[:length],
+            previous=previous.content if previous else "", limit=limit,
+            compaction_id=identity, run_id=run_id, task_input=task_input, recorder=recorder,
+        )
+        return _Candidate(candidate, baseline.snapshot.projected_token_estimate)
+
+    async def _adopt(self, speculation: _Speculation, *, session_id: UUID, run_id: UUID,
+                     state: RunState | None, inputs: _Inputs, model: Model,
+                     baseline: BuiltContext, build) -> BuiltContext | None:
+        """Publish a finished candidate, or throw it away with a reason.
+
+        Called only when the budget has run out, which is what makes waiting the
+        right choice: the calls are already paid for, and recomputing them would
+        buy the same summary twice.
+        """
+        if state is None or not speculation.valid(model=model, previous=inputs.previous,
+                                                  tool_revision=state.tool_revision):
+            await self._discard(speculation, run_id, "invalidated")
+            return None
+        self._speculations.pop(run_id, None)
+        try:
+            # The wait is bounded by the summarizer's own budget: a wedged request
+            # must not consume the run's time, and falling back to the synchronous
+            # path costs one more timeout at worst.
+            async with asyncio.timeout(self.policy.timeout):
+                candidate = await speculation.task
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            if speculation.task is not None and not speculation.task.done():
+                speculation.task.cancel()
+                await asyncio.gather(speculation.task, return_exceptions=True)
+            await self._discard(speculation, run_id, "timeout", finished=True)
+            return None
+        except Exception as error:
+            reason = str(error) if isinstance(error, CompactionError) else type(error).__name__
+            await self._discard(speculation, run_id, reason, finished=True)
+            return None
+        # The summary was verified against the history at the time it was
+        # computed; the suffix has grown since, so it is verified again against
+        # the request that would actually be sent now.
+        revision = await self.summaries.next_revision(session_id)
+        summary = replace(candidate.summary, id=uuid4(), revision=revision)
+        try:
+            result = self._checked(await build(summary, None))
+            self._verify_reduction(result, baseline)
+        except Exception as error:
+            reason = str(error) if isinstance(error, (CompactionError, ContextBudgetError)) else type(error).__name__
+            await self._discard(speculation, run_id, reason, finished=True)
+            return None
+        await self.summaries.record_calls(run_id, speculation.recorder.calls)
+        await self.summaries.save(summary, run_id, completed_event={
+            "compaction_id": str(speculation.identity), "summary_id": str(summary.id),
+            "revision": summary.revision,
+            "covered_through_sequence": summary.covered_through_sequence,
+            "source_run_id": str(summary.source_run_id) if summary.source_run_id else None,
+            "tokens_before": candidate.tokens_before,
+            "tokens_after": result.snapshot.token_estimate,
+            "duration_ms": None, "speculative": True,
+        })
+        state.summary = summary
+        state.context_revision += 1
+        # The prompt's second message just changed shape, so the provider anchor
+        # describes a request this run will never send again.
+        state.observed = None
+        return result
+
+    async def _discard(self, speculation: _Speculation, run_id: UUID, reason: str,
+                       *, finished: bool = False) -> None:
+        """Drop a candidate and record what it cost, while the run can still say so."""
+        self._speculations.pop(run_id, None)
+        if not finished and speculation.task is not None:
+            speculation.task.cancel()
+            await asyncio.gather(speculation.task, return_exceptions=True)
+        spent = sum((call.response.usage.total_tokens if call.response is not None and call.response.usage
+                     else 0) for call in speculation.recorder.calls)
+        await self.runs.event(run_id, "compaction_discarded", {
+            "compaction_id": str(speculation.identity), "reason": reason,
+            "summarized_through_sequence": speculation.progress,
+            "speculative_calls": len(speculation.recorder.calls), "speculative_tokens": spent,
+        })
+
     async def _inputs(self, session_id: UUID, run_id: UUID, state: RunState | None) -> _Inputs:
         if state is not None:
-            return _Inputs(state.history, state.task_state, state.summary, state.recovery, state.environment)
+            return _Inputs(state.history, state.task_state, state.summary, state.recovery,
+                           state.environment, state.observed)
         return _Inputs(
             await self.conversations.messages(session_id, current_run=run_id, project_artifacts=True),
             await self.conversations.task_state(session_id),
             await self.summaries.latest(session_id, current_run=run_id),
-            None, None,
+            None, None, None,
         )
 
     def _should_compact(self, baseline: BuiltContext) -> bool:
@@ -199,39 +470,97 @@ class ContextManager:
                        identity: UUID, started: int, previous: SessionSummary | None,
                        eligible: list[list[StoredMessage]], limit: int, baseline: BuiltContext,
                        build, checkpoint, current_input: StoredMessage) -> BuiltContext:
-        """Summarize, verify the result actually shrinks, then persist or fall back."""
+        """Compact, verify the result actually shrinks, then persist or fall back.
+
+        Two implementations share this lifecycle, the way Codex keeps its three:
+        ``summary`` pays a model to compress the span, ``fresh_window`` drops the
+        span and restates what it was. The verification, the save, the event and
+        the state update are the same for both, so a reader of the events cannot
+        tell which one ran except by the ``implementation`` field.
+        """
+        strategy = COMPACTION_FRESH_WINDOW if self.policy.fresh_window == FRESH_WINDOW_ALWAYS else COMPACTION_SUMMARY
         try:
+            return await self._install(
+                strategy, run_id=run_id, model=model, client=client, state=state, identity=identity,
+                started=started, previous=previous, eligible=eligible, limit=limit, baseline=baseline,
+                build=build, checkpoint=checkpoint, current_input=current_input,
+            )
+        except asyncio.CancelledError:
+            await self.runs.event(run_id, "compaction_cancelled", {"compaction_id": str(identity)})
+            raise
+        except Exception as error:
+            reason = self._reason(error)
+            if strategy == COMPACTION_SUMMARY and self.policy.fresh_window == FRESH_WINDOW_FALLBACK:
+                # The span is unsummarizable, not the run: dropping it and saying so
+                # keeps the task alive, where failing the run would not.
+                try:
+                    return await self._install(
+                        COMPACTION_FRESH_WINDOW, run_id=run_id, model=model, client=client, state=state,
+                        identity=identity, started=started, previous=previous, eligible=eligible,
+                        limit=limit, baseline=baseline, build=build, checkpoint=checkpoint,
+                        current_input=current_input, fallback_reason=reason,
+                    )
+                except asyncio.CancelledError:
+                    await self.runs.event(run_id, "compaction_cancelled", {"compaction_id": str(identity)})
+                    raise
+                except Exception as fallback:
+                    reason = f"{reason}; fresh window: {self._reason(fallback)}"
+            await self.runs.event(run_id, "compaction_failed", {
+                "compaction_id": str(identity), "reason": reason,
+                "implementation": strategy,
+                "fallback": "previous_summary_and_recent_complete_turns",
+            })
+            return self._checked(baseline)
+
+    async def _install(self, strategy: str, *, run_id: UUID, model: Model, client: ModelClient,
+                       state: RunState | None, identity: UUID, started: int,
+                       previous: SessionSummary | None, eligible: list[list[StoredMessage]], limit: int,
+                       baseline: BuiltContext, build, checkpoint, current_input: StoredMessage,
+                       fallback_reason: str | None = None) -> BuiltContext:
+        """Produce, verify and publish one checkpoint; raises when it does not hold up."""
+        if strategy == COMPACTION_SUMMARY:
             length = await self._fit_length(eligible, limit, baseline, build, checkpoint)
-            prefix, candidate = eligible[:length], checkpoint(length)
+        else:
+            # Covering more costs nothing here: the restatement is host-authored and
+            # bounded, while leaving an old turn out would only keep the window full.
+            length = len(eligible)
+        prefix, candidate = eligible[:length], checkpoint(length)
+        if strategy == COMPACTION_SUMMARY:
             task_input = self._task_input(current_input, candidate)
             candidate.content, candidate.usage = await self.compactor.compact(
                 model=model, client=client, turns=prefix, previous=previous.content if previous else "",
                 limit=limit, compaction_id=identity, run_id=run_id, task_input=task_input,
             )
-            result = self._checked(await build(candidate))
-            self._verify_reduction(result, baseline)
-            await self.summaries.save(candidate, run_id, completed_event={
-                "compaction_id": str(identity), "summary_id": str(candidate.id), "revision": candidate.revision,
-                "covered_through_sequence": candidate.covered_through_sequence,
-                "source_run_id": str(candidate.source_run_id) if candidate.source_run_id else None,
-                "tokens_before": baseline.snapshot.projected_token_estimate,
-                "tokens_after": result.snapshot.token_estimate,
-                "duration_ms": (monotonic_ns() - started) // 1_000_000,
-            })
-            if state is not None:
-                state.summary = candidate
-                state.context_revision += 1
-            return result
-        except asyncio.CancelledError:
-            await self.runs.event(run_id, "compaction_cancelled", {"compaction_id": str(identity)})
-            raise
-        except Exception as error:
-            reason = str(error) if isinstance(error, (CompactionError, ContextBudgetError)) else type(error).__name__
-            await self.runs.event(run_id, "compaction_failed", {
-                "compaction_id": str(identity), "reason": reason,
-                "fallback": "previous_summary_and_recent_complete_turns",
-            })
-            return self._checked(baseline)
+        else:
+            candidate.content = fresh_window_content(prefix, limit, self.builder.counter,
+                                                     retained=self.policy.retained_tool_results)
+            # No model wrote this checkpoint and saying otherwise would make the
+            # audit lie; ``prompt_version`` names the restatement instead.
+            candidate.model, candidate.provider = FRESH_WINDOW_MODEL, FRESH_WINDOW_MODEL
+            candidate.prompt_version, candidate.usage = FRESH_WINDOW_VERSION, None
+        result = self._checked(await build(candidate, None))
+        self._verify_reduction(result, baseline)
+        await self.summaries.save(candidate, run_id, completed_event={
+            "compaction_id": str(identity), "summary_id": str(candidate.id), "revision": candidate.revision,
+            "covered_through_sequence": candidate.covered_through_sequence,
+            "source_run_id": str(candidate.source_run_id) if candidate.source_run_id else None,
+            "tokens_before": baseline.snapshot.projected_token_estimate,
+            "tokens_after": result.snapshot.token_estimate,
+            "duration_ms": (monotonic_ns() - started) // 1_000_000,
+            "implementation": strategy,
+            "fallback_reason": fallback_reason,
+        })
+        if state is not None:
+            state.summary = candidate
+            state.context_revision += 1
+            # The prompt's second message just changed shape, so the provider
+            # anchor describes a request this run will never send again.
+            state.observed = None
+        return result
+
+    @staticmethod
+    def _reason(error: BaseException) -> str:
+        return str(error) if isinstance(error, (CompactionError, ContextBudgetError)) else type(error).__name__
 
     async def _fit_length(self, eligible: list[list[StoredMessage]], limit: int, baseline: BuiltContext,
                           build, checkpoint) -> int:
@@ -239,7 +568,7 @@ class ContextManager:
         left, right = 1, len(eligible)
         while left < right:
             middle = (left + right) // 2
-            trial = await build(checkpoint(middle))
+            trial = await build(checkpoint(middle), None)
             if self._fits(trial, baseline, limit):
                 right = middle
             else:

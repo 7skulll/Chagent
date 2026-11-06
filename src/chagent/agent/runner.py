@@ -214,7 +214,7 @@ class AgentRunner:
             self._tasks.pop(run_id, None)
             self._states.pop(run_id, None)
             if self.context_manager is not None:
-                self.context_manager.release(run_id)
+                await self.context_manager.release(run_id)
             try:
                 # A pending question must not outlive its run.
                 await self.scheduler.cancel_approvals(run_id)
@@ -343,6 +343,9 @@ class AgentRunner:
                 state.tools = executor.registry.definitions()
                 state.tool_revision = executor.registry.revision
                 state.context_revision += 1
+                # Tool declarations live in the system message; a new set means
+                # the anchor describes a prompt this run will never send again.
+                state.observed = None
             try:
                 if self.context_manager is not None:
                     built = await self.context_manager.prepare(session_id, run_id, self.model, self.client,
@@ -364,6 +367,9 @@ class AgentRunner:
             message = await self._response(run_id, built.request)
             record = await self.runs.save_response(run_id, session_id, model_call_id, message)
             state.append_committed(record)
+            state.record_usage(message.usage, after_sequence=record.sequence,
+                               memory_tokens=built.snapshot.memory_token_estimate,
+                               coarse_tokens=built.snapshot.coarse_token_estimate)
             state.active_model_call_id = None
             if message.stop_reason in {"error", "aborted"}:
                 raise RunExecutionError(message.error_message or "Model request failed",

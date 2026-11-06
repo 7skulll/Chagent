@@ -50,8 +50,8 @@ uv run --env-file .env ./scripts/start.command --demo
 默认工作区是 `~/Chagent Workspace`，首次网页启动会创建。程序源码目录、子目录及包含程序的父目录不能作为网页工作区；CLI 也检查源码目录。旧不合规会话保留数据，网页不可打开。不要把源码目录当作验证文件工具的默认工作区。
 
 ```sh
-# 可选：真实 tokenizer 与 PDF/Word/Excel 解析
-uv sync --extra tokenizer --extra documents
+# 可选：PDF/Word/Excel 解析（token 计数是启发式，不需要额外依赖）
+uv sync --extra documents
 # 配置解析，不发送模型请求，不显示 Key 值
 uv run --env-file .env python -m chagent.config show
 # 不调用真实模型的离线网页演示

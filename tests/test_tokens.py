@@ -1,12 +1,11 @@
-"""Token counting: a real encoder when available, bytes otherwise, never mixed."""
+"""Token estimation: one coarse heuristic over the wire body, never raw bytes."""
 
-import io
 import json
-from contextlib import redirect_stderr
 import unittest
 
 from chagent.context.tokens import (
-    BpeTokenCounter, ByteTokenCounter, TokenizerUnavailable, encoding_for, select_counter, wire_text,
+    ASCII_BYTES_PER_TOKEN, HeuristicTokenCounter, MESSAGE_OVERHEAD, TOOL_DECLARATION_OVERHEAD,
+    WIDE_CHAR_TOKENS, estimate_tokens, select_counter, wire_text,
 )
 from chagent.domain.messages import (
     AssistantMessage, SystemMessage, TextContent, ToolCall, ToolResultMessage, UserMessage,
@@ -42,64 +41,66 @@ class WireShapeTests(unittest.TestCase):
         self.assertEqual(json.loads(wire_text(message)), body)
 
 
-class ByteCounterTests(unittest.TestCase):
+class EstimateTests(unittest.TestCase):
+    """The heuristic is coarse on purpose; what it must never be is bytes-as-tokens."""
+
+    def test_ascii_text_costs_about_a_quarter_of_its_bytes(self):
+        text = "The quick brown fox jumps over the lazy dog. " * 40
+        self.assertEqual(estimate_tokens(text), -(-len(text) // ASCII_BYTES_PER_TOKEN))
+
+    def test_cjk_is_charged_per_character_not_per_byte(self):
+        """The old byte counter read Chinese as 3x the tokens it really needs."""
+        text = "我们需要把上下文预算做得更稳一些" * 20
+        tokens = estimate_tokens(text)
+        self.assertEqual(tokens, len(text) * WIDE_CHAR_TOKENS)
+        self.assertLess(tokens, len(text.encode("utf-8")))
+        self.assertGreater(tokens, len(text.encode("utf-8")) // ASCII_BYTES_PER_TOKEN)
+
+    def test_mixed_text_sums_both_rates(self):
+        text = "abc" * 100 + "你好" * 100
+        self.assertEqual(estimate_tokens(text), 300 // ASCII_BYTES_PER_TOKEN + 200 * WIDE_CHAR_TOKENS)
+
+    def test_empty_text_costs_nothing(self):
+        self.assertEqual(estimate_tokens(""), 0)
+
+    def test_english_prose_is_not_double_counted(self):
+        """A 900-byte English sample measured 201 cl100k tokens; stay in that band."""
+        text = "The quick brown fox jumps over the lazy dog. " * 20
+        self.assertLessEqual(estimate_tokens(text), 240)
+        self.assertGreaterEqual(estimate_tokens(text), 190)
+
+
+class CounterTests(unittest.TestCase):
     def test_is_additive_and_grows_with_content(self):
-        counter = ByteTokenCounter()
+        counter = HeuristicTokenCounter()
         messages = history()
         self.assertEqual(counter.count(messages), sum(counter.count([message]) for message in messages))
         self.assertLess(counter.count([UserMessage("hi", 0)]), counter.count([UserMessage("hi" * 100, 0)]))
 
+    def test_each_message_pays_a_fixed_overhead(self):
+        counter = HeuristicTokenCounter()
+        one = counter.count([UserMessage("", 0)])
+        two = counter.count([UserMessage("", 0), UserMessage("", 0)])
+        self.assertEqual(two - one, one, "the per-message cost is constant")
+        self.assertGreaterEqual(one, MESSAGE_OVERHEAD, "role markers are not free")
+
+    def test_tool_declarations_are_charged_per_tool(self):
+        counter = HeuristicTokenCounter()
+
+        def counted(tools):
+            return counter.count([SystemMessage("", 0, sections={"tools": "x"}, tools_added=tools)])
+
+        # Same section text, one more declaration: the schema plus its wrapper.
+        self.assertGreater(counted([tool("a"), tool("b")]), counted([tool("a")]))
+        self.assertGreaterEqual(counted([tool()]) - counted([]), TOOL_DECLARATION_OVERHEAD)
+
 
 class SelectionTests(unittest.TestCase):
-    def test_fake_and_disabled_models_use_bytes(self):
-        self.assertIsInstance(select_counter(Model("fake", "local", "fake", 4096, 256)), ByteTokenCounter)
-        self.assertIsInstance(select_counter(Model("gpt-5", "openai", "openai-chat", 4096, 256),
-                                             {"CHAGENT_TOKENIZER": "bytes"}), ByteTokenCounter)
-
-    def test_encoding_follows_the_model_family(self):
-        self.assertEqual(encoding_for("gpt-5.4-mini"), "o200k_base")
-        self.assertEqual(encoding_for("gpt-4o"), "o200k_base")
-        self.assertEqual(encoding_for("deepseek-flash"), "cl100k_base")
-
-    def test_an_unavailable_tokenizer_falls_back_and_says_so(self):
-        stderr = io.StringIO()
-        with redirect_stderr(stderr):
-            counter = select_counter(Model("m", "p", "openai-chat", 4096, 256),
-                                     {"CHAGENT_TOKENIZER": "definitely_not_an_encoding"})
-        self.assertIsInstance(counter, ByteTokenCounter)
-        self.assertIn("fallback", stderr.getvalue())
-
-
-class BpeCounterTests(unittest.TestCase):
-    def setUp(self):
-        try:
-            self.counter = BpeTokenCounter("cl100k_base")
-        except TokenizerUnavailable as error:
-            self.skipTest(str(error))
-
-    def test_counting_is_additive(self):
-        messages = history()
-        self.assertEqual(self.counter.count(messages), sum(self.counter.count([m]) for m in messages))
-
-    def test_tool_declarations_cost_more_than_their_text(self):
-        plain = self.counter.count([SystemMessage("rules", 0)])
-        declared = self.counter.count([SystemMessage("rules", 0, tools_added=[tool()])])
-        self.assertGreater(declared - plain, self.counter.TOOL_DECLARATION_OVERHEAD)
-
-    def test_english_bytes_are_the_documented_overestimate(self):
-        """Bytes overcount English by ~3x; that is why the BPE counter exists."""
-        message = UserMessage("Complete the user's task with the available tools, and report only "
-                              "what a tool confirmed. Do not invent results.", 0)
-        self.assertGreater(ByteTokenCounter().count([message]) / self.counter.count([message]), 2.5)
-
-    def test_a_message_costs_its_text_plus_the_json_envelope(self):
-        """The counter measures the wire JSON, so only the envelope is added on top."""
-        text = "Complete the user's task with the available tools and report only what a tool confirmed."
-        counted = self.counter.count([UserMessage(text, 0)]) - self.counter.MESSAGE_OVERHEAD
-        encoded = len(self.counter._encoder.encode(text, disallowed_special=()))
-        self.assertGreaterEqual(counted, encoded)
-        self.assertLess(counted - encoded, 20)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_one_counter_for_every_model(self):
+        """A missing encoder used to change when the same task compacted."""
+        for model in (Model("fake", "local", "fake", 4096, 256),
+                      Model("deepseek-flash", "deepseek", "openai-chat", 65536, 8192),
+                      Model("gpt-5", "openai", "openai-chat", 400_000, 8192)):
+            self.assertIsInstance(select_counter(model), HeuristicTokenCounter)
+        self.assertEqual(select_counter(Model("gpt-5", "openai", "openai-chat", 4096, 256)).name,
+                         HeuristicTokenCounter.name)

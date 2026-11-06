@@ -1,10 +1,17 @@
 """Compare local token estimates with the provider's reported prompt tokens.
 
-The byte estimate is not a tokenizer: it is roughly 4x high on English, which
-means the same task compacts at different points in different languages. This
-report measures every available counter against real usage already stored in
-``model_calls``, so changing the counter can be checked offline instead of
-spending another request.
+Two numbers are measured against real usage already stored in ``model_calls``,
+so a change to the estimator can be checked offline instead of by spending
+another request:
+
+``estimate``
+    the heuristic count of the whole prompt. This is what the first turn of a
+    run relies on, and what turn selection compares against the budget.
+``anchored``
+    the previous call's real prompt size plus the heuristic count of the
+    messages appended since — provided the prompt really is a prefix extension,
+    which the builder guarantees. This is the number the runner reports after
+    the first response, so it bounds the error that survives into later turns.
 
 Prompt tokens are ``usage.input + usage.cache_read``: our adapters report them
 separately, and the provider's cache read is still prompt context.
@@ -24,9 +31,7 @@ import psycopg
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
-from chagent.context.tokens import (
-    BpeTokenCounter, ByteTokenCounter, TokenizerUnavailable, encoding_for,
-)
+from chagent.context.tokens import HeuristicTokenCounter
 from chagent.domain.codec import message_from_dict
 from chagent.models.base import Model, ModelRequest
 
@@ -56,13 +61,8 @@ def deviation(estimate: int, actual: int) -> float | None:
     return (estimate - actual) / actual if actual else None
 
 
-def build_counters(model_id: str):
-    counters = [ByteTokenCounter()]
-    try:
-        counters.append(BpeTokenCounter(encoding_for(model_id)))
-    except TokenizerUnavailable as error:
-        print(f"tokenizer unavailable: {error}; reporting bytes only")
-    return counters
+def build_counters():
+    return [HeuristicTokenCounter()]
 
 
 def collect(arguments) -> list[dict]:
@@ -113,24 +113,30 @@ def main() -> None:
     samples, skipped = [], 0
     for entry in report:
         model_id = entry["calls"][0]["request"]["model"]["id"]
-        counters = build_counters(model_id)
-        turns = []
+        counter = build_counters()[0]
+        turns, previous = [], None
         for row in entry["calls"]:
             usage = (row["response"] or {}).get("usage") or {}
             actual = (usage.get("input") or 0) + (usage.get("cache_read") or 0)
             if actual <= 0:
                 skipped += 1
                 continue
-            request = request_of(row)
-            estimates = {counter.name: counter.count(request.messages) for counter in counters}
+            messages = request_of(row).messages
+            estimates = {"estimate": counter.count(messages)}
+            if previous is not None:
+                # The prompt only ever extends its predecessor, so the suffix is
+                # exactly what the previous provider number did not cover.
+                estimates["anchored"] = previous["actual"] + counter.count(
+                    messages[len(previous["messages"]):])
             turns.append({"iteration": row["iteration"], "actual": actual, "estimates": estimates,
                           "deviation": {name: round(deviation(value, actual), 4)
                                         for name, value in estimates.items()}})
             samples.append((actual, estimates))
+            previous = {"actual": actual, "messages": messages}
         entry["model"] = model_id
         entry["turns"] = turns
         entry.pop("calls")
-        entry["counters"] = [counter.name for counter in counters]
+        entry["counter"] = counter.name
 
     for entry in report:
         if not entry["turns"]:
@@ -138,24 +144,24 @@ def main() -> None:
         print(f"run {entry['run_id'][:8]}  model={entry['model']}  turns={len(entry['turns'])}")
         for turn in entry["turns"]:
             parts = "  ".join(
-                f"{name} {turn['estimates'][name]} ({turn['deviation'][name]:+.0%})"
-                if turn["deviation"][name] is not None else f"{name} {turn['estimates'][name]}"
-                for name in entry["counters"])
+                f"{name} {value} ({turn['deviation'][name]:+.0%})"
+                if turn["deviation"][name] is not None else f"{name} {value}"
+                for name, value in turn["estimates"].items())
             print(f"   it={turn['iteration']:<2} actual={turn['actual']:<6} {parts}")
         print()
 
     if not samples:
         print(f"no usable samples ({skipped} calls without provider usage)")
         return
-    names = [name for name in samples[0][1]]
+    names = sorted({name for _, estimates in samples for name in estimates})
     print(f"samples: {len(samples)} calls; skipped without usage: {skipped}")
     for name in names:
-        deviations = [abs(estimate[name] - actual) / actual
-                      for actual, estimate in samples if actual and name in estimate]
-        if not deviations:
+        pairs = [(estimate[name], actual) for actual, estimate in samples if actual and name in estimate]
+        if not pairs:
             continue
-        ratios = [estimate[name] / actual for actual, estimate in samples if actual and name in estimate]
-        print(f"  {name:<28} median |error| {statistics.median(deviations):6.1%}"
+        deviations = [abs(estimate - actual) / actual for estimate, actual in pairs]
+        ratios = [estimate / actual for estimate, actual in pairs]
+        print(f"  {name:<10} n={len(pairs):<4} median |error| {statistics.median(deviations):6.1%}"
               f"  mean ratio {statistics.mean(ratios):5.2f}x")
     if arguments.output:
         with open(arguments.output, "w", encoding="utf-8") as handle:

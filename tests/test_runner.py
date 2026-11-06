@@ -19,6 +19,7 @@ from chagent.bootstrap import create_demo_runner, create_runner
 from chagent.config import Settings
 from chagent.domain.codec import message_from_dict
 from chagent.domain.messages import AssistantMessage, ToolCall, ToolResultMessage
+from chagent.domain.usage import Usage
 from chagent.models.events import DoneEvent, ErrorEvent, StartEvent
 from chagent.models.fake import FakeModelClient
 from chagent.models.factory import create_model_client
@@ -99,6 +100,33 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         declared = [tool["name"] for tool in rows[0]["request"]["messages"][0]["tools_added"]]
         self.assertIn("echo", declared)
         self.assertEqual(declared, sorted(declared))
+
+    async def test_provider_usage_anchors_the_estimate_after_the_first_response(self):
+        """Only the tail of a prompt is estimated once the provider has answered."""
+
+        class UsageReportingClient(FakeModelClient):
+            async def stream(self, request):
+                async for event in super().stream(request):
+                    if isinstance(event, DoneEvent):
+                        event.message.usage = Usage(input=700, output=100, cache_read=0,
+                                                    cache_write=0, total_tokens=800)
+                    yield event
+
+        self.runner.client = UsageReportingClient()
+        await self.runner.run(self.session, "hello")
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT context_snapshot FROM model_calls ORDER BY iteration")
+            snapshots = [row["context_snapshot"] for row in await cursor.fetchall()]
+        self.assertEqual(len(snapshots), 2, "one tool call, then the answer")
+        self.assertEqual(snapshots[0]["estimate_source"], "coarse")
+        self.assertEqual(snapshots[0]["observed_prompt_tokens"], None)
+        self.assertEqual(snapshots[1]["estimate_source"], "observed")
+        self.assertEqual(snapshots[1]["observed_prompt_tokens"], 800)
+        self.assertGreater(snapshots[1]["tail_token_estimate"], 0, "the tool result is new")
+        self.assertEqual(snapshots[1]["token_estimate"],
+                         800 + snapshots[1]["tail_token_estimate"])
+        self.assertEqual(snapshots[1]["token_counter"], "wire_tokens_ascii4_wide1")
 
     async def test_error_persisted_and_failed_run_not_replayed(self):
         class ErrorClient:

@@ -6,8 +6,8 @@ import json
 from typing import Protocol
 
 from chagent.context.projection import ProjectionCache
-from chagent.context.tokens import ByteTokenCounter, TokenCounter
-from chagent.domain.context import ContextPolicy, ContextSelection, ContextSnapshot
+from chagent.context.tokens import HeuristicTokenCounter, TokenCounter
+from chagent.domain.context import ContextPolicy, ContextSelection, ContextSnapshot, ObservedUsage
 from chagent.domain.messages import AssistantMessage, Message, SystemMessage, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.recovery import RecoveryNote
 from chagent.domain.runs import StoredMessage
@@ -126,9 +126,7 @@ class BasicContextBuilder:
     ):
         self.instructions = instructions
         self.policy = policy or ContextPolicy()
-        self.counter = counter or ByteTokenCounter()
-        # Recorded alongside the primary estimate so the two never mix.
-        self.byte_counter = ByteTokenCounter()
+        self.counter = counter or HeuristicTokenCounter()
 
     async def build(
         self, history: list[StoredMessage], model: Model, tools: list[Tool],
@@ -140,6 +138,8 @@ class BasicContextBuilder:
         environment: str | None = None,
         mode: str | None = None,
         other_modes: tuple[str, ...] = (),
+        observed: ObservedUsage | None = None,
+        scale: float | None = None,
     ) -> BuiltContext:
         """Compile the request the model sees, plus the audit trail for it.
 
@@ -148,7 +148,15 @@ class BasicContextBuilder:
         and turn grouping, the selection itself, and the snapshot that records
         why every message was kept or dropped. Keeping them separate is what
         makes a budget bug traceable to a phase instead of to one long method.
+
+        ``observed`` is the provider's own count for the last prompt of this run.
+        It anchors the reported estimate. ``scale`` carries that anchor's
+        estimate error into turn selection so both decide in the same units; a
+        hyperthetical checkpoint can pass the scale without the anchor, because
+        the error is a property of the content, not of the prompt's structure.
         """
+        if scale is None:
+            scale = observed.scale if observed is not None else 1.0
         original = history
         history = self._replayable(history, summary, current_run_id)
         output, budget = self._limits(model)
@@ -159,13 +167,18 @@ class BasicContextBuilder:
         selection = self._select(
             system=system, summary=summary, history=history, visible=visible, groups=groups,
             pinned=pinned, required=required, budget=budget, allow_over_budget=allow_over_budget,
+            scale=scale,
         )
         messages = self._render(system, summary, history, visible, selection.selected)
+        coarse, estimate, source, tail = self._estimate(history, visible, selection, messages,
+                                                       observed, summary, scale)
         return BuiltContext(
             request=ModelRequest(model=model, messages=messages, max_tokens=output),
             snapshot=self._snapshot(
                 original=original, history=history, summary=summary, task_state=task_state,
                 recovery=recovery, selection=selection, messages=messages, output=output, budget=budget,
+                estimate=estimate, source=source, tail=tail, observed=observed, visible=visible,
+                coarse=coarse,
             ),
         )
 
@@ -251,7 +264,8 @@ class BasicContextBuilder:
 
     def _project(self, history: list[StoredMessage], cache: ProjectionCache | None) -> dict:
         """Project every message once; the cache makes turns after the first free."""
-        projections = cache if cache is not None else ProjectionCache()
+        projections = cache if cache is not None else ProjectionCache(
+            max_tool_result_tokens=self.policy.max_tool_result_tokens)
         return {item.id: projections.project(item, self.counter) for item in history}
 
     def _turns(
@@ -298,7 +312,7 @@ class BasicContextBuilder:
     def _select(
         self, *, system: SystemMessage, summary: SessionSummary | None, history: list[StoredMessage],
         visible: dict, groups: list[list[StoredMessage]], pinned: set[UUID], required: set[UUID],
-        budget: int, allow_over_budget: bool,
+        budget: int, allow_over_budget: bool, scale: float = 1.0,
     ) -> _Selection:
         """Keep the pinned prefix and current turn, then whole turns while they fit."""
         selected = pinned | required
@@ -314,7 +328,7 @@ class BasicContextBuilder:
         fixed_cost = (self.counter.count([system] + ([] if summary is None
                                                     else [self.summary_message(summary.content)]))
                       if additive else 0)
-        required_cost = self._cost(selected, render, additive, fixed_cost, visible)
+        required_cost = self._cost(selected, render, additive, fixed_cost, visible, scale)
         if required_cost > budget and not allow_over_budget:
             raise ContextBudgetError(
                 f"Required context estimate {required_cost} exceeds input budget {budget}; "
@@ -322,7 +336,6 @@ class BasicContextBuilder:
                 required_tokens=required_cost, input_budget=budget,
             )
         exclusion = "history_limit"
-        running = required_cost
         for group in reversed(groups):
             identities = {item.id for item in group}
             if identities <= selected:
@@ -331,21 +344,29 @@ class BasicContextBuilder:
             if len(trial) > self.policy.max_history_messages:
                 exclusion = "history_limit"
                 break
-            trial_cost = self._cost(trial, render, additive, fixed_cost, visible)
+            trial_cost = self._cost(trial, render, additive, fixed_cost, visible, scale)
             if trial_cost > budget:
                 exclusion = "token_budget"
                 break
-            selected, running = trial, trial_cost
+            selected = trial
             reasons.update({identity: "recent_complete_turn" for identity in identities})
         return _Selection(
             selected=selected, reasons=reasons, exclusion=exclusion, required_cost=required_cost,
-            projected_cost=self._cost(set(visible), render, additive, fixed_cost, visible),
+            projected_cost=self._cost(set(visible), render, additive, fixed_cost, visible, scale),
         )
 
-    def _cost(self, identities: set[UUID], render, additive: bool, fixed_cost: int, visible: dict) -> int:
-        if additive:
-            return fixed_cost + sum(visible[identity].cost for identity in identities)
-        return self.counter.count(render(identities))
+    def _cost(self, identities: set[UUID], render, additive: bool, fixed_cost: int, visible: dict,
+              scale: float = 1.0) -> int:
+        """Cost in the units the budget is expressed in.
+
+        ``scale`` is the provider's measured correction for this content, so a
+        selection made from estimated costs and a final check made from the
+        provider's own number agree on what fits. It is monotone, so it cannot
+        change the order in which turns are considered.
+        """
+        raw = (fixed_cost + sum(visible[identity].cost for identity in identities) if additive
+               else self.counter.count(render(identities)))
+        return raw if scale == 1.0 else round(raw * scale)
 
     def _render(
         self, system: SystemMessage, summary: SessionSummary | None, history: list[StoredMessage],
@@ -356,20 +377,55 @@ class BasicContextBuilder:
         return [deepcopy(system), *reference,
                 *(deepcopy(visible[item.id].message) for item in history if item.id in identities)]
 
+    def _estimate(
+        self, history: list[StoredMessage], visible: dict, selection: _Selection,
+        messages: list[Message], observed: ObservedUsage | None, summary: SessionSummary | None,
+        scale: float = 1.0,
+    ) -> tuple[int, int, str, int | None]:
+        """The authoritative prompt size, in three regimes.
+
+        ``observed``: the provider told us exactly what the last prompt cost and
+        every message that prompt contained is still selected. Only what was
+        appended since — tool results, the next user turn — needs the heuristic,
+        so the error cannot accumulate across turns.
+
+        ``scaled``: the same provider number exists but selection has since
+        dropped an older turn, so the anchor describes a prompt that no longer
+        exists and cannot be reduced by dropping. Fall back to the heuristic
+        multiplied by the ratio the provider measured for this content.
+
+        ``coarse``: no anchor at all (first request of a run, or a summary now
+        covers it). The heuristic alone, as before.
+        """
+        coarse = self.counter.count(messages)
+        if observed is None:
+            return coarse, coarse, "coarse", None
+        if summary is not None and observed.after_sequence < summary.covered_through_sequence:
+            return coarse, coarse, "coarse", None
+        if any(item.sequence <= observed.after_sequence and item.id not in selection.selected
+               for item in history):
+            return coarse, (coarse if scale == 1.0 else round(coarse * scale)), "scaled", None
+        tail_ids = {item.id for item in history
+                    if item.sequence > observed.after_sequence and item.id in selection.selected}
+        if not tail_ids:
+            return coarse, observed.prompt_tokens, "observed", 0
+        if getattr(self.counter, "additive", False):
+            tail = sum(visible[identity].cost for identity in tail_ids)
+        else:
+            tail = self.counter.count([deepcopy(visible[identity].message) for identity in tail_ids])
+        return coarse, observed.prompt_tokens + tail, "observed", tail
+
     def _snapshot(
         self, *, original: list[StoredMessage], history: list[StoredMessage], summary: SessionSummary | None,
         task_state: TaskState | None, recovery: RecoveryNote | None, selection: _Selection,
-        messages: list[Message], output: int, budget: int,
+        messages: list[Message], output: int, budget: int, estimate: int, source: str,
+        tail: int | None, observed: ObservedUsage | None, visible: dict, coarse: int,
     ) -> ContextSnapshot:
-        estimate = self.counter.count(messages)
-        estimates = {self.counter.name: estimate}
-        if self.counter.name != self.byte_counter.name:
-            estimates[self.byte_counter.name] = self.byte_counter.count(messages)
         return ContextSnapshot(
             strategy="summary_and_recent_turns" if summary else "recent_complete_turns",
             source_message_ids=[str(item.id) for item in history if item.id in selection.selected],
             message_count=len(messages), token_estimate=estimate,
-            token_counter=self.counter.name, token_estimates=estimates,
+            token_counter=self.counter.name, token_estimates={self.counter.name: estimate},
             input_budget=budget, output_reserved=output,
             safety_reserved=self.policy.safety_tokens,
             task_state_revision=task_state.revision if task_state is not None else None,
@@ -384,6 +440,11 @@ class BasicContextBuilder:
             protected_input_id=str(summary.protected_input_id) if summary and summary.protected_input_id else None,
             recovery_fact_count=recovery.fact_count if recovery is not None else 0,
             recovery_source_runs=list(recovery.run_ids) if recovery is not None else [],
+            estimate_source=source,
+            observed_prompt_tokens=observed.prompt_tokens if observed is not None and source == "observed" else None,
+            tail_token_estimate=tail,
+            coarse_token_estimate=coarse,
+            truncated_tool_results=sum(visible[identity].omitted_chars for identity in selection.selected),
         )
 
     @staticmethod

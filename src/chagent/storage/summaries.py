@@ -134,6 +134,30 @@ class SummaryRepository:
             self.database.notifications.notify(run_id)
         return summary
 
+    async def record_calls(self, run_id: UUID, records) -> None:
+        """Insert summarization calls that were captured off the critical path.
+
+        The rows are written already terminal, because by adoption time they are.
+        The same ownership gate as ``start_call`` decides whether they may exist,
+        so a lost lease cannot attach audit rows to a run someone else owns.
+        """
+        records = [record for record in records if record.response is not None or record.error is not None]
+        if not records:
+            return
+        token = self.database.run_owners.get(run_id)
+        async with self.database.transaction() as connection:
+            for record in records:
+                cursor = await connection.execute(
+                    "INSERT INTO compaction_calls (id, compaction_id, run_id, iteration, status, request, response, error, duration_ms, ended_at) "
+                    "SELECT %s, %s, r.id, %s, %s, %s, %s, %s, %s, now() FROM runs r "
+                    "WHERE r.id = %s AND r.status = 'running' AND r.owner_token = %s AND r.lease_expires_at > clock_timestamp()",
+                    (uuid4(), record.compaction_id, record.iteration, record.status, Jsonb(asdict(record.request)),
+                     Jsonb(message_to_dict(record.response)) if record.response else None,
+                     record.error, record.duration_ms, run_id, token),
+                )
+                if cursor.rowcount == 0:
+                    raise RunOwnershipLost("Run ownership lost or lease expired")
+
     async def start_call(self, compaction_id: UUID, run_id: UUID, iteration: int, request: ModelRequest) -> UUID:
         identity = uuid4()
         token = self.database.run_owners.get(run_id)
