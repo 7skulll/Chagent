@@ -12,9 +12,16 @@ from chagent.tools.sandbox import Sandbox, SandboxSettings
 from chagent.tools.site import SiteTool
 from chagent.tools.context import ToolContext
 from chagent.web.workspace_api import workspace_site
+from chagent.web.runtime import WebRuntime
+from chagent.config import Settings
 
 
 class ContainerLifecycleTests(TestCase):
+    def test_idle_timeout_configuration(self):
+        self.assertEqual(Settings.from_env({"CHAGENT_CONTAINER_IDLE_SECONDS": "0"}).container_idle_seconds, 0)
+        with self.assertRaisesRegex(ValueError, "CHAGENT_CONTAINER_IDLE_SECONDS"):
+            Settings(container_idle_seconds=-1)
+
     def test_command_uses_private_scratch_and_release_removes_it(self):
         async def check():
             sandbox = Sandbox(SandboxSettings(containerized=True, host_controller=True))
@@ -132,4 +139,95 @@ class ContainerLifecycleTests(TestCase):
                 current.workspace_id.assert_awaited_once_with(root)
                 current.require_programming.assert_not_awaited()
                 ensure.assert_not_awaited()
+        asyncio.run(check())
+
+    def test_active_run_lease_prevents_idle_reaping(self):
+        async def check():
+            sandbox = Sandbox(SandboxSettings(containerized=True, host_controller=True))
+            with TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                name, workspace_id = sandbox.container_name(root), uuid4()
+                stat = root.stat()
+
+                class Cursor:
+                    async def fetchall(self):
+                        return [{"workspace_id": workspace_id, "container_name": name,
+                                 "host_path": str(root), "device": stat.st_dev, "inode": stat.st_ino}]
+
+                class Connection:
+                    async def __aenter__(self): return self
+                    async def __aexit__(self, *args): return None
+                    async def execute(self, *args): return Cursor()
+
+                class Database:
+                    def connection(self): return Connection()
+
+                sandbox._run_containers[str(uuid4())] = name
+                with patch.object(sandbox, "_docker", AsyncMock()) as docker:
+                    self.assertEqual(await sandbox.reap_idle_containers(Database(), 1), 0)
+                    sandbox._run_containers.clear()
+                    async with sandbox.use(root):
+                        self.assertEqual(await sandbox.reap_idle_containers(Database(), 1), 0)
+                docker.assert_not_awaited()
+        asyncio.run(check())
+
+    def test_command_startup_lease_blocks_gc_during_ensure(self):
+        async def check():
+            sandbox = Sandbox(SandboxSettings(containerized=True, host_controller=True))
+            with TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                name, workspace_id, owner = sandbox.container_name(root), uuid4(), uuid4()
+                stat = root.stat()
+                entered, proceed = asyncio.Event(), asyncio.Event()
+
+                async def slow_ensure(_root):
+                    entered.set()
+                    await proceed.wait()
+                    return name
+
+                class Cursor:
+                    async def fetchall(self):
+                        return [{"workspace_id": workspace_id, "container_name": name,
+                                 "host_path": str(root), "device": stat.st_dev, "inode": stat.st_ino}]
+
+                class Connection:
+                    async def __aenter__(self): return self
+                    async def __aexit__(self, *args): return None
+                    async def execute(self, *args): return Cursor()
+
+                class Database:
+                    def connection(self): return Connection()
+
+                with patch.object(sandbox, "ensure_container", side_effect=slow_ensure), \
+                     patch.object(sandbox, "_docker", AsyncMock(return_value=(0, ""))) as docker:
+                    startup = asyncio.create_task(sandbox.wrap(["true"], root, owner=owner))
+                    await entered.wait()
+                    self.assertEqual(await sandbox.reap_idle_containers(Database(), 1), 0)
+                    docker.assert_not_awaited()
+                    proceed.set()
+                    await startup
+                    await sandbox.release(owner)
+        asyncio.run(check())
+
+    def test_orphans_are_previewed_for_one_gc_interval(self):
+        async def check():
+            sandbox = SimpleNamespace(
+                reap_terminal_scratch=AsyncMock(), reap_idle_containers=AsyncMock(),
+                reap_orphan_containers=AsyncMock())
+            runtime = object.__new__(WebRuntime)
+            runtime.runner = SimpleNamespace(sandbox=sandbox, runs=SimpleNamespace(database=object()))
+            runtime.settings = SimpleNamespace(container_idle_seconds=1)
+            sleeps = []
+
+            async def advance(seconds):
+                sleeps.append(seconds)
+                if len(sleeps) == 3:
+                    raise asyncio.CancelledError()
+
+            with patch("chagent.web.runtime.asyncio.sleep", side_effect=advance):
+                with self.assertRaises(asyncio.CancelledError):
+                    await runtime._reap_scratch()
+            self.assertEqual(sleeps, [5, 300, 300])
+            self.assertEqual(sandbox.reap_terminal_scratch.await_count, 2)
+            self.assertEqual(sandbox.reap_orphan_containers.await_count, 1)
         asyncio.run(check())

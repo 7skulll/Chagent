@@ -225,6 +225,7 @@ class ConfigView(BaseModel):
     approval: str
     approval_timeout: float
     approval_grace: float
+    container_idle_seconds: int = 1800
     host_commands: bool
     host_execution: bool = False
     host_workspace_path: str = ""

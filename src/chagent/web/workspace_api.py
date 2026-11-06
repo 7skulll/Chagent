@@ -42,6 +42,13 @@ async def workspaces(current: deps.Current):
     return {"items": items}
 
 
+@router.get("/containers")
+async def containers(current: deps.Current):
+    if current.settings.execution_profile != "host-controller":
+        raise HTTPException(404, "Container inventory requires the host controller")
+    return {"items": await current.runner.sandbox.container_inventory(current.runner.runs.database)}
+
+
 @router.post("/workspaces", response_model=WorkspaceView, status_code=201)
 async def open_workspace(value: WorkspaceCreate, current: deps.Current):
     """Open one directory; from then on requests may name it as their workspace."""

@@ -88,6 +88,10 @@ class SiteTool(AgentTool):
     async def execute(self, tool_call_id, params, signal=None, on_update=None, *, context: ToolContext | None = None):
         if context is None:
             raise PermissionError("Website operation needs a workspace")
+        async with self.sandbox.use(context.workspace):
+            return await self._execute(params, context)
+
+    async def _execute(self, params, context):
         fs = WorkspaceFS(context.workspace, expected_identity=context.workspace_identity)
         action = params["action"]
         if action == "status":

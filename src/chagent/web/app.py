@@ -120,6 +120,7 @@ async def config(current: Current):
                           bool(getattr(current.runner.tools.registry.get("exec_command"), "process_stdin", False))),
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
         "approval_grace": settings.approval_unwatched_grace,
+        "container_idle_seconds": settings.container_idle_seconds,
         "host_commands": current.runner.tools.allow_host_commands,
         "host_execution": current.runner.tools.registry.get("host_exec") is not None,
         "host_workspace_path": os.environ.get("CHAGENT_HOST_WORKSPACE_PATH", ""),

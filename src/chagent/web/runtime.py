@@ -45,6 +45,8 @@ class WebRuntime:
         self.closing = False
         self._workspace_ids: dict[Path, UUID] = {}
         self.auth_guard = None
+        if self.runner.sandbox is not None and self.settings.execution_profile == "host-controller":
+            self.runner.sandbox.database = self.runner.runs.database
         self._recovery_task: asyncio.Task | None = None
         self._scratch_task: asyncio.Task | None = None
         #: How many browser streams are attached to each run. A count, not a
@@ -198,9 +200,18 @@ class WebRuntime:
         # The first pass runs after the run recovery loop has had a chance to
         # mark expired owners. A nonterminal run is never removed in any case.
         await asyncio.sleep(5)
+        first_pass = True
         while True:
             try:
                 await self.runner.sandbox.reap_terminal_scratch(self.runner.runs.database)
+                if first_pass:
+                    # Give the diagnostic inventory one GC interval to expose
+                    # candidates before any orphan container is deleted.
+                    first_pass = False
+                else:
+                    await self.runner.sandbox.reap_orphan_containers(self.runner.runs.database)
+                await self.runner.sandbox.reap_idle_containers(
+                    self.runner.runs.database, self.settings.container_idle_seconds)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
