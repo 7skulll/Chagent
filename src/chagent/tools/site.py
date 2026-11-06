@@ -89,8 +89,22 @@ class SiteTool(AgentTool):
         if context is None:
             raise PermissionError("Website operation needs a workspace")
         fs = WorkspaceFS(context.workspace, expected_identity=context.workspace_identity)
-        name = await self.sandbox.ensure_container(fs.root)
         action = params["action"]
+        if action == "status":
+            # A read-only status request must not restart a stopped container.
+            candidate = self.sandbox.container_name(fs.root)
+            code, output = await self.sandbox._docker(
+                "inspect", candidate, "--format", "{{.State.Running}}")
+            if code or output.strip() != "true":
+                async with self.database.connection() as connection:
+                    await connection.execute(
+                        "UPDATE workspace_services SET status='stopped', updated_at=now() "
+                        "WHERE workspace_id=(SELECT id FROM workspaces WHERE root_path=%s)",
+                        (str(fs.root),))
+                state = {"state": "stopped", "reason": "container_missing" if code else "container_stopped"}
+                return AgentToolResult(content=[TextContent(json.dumps({"url": None, "service": state}))],
+                                       details={"url": None, "service": state})
+        name = await self.sandbox.ensure_container(fs.root)
         current = await self._state(name)
         host_port = await self._port(name)
         url = f"http://127.0.0.1:{host_port}"

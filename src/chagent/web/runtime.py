@@ -46,6 +46,7 @@ class WebRuntime:
         self._workspace_ids: dict[Path, UUID] = {}
         self.auth_guard = None
         self._recovery_task: asyncio.Task | None = None
+        self._scratch_task: asyncio.Task | None = None
         #: How many browser streams are attached to each run. A count, not a
         #: flag: two tabs on one run means closing one is not "nobody is left".
         self.viewers: dict[UUID, int] = {}
@@ -193,10 +194,26 @@ class WebRuntime:
                 logger.warning("Run recovery failed (%s)", type(error).__name__)
             await asyncio.sleep(5)
 
+    async def _reap_scratch(self) -> None:
+        # The first pass runs after the run recovery loop has had a chance to
+        # mark expired owners. A nonterminal run is never removed in any case.
+        await asyncio.sleep(5)
+        while True:
+            try:
+                await self.runner.sandbox.reap_terminal_scratch(self.runner.runs.database)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning("Run scratch recovery failed (%s)", type(error).__name__)
+            await asyncio.sleep(300)
+
     def start_worker(self) -> None:
         """Start recovery and extraction while the application is serving."""
         if self._recovery_task is None or self._recovery_task.done():
             self._recovery_task = asyncio.create_task(self._recover_runs(), name="run-recovery")
+        if (self.runner.sandbox is not None and self.runner.sandbox.settings.host_controller
+                and (self._scratch_task is None or self._scratch_task.done())):
+            self._scratch_task = asyncio.create_task(self._reap_scratch(), name="scratch-recovery")
         if getattr(self.runner, "memory_worker", None) is not None:
             self.runner.memory_worker.start()
 
@@ -206,6 +223,10 @@ class WebRuntime:
             self._recovery_task.cancel()
             await asyncio.gather(self._recovery_task, return_exceptions=True)
             self._recovery_task = None
+        if self._scratch_task is not None:
+            self._scratch_task.cancel()
+            await asyncio.gather(self._scratch_task, return_exceptions=True)
+            self._scratch_task = None
         for task in self.tasks:
             if not task.cancelling():
                 task.cancel()

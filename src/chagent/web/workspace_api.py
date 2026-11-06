@@ -63,7 +63,9 @@ async def workspace_site(workspace_id: UUID, current: deps.Current):
     root = next((root for root in current.roots if current._workspace_ids.get(root) == workspace_id), None)
     if root is None:
         raise HTTPException(404, "Workspace is not open")
-    await current.require_programming(root)
+    # Status is read-only: the normal programming preflight would call
+    # ensure_container() and restart a stopped container before we inspect it.
+    await current.workspace_id(root)
     site = current.runner.tools.registry.get("site")
     result = await site.execute("web-status", {"action": "status"}, context=ToolContext(workspace=root))
     return result.details

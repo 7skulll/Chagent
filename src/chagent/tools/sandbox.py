@@ -10,8 +10,10 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 from typing import Sequence
+from uuid import UUID
 
 from chagent.boundaries import validate_workspace
 
@@ -216,6 +218,49 @@ class Sandbox:
         if code:
             raise OSError("Could not remove run scratch: " + output[-200:])
         self._run_containers.pop(str(owner), None)
+
+    async def reap_terminal_scratch(self, database) -> int:
+        """Remove only scratch directories belonging to terminal database runs.
+
+        A missing row is not proof that another controller is done with a run.
+        Container and directory names are restricted before passing them to Docker.
+        """
+        if not self.settings.host_controller:
+            return 0
+        code, output = await self._docker("ps", "--filter", "label=chagent.workspace", "--format", "{{.Names}}")
+        if code:
+            raise RuntimeError("Could not list workspace containers: " + output[-200:])
+        removed = 0
+        for name in output.splitlines():
+            if not re.fullmatch(r"chagent-ws-[0-9a-f]{20}", name):
+                continue
+            code, listing = await self._docker("exec", name, "ls", "-1", "/tmp")
+            if code:
+                continue
+            candidates = []
+            for entry in listing.splitlines():
+                if not entry.startswith("chagent-run-"):
+                    continue
+                try:
+                    owner = UUID(entry.removeprefix("chagent-run-"))
+                except ValueError:
+                    continue
+                if entry != f"chagent-run-{owner}" or str(owner) in self._run_containers:
+                    continue
+                candidates.append(owner)
+            if not candidates:
+                continue
+            async with database.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT id FROM runs WHERE id = ANY(%s) AND status IN ('completed','failed','cancelled','interrupted')",
+                    (candidates,))
+                terminal = {row["id"] for row in await cursor.fetchall()}
+            for owner in candidates:
+                if owner not in terminal:
+                    continue
+                status, _ = await self._docker("exec", name, "rm", "-rf", "--", f"/tmp/chagent-run-{owner}")
+                removed += status == 0
+        return removed
 
     def close(self) -> None:
         pass
