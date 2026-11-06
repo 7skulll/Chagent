@@ -35,7 +35,7 @@ class SiteTool(AgentTool):
         return 60.0
 
     async def _state(self, name: str):
-        code, output = await self.sandbox._docker("exec", name, "cat", "/tmp/chagent-site.json")
+        code, output = await self.sandbox._docker("exec", name, "cat", "/cache/site/chagent-site.json")
         if code:
             return None
         try:
@@ -43,10 +43,15 @@ class SiteTool(AgentTool):
         except ValueError:
             return None
         pid = str(state.get("worker_pid", ""))
-        if state.get("state") == "running" and pid.isdigit():
-            alive, _ = await self.sandbox._docker("exec", name, "/bin/sh", "-c", 'kill -0 "$1"', "sh", pid)
-            if alive:
-                state["state"] = "unknown"
+        if state.get("state") in {"running", "starting"} and pid.isdigit():
+            alive, observed = await self.sandbox._docker("exec", name, "/bin/sh", "-c",
+                'cat "/proc/$1/stat"', "sh", pid)
+            try:
+                start = observed.rsplit(") ", 1)[1].split()[19] if alive == 0 else None
+            except (IndexError, ValueError):
+                start = None
+            if start != state.get("worker_start"):
+                state["state"] = "stopped"
         return state
 
     async def _port(self, name: str) -> int:
@@ -93,11 +98,11 @@ class SiteTool(AgentTool):
             await self._reconcile(fs.root, name, host_port, current)
             return AgentToolResult(content=[TextContent(json.dumps({"url": url, "service": current}, ensure_ascii=False))],
                                    details={"url": url, "service": current,
-                                            "log": f"docker:{name}:/tmp/chagent-site.log"})
+                                            "log": f"docker:{name}:/cache/site/chagent-site.log"})
         if action == "logs":
-            code, output = await self.sandbox._docker("exec", name, "tail", "-c", "4000", "/tmp/chagent-site.log")
+            code, output = await self.sandbox._docker("exec", name, "tail", "-c", "4000", "/cache/site/chagent-site.log")
             return AgentToolResult(content=[TextContent(output[-4000:] if code == 0 else "No site log available")],
-                                   details={"log": f"docker:{name}:/tmp/chagent-site.log", "output": output[-4000:]},
+                                   details={"log": f"docker:{name}:/cache/site/chagent-site.log", "output": output[-4000:]},
                                    is_error=code != 0)
         if action == "stop":
             if current and current.get("state") == "running":
@@ -118,7 +123,7 @@ class SiteTool(AgentTool):
             with fs.directory(parts):
                 pass
             cwd = fs.root.joinpath(*parts)
-            await self.sandbox._docker("exec", name, "rm", "-f", "/tmp/chagent-site.json")
+            await self.sandbox._docker("exec", name, "rm", "-f", "/cache/site/chagent-site.json")
             code, output = await self.sandbox._docker("exec", "--detach", "--workdir", str(cwd),
                 "--env", "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin",
                 "--env", "HOME=/tmp", "--env", "PYTHONPATH=" + str(fs.root),
@@ -135,7 +140,7 @@ class SiteTool(AgentTool):
                     await self._save(fs.root, name, command, port, host_port, "running")
                     return AgentToolResult(content=[TextContent(f"Website process started. URL: {url}. Call site(probe) to verify HTTP content.")],
                         details={"url": url, "service": current, "container": name,
-                                 "log": f"docker:{name}:/tmp/chagent-site.log"})
+                                 "log": f"docker:{name}:/cache/site/chagent-site.log"})
                 if current and current.get("state") in {"stopped", "failed", "unknown"}:
                     break
             await self._save(fs.root, name, command, port, host_port, "failed")

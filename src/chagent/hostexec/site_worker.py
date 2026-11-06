@@ -8,8 +8,12 @@ from pathlib import Path
 import signal
 
 
-STATUS = Path("/tmp/chagent-site.json")
-LOG = Path("/tmp/chagent-site.log")
+STATUS = Path("/cache/site/chagent-site.json")
+LOG = Path("/cache/site/chagent-site.log")
+
+
+def process_start(pid: int) -> str:
+    return Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
 
 
 def write_status(**values):
@@ -34,11 +38,13 @@ async def main():
     args = parser.parse_args()
     if not 1 <= args.port <= 65535 or args.port == 18080:
         parser.error("Site port must be 1–65535 and not the reserved proxy port 18080")
+    STATUS.parent.mkdir(parents=True, exist_ok=True)
+    worker_start = process_start(os.getpid())
     with LOG.open("ab", buffering=0) as log:
         child = await asyncio.create_subprocess_exec("/bin/sh", "-c", args.command,
             stdin=asyncio.subprocess.DEVNULL, stdout=log, stderr=log,
             start_new_session=True)
-        write_status(state="starting", worker_pid=os.getpid(), child_pid=child.pid,
+        write_status(state="starting", worker_pid=os.getpid(), worker_start=worker_start, child_pid=child.pid,
                      actual_port=args.port, command=args.command)
 
         async def handle(client_reader, client_writer):
@@ -51,7 +57,7 @@ async def main():
                                  transfer(target_reader, client_writer), return_exceptions=True)
 
         server = await asyncio.start_server(handle, "0.0.0.0", 18080)
-        write_status(state="running", worker_pid=os.getpid(), child_pid=child.pid,
+        write_status(state="running", worker_pid=os.getpid(), worker_start=worker_start, child_pid=child.pid,
                      actual_port=args.port, command=args.command)
         try:
             stopping = asyncio.Event()
@@ -77,7 +83,7 @@ async def main():
         finally:
             server.close()
             await server.wait_closed()
-            write_status(state="stopped", worker_pid=os.getpid(), child_pid=child.pid,
+            write_status(state="stopped", worker_pid=os.getpid(), worker_start=worker_start, child_pid=child.pid,
                          actual_port=args.port, command=args.command, exit_code=child.returncode)
 
 

@@ -1,6 +1,7 @@
 """Model/tool loop with commit-driven state, bounded batches and explicit endings."""
 
 import asyncio
+import inspect
 import logging
 import math
 from collections.abc import Callable
@@ -227,8 +228,10 @@ class AgentRunner:
                     logger.warning("Could not terminate run processes (%s)", type(error).__name__)
             if self.sandbox is not None and processes_reaped:
                 try:
-                    self.sandbox.release(run_id)
-                except OSError:
+                    cleanup = self.sandbox.release(run_id)
+                    if inspect.isawaitable(cleanup):
+                        await cleanup
+                except (OSError, RuntimeError):
                     logger.exception("Could not remove run scratch")
             try:
                 # Stops the flush task and commits or drops the tail. A cancelled

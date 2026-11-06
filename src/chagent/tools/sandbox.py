@@ -63,6 +63,7 @@ class Sandbox:
         self.settings = settings
         self.enabled = settings.containerized
         self._locks: dict[str, asyncio.Lock] = {}
+        self._run_containers: dict[str, str] = {}
 
     @classmethod
     def from_settings(cls, settings) -> "Sandbox":
@@ -81,7 +82,7 @@ class Sandbox:
     def environment(self, workspace: Path, *, owner=None) -> dict[str, str] | None:
         if self.settings.host_controller:
             return {**{key: os.environ[key] for key in ("PATH", "HOME", "LANG") if key in os.environ},
-                    "TMPDIR": "/tmp"}
+                    "TMPDIR": f"/tmp/chagent-run-{owner}" if owner is not None else "/tmp"}
         if self.settings.containerized:
             # Commands need toolchains, never the agent's API keys or DB URL.
             return {"PATH": "/app/.venv/bin:/usr/local/bin:/usr/bin:/bin",
@@ -172,6 +173,10 @@ class Sandbox:
             raise PermissionError("Command execution requires the container boundary")
         if self.settings.host_controller:
             name = await self.ensure_container(policy.workspace)
+            if owner is None:
+                raise ValueError("Container command requires a run owner")
+            scratch = f"/tmp/chagent-run-{owner}"
+            self._run_containers[str(owner)] = name
             cwd = validate_workspace(workdir or policy.workspace)
             if cwd != policy.workspace and not cwd.is_relative_to(policy.workspace):
                 raise PermissionError("Command directory is outside workspace")
@@ -179,8 +184,10 @@ class Sandbox:
                        if timeout_seconds is not None else list(argv))
             return (["docker", "exec", "--workdir", str(cwd),
                      "--env", "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin",
-                     "--env", "HOME=/tmp", "--env", "PYTHONPATH=" + str(policy.workspace),
-                     name, *bounded],
+                     "--env", "HOME=" + scratch, "--env", "TMPDIR=" + scratch,
+                     "--env", "PYTHONPATH=" + str(policy.workspace),
+                     name, "/bin/sh", "-c", 'mkdir -p -m 700 "$1" && shift && exec "$@"',
+                     "chagent-run", scratch, *bounded],
                     {**self.record(policy), "container": name})
         return list(argv), self.record(policy)
 
@@ -200,8 +207,15 @@ class Sandbox:
         return {**self.record(policy), "available": support.available,
                 "checks": support.checks, "detail": support.detail}
 
-    def release(self, owner) -> None:
-        pass
+    async def release(self, owner) -> None:
+        name = self._run_containers.get(str(owner))
+        if name is None:
+            return
+        path = f"/tmp/chagent-run-{owner}"
+        code, output = await self._docker("exec", name, "rm", "-rf", "--", path)
+        if code:
+            raise OSError("Could not remove run scratch: " + output[-200:])
+        self._run_containers.pop(str(owner), None)
 
     def close(self) -> None:
         pass
