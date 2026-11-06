@@ -36,6 +36,9 @@ class ToolExecutor:
                 raise ValueError(call.arguments_error)
             if not isinstance(call.arguments, dict):
                 raise ValueError("Tool arguments must be a JSON object")
+            from chagent.domain.json_types import postgres_json_safe
+            if postgres_json_safe(call.arguments) != call.arguments:
+                raise ValueError("Tool arguments contain a NUL character")
             arguments = tool.prepare_arguments(call.arguments)
             Draft202012Validator(tool.parameters).validate(arguments)
             if tool.requires_workspace and context is None:

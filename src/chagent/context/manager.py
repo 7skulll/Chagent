@@ -207,6 +207,8 @@ class ContextManager:
             candidate.content, candidate.usage = await self.compactor.compact(
                 model=model, client=client, turns=prefix, previous=previous.content if previous else "",
                 limit=limit, compaction_id=identity, run_id=run_id, task_input=task_input,
+                workspace=(state.session.workspace if state is not None else
+                           (await self.conversations.get_session(candidate.session_id)).workspace),
             )
             result = self._checked(await build(candidate))
             self._verify_reduction(result, baseline)

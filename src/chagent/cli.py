@@ -90,6 +90,7 @@ async def _run(
                                         memory_worker_concurrency=settings.memory_worker_concurrency,
                                         sandbox=sandbox, approval_policy=approval,
                                         approval_timeout=settings.approval_timeout,
+                                        wall_timeout=settings.run_wall_timeout,
                                         approval_decider=local_approver(), approval_remote=False,
                                         process_wall_timeout=settings.process_timeout,
                                         max_processes=settings.max_processes, web=web)
@@ -109,6 +110,7 @@ async def _run(
                                    memory_worker_concurrency=settings.memory_worker_concurrency,
                                    sandbox=sandbox, approval_policy=approval,
                                    approval_timeout=settings.approval_timeout,
+                                   wall_timeout=settings.run_wall_timeout,
                                    approval_decider=local_approver(), approval_remote=False,
                                    process_wall_timeout=settings.process_timeout,
                                    max_processes=settings.max_processes, web=web)

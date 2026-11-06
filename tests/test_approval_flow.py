@@ -178,6 +178,18 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.end_reason, "model_stop")
         self.assertTrue(marker.exists())
 
+    async def test_wall_limit_ends_a_run_waiting_for_approval(self):
+        marker = self.workspace / "wall-limit.txt"
+        runner = self.runner(arguments={"cmd": f"printf x > {marker.name}"})
+        runner.timeout = 1.0
+        runner.wall_timeout = 0.3
+        session = await runner.conversations.create_session(self.workspace)
+        from chagent.agent.runner import RunFailedError
+        with self.assertRaises(RunFailedError) as failure:
+            await asyncio.wait_for(runner.run(session, "等待审批"), timeout=5)
+        self.assertEqual(failure.exception.end_reason, "run_timeout")
+        self.assertFalse(marker.exists())
+
     async def test_an_allowlisted_command_runs_without_a_question(self):
         policy = ApprovalPolicy.from_settings(Settings(
             execution_profile="containerized", container_declared=True,
@@ -256,6 +268,9 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
 
         broker.audience = audience
         broker.grace = 0.4
+        # The audience is consulted once per tick, so this test sets the cadence
+        # it counts on instead of inheriting the product's recovery interval.
+        broker.poll = 0.1
         session = await runner.conversations.create_session(self.workspace)
         identities = []
         task = asyncio.create_task(runner.run(session, "刷新一下", on_started=identities.append))
@@ -421,6 +436,67 @@ class ApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(marker.exists())
         await runner.processes.stop(process)
         await runner.runs.finish(run_id, "completed")
+
+    async def test_an_approved_command_says_so_in_the_result_the_model_reads(self):
+        """C5: the page answered, so the result has to say it did.
+
+        The model never sees the card and the question is settled before the
+        tool runs, so the decision can only reach it inside the tool result.
+        In C5 every run had a real approval, a consumed grant and the expected
+        file on disk, and the final answer still said none was asked for.
+        """
+        marker = self.workspace / "approved.txt"
+        runner = self.runner(arguments={"cmd": f"printf c5 > {marker.name}"})
+        session = await runner.conversations.create_session(self.workspace)
+        identities = []
+        task = asyncio.create_task(runner.run(session, "批准后再执行", on_started=identities.append))
+        request = await self.wait_pending(runner, await self.wait_run_id(identities))
+        await self.approvals(runner).decide(request.id, approve=True, note="only this one")
+        result = await asyncio.wait_for(task, timeout=20)
+        self.assertEqual(result.end_reason, "model_stop")
+        self.assertTrue(marker.exists())
+
+        row = await self.tool_row(result.run_id)
+        self.assertEqual(row["status"], "completed")
+        details = row["result"]["details"]
+        self.assertEqual(details["approval"], "approved")
+        self.assertTrue(details["approval_id"])
+        self.assertEqual(details["approval_note"], "only this one")
+        head = row["result"]["content"][0]["text"]
+        self.assertTrue(head.startswith("Approval: the user approved this exec_command call"), head)
+        self.assertIn("only this one", head)
+        self.assertIn("do not report that no approval was requested", head)
+
+    async def test_a_call_that_needed_no_approval_carries_no_approval_line(self):
+        # The line is a fact about one call, not a banner on every result.
+        (self.workspace / "notes.txt").write_text("hello", encoding="utf-8")
+        runner = self.runner(tool_name="read_file", arguments={"path": "notes.txt"})
+        session = await runner.conversations.create_session(self.workspace)
+        result = await runner.run(session, "读一下")
+        self.assertEqual(result.end_reason, "model_stop")
+        row = await self.tool_row(result.run_id)
+        self.assertNotIn("Approval:", row["result"]["content"][0]["text"])
+        self.assertNotIn("approval", row["result"]["details"] or {})
+
+    async def test_the_local_prompt_marker_never_reads_as_the_users_words(self):
+        # "local prompt" records who answered for audit; it is not a remark, so
+        # the model must not be told the user wrote it.
+        marker = self.workspace / "cli-approved.txt"
+
+        async def approve(request):
+            return True
+
+        runner = self.runner(arguments={"cmd": f"printf cli > {marker.name}"},
+                             remote=False, decider=approve)
+        session = await runner.conversations.create_session(self.workspace)
+        result = await runner.run(session, "批准一下")
+        self.assertEqual(result.end_reason, "model_stop")
+        self.assertTrue(marker.exists())
+        row = await self.tool_row(result.run_id)
+        head = row["result"]["content"][0]["text"]
+        self.assertIn("Approval: the user approved this exec_command call", head)
+        self.assertNotIn("local prompt", head)
+        self.assertNotIn("approval_note", row["result"]["details"])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Optional decisions made before a tool takes execution resources."""
 
 import asyncio
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -10,6 +11,7 @@ from chagent.domain.messages import ToolCall
 from chagent.tools.context import ToolContext
 from chagent.tools.approvals import ApprovalBroker, UNAVAILABLE, WRITE_REFUSALS
 from chagent.tools.policy import ApprovalPolicy, FILE_WRITE_TOOLS, sensitive_path
+from chagent.tools.workspace import WorkspaceFS
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +20,18 @@ class GateDecision:
     reason: str = ""
     code: str = "denied"
     approval_id: UUID | None = None
+    # The user's words with their decision, carried through to the tool result
+    # so the model can report the answer it actually got.
+    note: str = ""
+
+
+def _with_note(message: str, note: str) -> str:
+    """A refusal carries the reason the user gave, when they gave one.
+
+    The fixed wording says not to retry; the user's own sentence says what to
+    change instead, which is the part a second attempt actually needs.
+    """
+    return f"{message}\nThe user's note: {note}" if note else message
 
 
 class ToolGate(Protocol):
@@ -39,12 +53,61 @@ class HumanGate:
             return GateDecision(True)
         if self.broker is None:
             return GateDecision(False, UNAVAILABLE, "unavailable")
+        subject = None
+        if self.sandbox_mode == "managed-container" and call.name == "host_exec":
+            fs = WorkspaceFS(context.workspace, expected_identity=context.workspace_identity)
+            try:
+                parts = fs.parts(call.arguments.get("workdir", "."))
+                with fs.directory(parts):
+                    pass
+            except (ValueError, OSError):
+                return GateDecision(False, "Native command directory is invalid; no approval was requested", "invalid")
+            async with self.broker.approvals.database.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT t.name, t.result FROM tool_calls t JOIN model_calls m ON m.id=t.model_call_id "
+                    "WHERE t.run_id=%s AND t.name IN ('exec_command','run_tests') AND t.status='completed' "
+                    "AND t.result->'details'->>'exit_code'='0' AND m.iteration < "
+                    "(SELECT current.iteration FROM tool_calls own JOIN model_calls current "
+                    "ON current.id=own.model_call_id WHERE own.id=%s) "
+                    "ORDER BY t.ended_at DESC LIMIT 1", (context.run_id, tool_record_id))
+                evidence = await cursor.fetchone()
+            if evidence is None:
+                return GateDecision(False, "First verify the operation in the container, then request native execution", "unverified")
+            cwd = fs.root.joinpath(*parts)
+            stdin = ("stdin stays open; every later write needs its own approval"
+                     if "yield_time_ms" in call.arguments else "stdin closed")
+            subject = (f"{call.arguments.get('command', '')}\nDirectory: {cwd}\n"
+                       f"Purpose: {call.arguments.get('purpose', '')}\n"
+                       f"Timeout: {call.arguments.get('timeout_ms', 30000)} ms\n"
+                       f"Environment: PATH, HOME, LANG only; {stdin}\n"
+                       f"Container verification: {evidence['name']} exit 0")
+        if self.sandbox_mode == "managed-container" and call.name == "host_process" \
+                and call.arguments.get("action") == "write":
+            chars = str(call.arguments.get("chars", ""))
+            close_stdin = call.arguments.get("close_stdin", False) is True
+            async with self.broker.approvals.database.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT command, cwd, status FROM native_executions "
+                    "WHERE run_id=%s AND process_id=%s",
+                    (context.run_id, call.arguments.get("process_id")))
+                execution = await cursor.fetchone()
+            if execution is None or execution["status"] != "running":
+                return GateDecision(False, "No live native process with that id in this run; "
+                                           "the write was not executed", "unknown_process")
+            subject = (f"Native process {call.arguments.get('process_id')}: "
+                       f"{str(execution['command'])[:400]}\n"
+                       f"Directory: {execution['cwd']}\n"
+                       f"Input: {json.dumps(chars, ensure_ascii=False)} "
+                       f"({len(chars.encode('utf-8'))} UTF-8 bytes)\n"
+                       f"close_stdin: {close_stdin}\n"
+                       "One-time approval for exactly this input; it does not cover later writes.")
         outcome = await self.broker.request(
             run_id=context.run_id, tool_record_id=tool_record_id,
             tool_name=call.name, arguments=call.arguments,
-            cwd=str(context.workspace), signal=signal, budget=budget)
+            cwd=str(context.workspace), signal=signal, budget=budget, subject=subject)
         return GateDecision(outcome.approved and outcome.approval_id is not None,
-                            outcome.message, outcome.reason, outcome.approval_id)
+                            _with_note(outcome.message, "" if outcome.approved else outcome.note),
+                            outcome.reason, outcome.approval_id, outcome.note)
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,12 +231,29 @@ class WriteGate:
     def __init__(self, policy: ApprovalPolicy, broker: ApprovalBroker | None):
         self.policy, self.broker = policy, broker
 
+    def intent(self, call: ToolCall, context: ToolContext) -> "WriteIntent | None":
+        """Whether this call needs a page decision, without asking for one.
+
+        The scheduler uses this to collect every write of a model turn and ask
+        once; the write gate itself still answers single questions the same way.
+        """
+        if self.policy.mode == "never":
+            return None
+        graded = grade_write(call.name, call.arguments, context.workspace)
+        return graded if graded.reason else None
+
+    def grant(self, outcome) -> GateDecision:
+        return GateDecision(True, "", outcome.reason, outcome.approval_id, outcome.note)
+
+    def refusal(self, outcome) -> GateDecision:
+        return GateDecision(False, _with_note(WRITE_REFUSALS.get(outcome.reason, outcome.message),
+                                              outcome.note),
+                            outcome.reason or "denied")
+
     async def check(self, call: ToolCall, *, context: ToolContext,
                     tool_record_id: UUID, signal: asyncio.Event, budget) -> GateDecision:
-        if self.policy.mode == "never":
-            return GateDecision(True)
-        intent = grade_write(call.name, call.arguments, context.workspace)
-        if not intent.reason:
+        intent = self.intent(call, context)
+        if intent is None:
             return GateDecision(True)
         if self.broker is None:
             return GateDecision(False, WRITE_REFUSALS["unavailable"], "unavailable")
@@ -182,7 +262,5 @@ class WriteGate:
             tool_name=call.name, arguments=call.arguments,
             cwd=str(context.workspace), signal=signal, budget=budget,
             subject=intent.subject)
-        if outcome.approved and outcome.approval_id is not None:
-            return GateDecision(True, "", outcome.reason, outcome.approval_id)
-        return GateDecision(False, WRITE_REFUSALS.get(outcome.reason, outcome.message),
-                            outcome.reason or "denied")
+        return self.grant(outcome) if outcome.approved and outcome.approval_id is not None \
+            else self.refusal(outcome)

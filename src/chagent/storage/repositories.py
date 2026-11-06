@@ -13,13 +13,14 @@ from psycopg.types.json import Jsonb
 from chagent.context.builder import BuiltContext
 from chagent.domain.codec import message_from_dict, message_to_dict
 from chagent.domain.json_types import JsonObject
+from chagent.domain.json_types import postgres_json_safe
 from chagent.domain.messages import AssistantMessage, Message, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.recovery import MAX_TARGET, SIDE_EFFECT_TOOLS, RecoveryFact
 from chagent.domain.runs import RunEndReason, RunStatus, StoredMessage, terminal_reason
 from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState, validate_mode
 from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError, StateConflictError
 from chagent.storage.database import Database
-from chagent.storage.artifacts import ArtifactRepository, INLINE_BYTES
+from chagent.storage.artifacts import ArtifactRepository, INLINE_MIN_BYTES, inline_bytes_for
 from chagent.storage.event_queue import EventItem, EventStream
 from chagent.tools.base import AgentToolResult
 
@@ -317,9 +318,17 @@ class ConversationRepository:
     async def messages(self, session_id: UUID, current_run: UUID | None = None, *, project_artifacts: bool = False) -> list[StoredMessage]:
         """All records for inspection, or completed/current-run history for the model.
 
-        Failed or interrupted runs remain inspectable but are not replayed into
-        the baseline context: they may contain unfinished tool-call batches.
+        Failed or interrupted runs remain inspectable but are mostly not
+        replayed into the baseline context: they may contain unfinished
+        tool-call batches. The two exceptions both end *after* a committed
+        batch — ``execute_batch`` returns, results are stored and paired with
+        their calls, and only then can the loop find that it is out of turns or
+        that the model repeated itself. Replaying them is what stops a run that
+        hit the turn limit from restarting blind: without it the next run sees
+        only the recovery note, re-reads what it already read, and spends its
+        budget arriving at the same place.
         """
+        replayable = "('turn_limit', 'repeated_tool_call')"
         payload = ("CASE WHEN jsonb_typeof(m.payload->'artifact') = 'object' THEN "
                    "(jsonb_set(m.payload, '{content}', jsonb_path_query_array(m.payload, '$.content[*] ? (@.type == \"image\")')) - 'details') "
                    "ELSE m.payload END" if project_artifacts else "m.payload")
@@ -332,7 +341,8 @@ class ConversationRepository:
             # A replay is a linear story: a record replaced by a later run is
             # not part of it, even though the row is still readable above.
             query += ("AND m.superseded_by IS NULL "
-                      "AND (m.run_id IS NULL OR r.status = 'completed' OR r.id = %s) ")
+                      "AND (m.run_id IS NULL OR r.status = 'completed' "
+                      f"OR r.end_reason IN {replayable} OR r.id = %s) ")
             params = (session_id, current_run)
         query += "ORDER BY m.sequence"
         async with self.database.connection() as connection:
@@ -343,8 +353,9 @@ class ConversationRepository:
 
 
 class RunRepository:
-    def __init__(self, database: Database):
+    def __init__(self, database: Database, *, inline_bytes: int = INLINE_MIN_BYTES):
         self.database = database
+        self.inline_bytes = inline_bytes
         self.notifications = database.notifications
         # Buffered high-frequency events, one stream per active run in this
         # process. Streams are never reconstructed from rows.
@@ -459,7 +470,7 @@ class RunRepository:
             "  + row_number() OVER (ORDER BY t.ord), t.kind, t.payload::jsonb "
             "FROM unnest(%s::text[], %s::text[]) WITH ORDINALITY AS t(kind, payload, ord)",
             (run_id, run_id, [kind for kind, _ in items],
-             [json.dumps(payload, ensure_ascii=False) for _, payload in items]),
+             [json.dumps(postgres_json_safe(payload), ensure_ascii=False) for _, payload in items]),
         )
 
     async def _event(
@@ -605,7 +616,8 @@ class RunRepository:
             await connection.execute(
                 "INSERT INTO model_calls (id, run_id, iteration, request, context_snapshot) "
                 "VALUES (%s, %s, %s, %s, %s)",
-                (call_id, run_id, iteration, Jsonb(asdict(built.request)), Jsonb(asdict(built.snapshot))),
+                (call_id, run_id, iteration, Jsonb(postgres_json_safe(asdict(built.request))),
+                 Jsonb(postgres_json_safe(asdict(built.snapshot)))),
             )
             await self._event(connection, run_id, "model_started", {"model_call_id": str(call_id)}, locked=True)
         self.notifications.notify(run_id)
@@ -652,14 +664,31 @@ class RunRepository:
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             for index, (identity, call) in enumerate(zip(identities, calls)):
+                arguments = postgres_json_safe(call.arguments)
+                # An attempt is one execution of one invocation. The count runs in
+                # this transaction, so two identical calls in one batch are 1 and 2,
+                # and a retry in a later turn is 2 rather than a fresh 1.
+                cursor = await connection.execute(
+                    "SELECT count(*) AS n FROM tool_calls WHERE run_id = %s AND name = %s "
+                    "AND arguments = %s", (run_id, call.name, Jsonb(arguments)))
+                attempt = (await cursor.fetchone())["n"] + 1
                 await connection.execute(
-                    "INSERT INTO tool_calls (id, run_id, model_call_id, call_id, name, arguments, status, call_index) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s)",
-                    (identity, run_id, model_call_id, call.id, call.name, Jsonb(call.arguments), index))
-                await self._event(connection, run_id, "tool_queued", {"tool_call_id": call.id, "name": call.name},
-                                  locked=True)
+                    "INSERT INTO tool_calls (id, run_id, model_call_id, call_id, name, arguments, status, "
+                    "call_index, attempt) VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s, %s)",
+                    (identity, run_id, model_call_id, call.id, call.name, Jsonb(arguments), index, attempt))
+                await self._event(connection, run_id, "tool_queued", {
+                    "tool_call_id": call.id, "name": call.name, "attempt": attempt}, locked=True)
         self.notifications.notify(run_id)
         return identities
+
+    async def call_attempts(self, identities: list[UUID]) -> dict[UUID, int]:
+        """The attempt number of each just-queued call, for the model-facing note."""
+        if not identities:
+            return {}
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT id, attempt FROM tool_calls WHERE id = ANY(%s)", (list(identities),))
+            return {row["id"]: row["attempt"] for row in await cursor.fetchall()}
 
     async def start_tool_call(self, run_id: UUID, model_call_id: UUID, call: ToolCall, *, record_id: UUID) -> UUID:
         await self.flush_events(run_id)
@@ -685,7 +714,7 @@ class RunRepository:
         async with self.database.transaction() as connection:
             await self.check_owner(connection, run_id)
             text = "\n".join(block.text for block in message.content if hasattr(block, "text"))
-            if len(text.encode("utf-8")) > INLINE_BYTES:
+            if len(text.encode("utf-8")) > self.inline_bytes:
                 details = result.details if isinstance(result.details, dict) else {}
                 message.artifact = await ArtifactRepository(self.database).create(
                     connection, session_id=session_id, run_id=run_id, tool_record_id=record_id, text=text,
@@ -695,7 +724,7 @@ class RunRepository:
                 "UPDATE tool_calls SET status = %s, result = %s, ended_at = now() "
                 "WHERE id = %s AND run_id = %s",
                 ("unknown" if result.outcome_unknown else "failed" if result.is_error else "completed",
-                 Jsonb(asdict(result)), record_id, run_id),
+                 Jsonb(postgres_json_safe(asdict(result))), record_id, run_id),
             )
             record = await self._message(connection, session_id, run_id, message)
             await self._event(connection, run_id, "tool_completed", {
@@ -780,6 +809,23 @@ class RunRepository:
                 "WHERE run_id = %s AND sequence > %s ORDER BY sequence LIMIT %s", (run_id, after, limit),
             )
             return await cursor.fetchall()
+
+    async def file_diff(self, run_id: UUID) -> dict | None:
+        """Read the durable final inventory without paging through the event stream."""
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT payload FROM run_events WHERE run_id = %s "
+                "AND type = 'workspace_manifest_after' ORDER BY sequence DESC LIMIT 1", (run_id,))
+            row = await cursor.fetchone()
+            return row["payload"].get("diff") if row is not None else None
+
+    async def network_observation(self, run_id: UUID) -> dict | None:
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT payload FROM run_events WHERE run_id = %s "
+                "AND type = 'network_observed' ORDER BY sequence DESC LIMIT 1", (run_id,))
+            row = await cursor.fetchone()
+            return row["payload"] if row is not None else None
 
     async def terminal_sequence(self, run_id: UUID) -> int | None:
         async with self.database.connection() as connection:

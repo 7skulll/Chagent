@@ -10,11 +10,12 @@ from chagent.context.tokens import TokenCounter, select_counter
 from chagent.memory.worker import MemoryWorker
 from chagent.models.base import Model, ModelClient
 from chagent.models.fake import FakeModelClient
+from chagent.models.http import HTTPModelClient
 from chagent.storage.database import Database
 from chagent.storage.memory_jobs import MemoryJobRepository
 from chagent.storage.repositories import ConversationRepository, RunRepository
 from chagent.storage.summaries import SummaryRepository
-from chagent.storage.artifacts import ArtifactRepository
+from chagent.storage.artifacts import ArtifactRepository, inline_bytes_for
 from chagent.tools.builtin import create_builtin_registry
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.processes import ProcessManager
@@ -38,6 +39,7 @@ def _tool_faces(
     unified: bool = False,
     containerized: bool = False,
     host_exec: tuple[str, str] | None = None,
+    native_host_exec: bool = False,
 ) -> dict[str, ToolExecutor]:
     """Build a unified executor or diagnostic mode-specific executors.
 
@@ -76,6 +78,7 @@ def _tool_faces(
             artifacts=ArtifactRepository(database), sandbox=sandbox,
             processes=processes, web=web, include_echo=include_echo,
             host_exec=host_exec,
+            native_host_exec=native_host_exec,
         )
         faces[mode] = ToolExecutor(registry, allow_host_commands=allow_host_commands)
     if unified:
@@ -96,6 +99,7 @@ def create_demo_runner(
     sandbox: Sandbox | None = None,
     approval_policy: ApprovalPolicy | None = None,
     approval_timeout: float = 300.0,
+    wall_timeout: float = 3600.0,
     approval_grace: float = 10.0,
     approval_decider=None,
     approval_remote: bool = True,
@@ -115,6 +119,7 @@ def create_demo_runner(
         memory_worker_concurrency=memory_worker_concurrency,
         sandbox=sandbox,
         approval_policy=approval_policy, approval_timeout=approval_timeout,
+        wall_timeout=wall_timeout,
         approval_grace=approval_grace,
         approval_decider=approval_decider, approval_remote=approval_remote,
         process_wall_timeout=process_wall_timeout, max_processes=max_processes,
@@ -135,7 +140,8 @@ def create_demo_runner(
 def create_runner(
     database: Database, model: Model, client: ModelClient, *, allow_host_commands: bool = False,
     context_policy: ContextPolicy | None = None, token_counter: TokenCounter | None = None,
-    timeout: float = 180,
+    timeout: float = 600,
+    wall_timeout: float = 3600.0,
     compaction_policy: CompactionPolicy | None = None,
     max_turns: int = 32,
     memory_policy: MemoryPolicy | None = None,
@@ -159,6 +165,7 @@ def create_runner(
     unified: bool = False,
     containerized: bool = False,
     host_exec: tuple[str, str] | None = None,
+    native_host_exec: bool = False,
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -169,13 +176,19 @@ def create_runner(
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
                         single_face=single_face, allow_workspace_writes=allow_workspace_writes,
                         process_stdin=process_stdin, versioned_files=versioned_files,
-                        unified=unified, containerized=containerized, host_exec=host_exec)
+                        unified=unified, containerized=containerized, host_exec=host_exec,
+                        native_host_exec=native_host_exec)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))
     builder = BasicContextBuilder(policy=context_policy,
                                   counter=token_counter or select_counter(model))
-    conversations, runs = ConversationRepository(database), RunRepository(database)
+    conversations = ConversationRepository(database)
+    runs = RunRepository(database, inline_bytes=inline_bytes_for(builder.input_budget(model)))
+    if isinstance(client, HTTPModelClient):
+        async def outbound_audit(run_id, purpose):
+            await runs.audit_event(run_id, "model_export_blocked", {"purpose": purpose, "reason": "protected_path"})
+        client.outbound_audit = outbound_audit
     jobs = MemoryJobRepository(database)
     memory_service = MemoryService(MemoryRepository(database), conversations, runs, builder.counter,
                                    policy=memory_policy, jobs=jobs)
@@ -185,7 +198,9 @@ def create_runner(
         context_manager=ContextManager(builder, conversations, runs, SummaryRepository(database), policy=compaction_policy,
                                        modes=tuple(faces)),
         memory_service=memory_service,
-        timeout=timeout, max_turns=max_turns,
+        timeout=timeout,
+        wall_timeout=wall_timeout,
+        max_turns=max_turns,
         max_tool_concurrency=max_tool_concurrency,
     )
     # Approval questions are asked by the scheduler before it takes execution
@@ -195,7 +210,8 @@ def create_runner(
         ApprovalRepository(database, runs), runs, timeout=approval_timeout,
         decider=approval_decider, remote=approval_remote, grace=approval_grace,
     )
-    runner.scheduler.sandbox_mode = sandbox.settings.mode if sandbox is not None else "off"
+    runner.scheduler.sandbox_mode = ("managed-container" if sandbox is not None and sandbox.settings.host_controller
+                                     else sandbox.settings.mode if sandbox is not None else "off")
     # Per-session mode resolution: a single face harness has nothing to resolve.
     runner.tool_faces = None if single_face else faces
     runner.unified = unified

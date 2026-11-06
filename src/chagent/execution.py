@@ -45,8 +45,8 @@ PUBLISHED = (
 )
 RESERVED = ()
 
-PROFILES = frozenset({"configured", "containerized"})
-PROFILE_BOUNDARY = {"configured": NONE, "containerized": CONTAINER}
+PROFILES = frozenset({"configured", "containerized", "host-controller"})
+PROFILE_BOUNDARY = {"configured": NONE, "containerized": CONTAINER, "host-controller": CONTAINER}
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +95,7 @@ def resolve(*, execution_profile: str = "configured", boundary: str = "",
     if execution_profile == "trusted-development":
         raise ValueError("trusted-development was removed; run Chagent in a container")
     if execution_profile not in PROFILES:
-        raise ValueError("CHAGENT_EXECUTION_PROFILE must be configured or containerized")
+        raise ValueError("CHAGENT_EXECUTION_PROFILE must be configured, containerized or host-controller")
     expected = PROFILE_BOUNDARY[execution_profile]
     if boundary and boundary != expected:
         raise ValueError("CHAGENT_BOUNDARY conflicts with execution profile")
@@ -125,7 +125,7 @@ def resolve(*, execution_profile: str = "configured", boundary: str = "",
     if axes.capability == FULL:
         # Commands exist only inside a declared container with a writable,
         # networked workspace; a read-only shape does not claim any of these.
-        if not container_declared:
+        if not container_declared and execution_profile != "host-controller":
             raise ValueError("containerized requires an explicit container declaration, "
                              "code=on, host commands, network=true and workspace_writable=true")
         if not workspace_writable:

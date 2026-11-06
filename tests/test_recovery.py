@@ -10,6 +10,7 @@ from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
 
 from chagent.agent.runner import RunFailedError
+from chagent.agent.turn_note import last_request_message
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
 from chagent.domain.codec import message_from_dict
@@ -25,7 +26,7 @@ class FailsAfterTool(FakeModelClient):
     """Completes one tool batch, then fails the following model request."""
 
     async def stream(self, request):
-        if isinstance(request.messages[-1], ToolResultMessage):
+        if isinstance(last_request_message(request.messages), ToolResultMessage):
             yield ErrorEvent(reason="error", error=AssistantMessage(
                 [], "fake", "local-test", "fake-echo", 1, "error",
                 error_message="Provider rejected request",

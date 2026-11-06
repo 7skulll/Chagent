@@ -46,6 +46,8 @@ class Settings:
     approval: str = "never"
     approval_allowlist: str = ""
     approval_timeout: float = 300.0
+    # Total elapsed time for a run, including approval waits and tool execution.
+    run_wall_timeout: float = 3600.0
     #: Seconds a remote approval may wait with no browser attached before it is
     #: denied as unwatched. 0 keeps the absolute deadline (the pre-Z4 rule).
     approval_unwatched_grace: float = 10.0
@@ -129,6 +131,8 @@ class Settings:
             raise ValueError("CHAGENT_SANDBOX_WRITABLE must be true or false")
         if not math.isfinite(self.approval_timeout) or self.approval_timeout <= 0:
             raise ValueError("CHAGENT_APPROVAL_TIMEOUT must be finite and positive")
+        if not math.isfinite(self.run_wall_timeout) or self.run_wall_timeout <= 0:
+            raise ValueError("CHAGENT_RUN_WALL_TIMEOUT must be finite and positive")
         if not math.isfinite(self.approval_unwatched_grace) or self.approval_unwatched_grace < 0:
             raise ValueError("CHAGENT_APPROVAL_UNWATCHED_GRACE must be finite and nonnegative")
         if isinstance(self.max_processes, bool) or not isinstance(self.max_processes, int) \
@@ -201,6 +205,7 @@ class Settings:
             approval=values.get("CHAGENT_APPROVAL", "never").strip().lower(),
             approval_allowlist=values.get("CHAGENT_APPROVAL_ALLOWLIST", ""),
             approval_timeout=float(values.get("CHAGENT_APPROVAL_TIMEOUT", "300")),
+            run_wall_timeout=float(values.get("CHAGENT_RUN_WALL_TIMEOUT", "3600")),
             approval_unwatched_grace=float(values.get("CHAGENT_APPROVAL_UNWATCHED_GRACE", "10")),
             max_processes=int(values.get("CHAGENT_MAX_PROCESSES", "4")),
             process_timeout=float(values.get("CHAGENT_PROCESS_TIMEOUT", "600")),

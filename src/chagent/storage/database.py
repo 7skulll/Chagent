@@ -21,7 +21,10 @@ class Database:
 
     def __init__(self, settings: Settings) -> None:
         self._timeout = settings.db_timeout
+        self.conninfo = settings.database_url
+        self.connected = False
         self.notifications = RunNotifications()
+        self.notifications.attach(self)
         # Tokens are process-local and are never reconstructed from database rows.
         self.run_owners = {}
         self._pool = AsyncConnectionPool(
@@ -41,6 +44,7 @@ class Database:
     async def connect(self) -> None:
         """Open the pool and fail promptly if no connection can be obtained."""
         await self._pool.open()
+        self.connected = True
         try:
             await self.check()
         except BaseException:
@@ -48,6 +52,8 @@ class Database:
             raise
 
     async def close(self) -> None:
+        self.connected = False
+        await self.notifications.close()
         await self._pool.close()
 
     @asynccontextmanager

@@ -80,12 +80,12 @@ class WriteGradingTests(unittest.TestCase):
 
 
 class StubBroker:
-    def __init__(self, approved=True, reason="approved"):
-        self.approved, self.reason, self.calls = approved, reason, []
+    def __init__(self, approved=True, reason="approved", note=""):
+        self.approved, self.reason, self.note, self.calls = approved, reason, note, []
 
     async def request(self, **kwargs):
         self.calls.append(kwargs)
-        return ApprovalOutcome(self.approved, uuid4(), "", self.reason)
+        return ApprovalOutcome(self.approved, uuid4(), "", self.reason, self.note)
 
 
 class WriteApprovalTests(unittest.IsolatedAsyncioTestCase):
@@ -112,6 +112,15 @@ class WriteApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(broker.calls[0]["tool_name"], "write_file")
         self.assertIn("overwrite existing.py", broker.calls[0]["subject"])
 
+    async def test_the_users_note_travels_with_the_approval(self):
+        # The note is the only place the user's own words about the decision
+        # exist, and the gate is the only thing that sees them.
+        broker = StubBroker(note="only this file")
+        decision = await self.check(WriteGate(ApprovalPolicy(mode="untrusted"), broker),
+                                    "write_file", path="existing.py", content="new")
+        self.assertTrue(decision.allow)
+        self.assertEqual(decision.note, "only this file")
+
     async def test_denial_says_the_file_was_not_modified(self):
         broker = StubBroker(approved=False, reason="denied")
         decision = await self.check(WriteGate(ApprovalPolicy(mode="untrusted"), broker),
@@ -120,6 +129,16 @@ class WriteApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.code, "denied")
         self.assertIn("file was not modified", decision.reason)
         self.assertIn("Do not resend", decision.reason)
+
+    async def test_a_denial_carries_the_reason_the_user_gave(self):
+        # The fixed wording says "do not resend"; the user's sentence says what
+        # to do instead, which is what a second attempt needs.
+        broker = StubBroker(approved=False, reason="denied", note="the name is wrong")
+        decision = await self.check(WriteGate(ApprovalPolicy(mode="untrusted"), broker),
+                                    "write_file", path="existing.py", content="new")
+        self.assertFalse(decision.allow)
+        self.assertIn("file was not modified", decision.reason)
+        self.assertIn("The user's note: the name is wrong", decision.reason)
 
     async def test_a_new_file_never_reaches_the_broker(self):
         broker = StubBroker()
@@ -143,11 +162,25 @@ class WriteApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("file was not modified", decision.reason)
 
 
+class PublicNoteTests(unittest.TestCase):
+    def test_internal_markers_are_not_the_users_words(self):
+        from chagent.tools.approvals import public_note
+
+        for note in ("local prompt", "no viewer", "no interactive approver", "", None, "   "):
+            with self.subTest(note=note):
+                self.assertEqual(public_note(note), "")
+
+    def test_a_real_note_is_kept_without_its_padding(self):
+        from chagent.tools.approvals import public_note
+
+        self.assertEqual(public_note("  only this one  "), "only this one")
+
+
 class GateWiringTests(unittest.TestCase):
-    def scheduler(self, mode):
+    def scheduler(self, mode, sandbox_mode="off"):
         from chagent.tools.scheduler import ToolScheduler
 
-        return ToolScheduler(None, policy=ApprovalPolicy(mode=mode))
+        return ToolScheduler(None, policy=ApprovalPolicy(mode=mode), sandbox_mode=sandbox_mode)
 
     def test_a_run_with_approvals_asks_both_questions(self):
         names = [gate.name for gate in self.scheduler("untrusted").default_gates()]
@@ -155,6 +188,84 @@ class GateWiringTests(unittest.TestCase):
 
     def test_never_asks_nothing_so_an_upgrade_does_not_block(self):
         self.assertEqual(self.scheduler("never").default_gates(), ())
+
+    def test_the_host_controller_asks_about_writes_too(self):
+        # The regression this guards: the profile kept only HumanGate, whose
+        # subject in that build is native commands, so every overwrite went
+        # through without a card.
+        names = [gate.name for gate in
+                 self.scheduler("untrusted", "managed-container").default_gates()]
+        self.assertEqual(names, ["human", "write"])
+
+    def test_the_host_controller_still_asks_about_native_commands_with_approvals_off(self):
+        names = [gate.name for gate in
+                 self.scheduler("never", "managed-container").default_gates()]
+        self.assertEqual(names, ["human"])
+
+
+class HostControllerWriteTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.workspace = Path(self.temporary.name).resolve()
+        (self.workspace / "existing.py").write_text("old", encoding="utf-8")
+        self.context = ToolContext(workspace=self.workspace, session_id=uuid4(), run_id=uuid4())
+
+    def write_gate(self, broker):
+        from chagent.tools.scheduler import ToolScheduler
+
+        gates = ToolScheduler(None, policy=ApprovalPolicy(mode="untrusted"), approvals=broker,
+                              sandbox_mode="managed-container").default_gates()
+        return next(gate for gate in gates if gate.name == "write")
+
+    async def check(self, gate, name, **arguments):
+        return await gate.check(ToolCall(id="call-1", name=name, arguments=arguments),
+                                context=self.context, tool_record_id=uuid4(),
+                                signal=asyncio.Event(), budget=None)
+
+    async def test_an_overwrite_in_this_profile_reaches_the_broker(self):
+        broker = StubBroker()
+        decision = await self.check(self.write_gate(broker), "write_file",
+                                    path="existing.py", content="new")
+        self.assertTrue(decision.allow)
+        self.assertEqual(broker.calls[0]["tool_name"], "write_file")
+        self.assertIn("overwrite existing.py", broker.calls[0]["subject"])
+
+    async def test_a_new_file_in_this_profile_is_still_quiet(self):
+        broker = StubBroker()
+        decision = await self.check(self.write_gate(broker), "write_file",
+                                    path="fresh.py", content="new")
+        self.assertTrue(decision.allow)
+        self.assertEqual(broker.calls, [])
+
+    async def test_a_denied_overwrite_does_not_write(self):
+        broker = StubBroker(approved=False, reason="denied")
+        decision = await self.check(self.write_gate(broker), "write_file",
+                                    path="existing.py", content="new")
+        self.assertFalse(decision.allow)
+        self.assertEqual(decision.code, "denied")
+        self.assertIn("file was not modified", decision.reason)
+
+
+class WithApprovalTests(unittest.TestCase):
+    def test_a_long_note_is_bounded_for_the_model_and_kept_in_the_record(self):
+        # The page allows 2000 characters. Spending all of them in front of the
+        # tool output would let a paste crowd out the result it annotates, so
+        # only the model-facing copy is cut; the stored note stays whole.
+        from chagent.domain.messages import TextContent
+        from chagent.tools.base import AgentToolResult
+        from chagent.tools.scheduler import Grant, NOTE_CHARS, with_approval
+
+        note = "x" * (NOTE_CHARS + 400)
+        result = with_approval(
+            AgentToolResult(content=[TextContent("Written: file.txt")]),
+            Grant(uuid4(), note), "write_file")
+        head = result.content[0].text
+        self.assertIn("The user added with the approval:", head)
+        self.assertTrue(head.endswith("…"), head[-20:])
+        self.assertLess(len(head), len(note))
+        self.assertEqual(result.details["approval_note"], note)
+        self.assertEqual(result.content[1].text, "Written: file.txt")
 
 
 if __name__ == "__main__":

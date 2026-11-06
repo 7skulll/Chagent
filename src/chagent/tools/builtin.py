@@ -30,6 +30,8 @@ from chagent.tools.generated_files import CreateFileTool
 from chagent.tools.sandbox import Sandbox
 from chagent.tools.web import WebAccess, create_web_tools
 from chagent.tools.host import HostExecTool
+from chagent.hostexec.native import NativeHostExecTool, NativeHostProcessTool
+from chagent.tools.site import SiteTool
 
 
 #: Tools that change files in the workspace. Shared by both modes; what a
@@ -52,7 +54,8 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
                             include_echo: bool = False,
                             process_stdin: bool = True,
                             versioned_files: bool = False,
-                            host_exec: tuple[str, str] | None = None) -> ToolRegistry:
+                            host_exec: tuple[str, str] | None = None,
+                            native_host_exec: bool = False) -> ToolRegistry:
     """One tool face. ``mode`` is required so no call site gets a face by accident.
 
     The second layer (``ToolExecutor``) is the registry itself: an executor built
@@ -94,12 +97,22 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
         # Both run host processes; the executor enforces the same switch.
         registry.register(ExecCommandTool(sandbox, processes, process_stdin=process_stdin))
         registry.register(RunTestsTool(sandbox))
-        if processes is not None:
+        if processes is not None and not (sandbox is not None and sandbox.settings.host_controller):
             # Useless without a command to attach to, so it follows the same
             # switch instead of appearing in every session.
             registry.register(ProcessTool(processes, allowed_actions=("read", "stop") if readonly_code or not process_stdin else None))
         if host_exec is not None and containerized:
             registry.register(HostExecTool(*host_exec, artifacts.database if artifacts is not None else None))
+        if native_host_exec:
+            if sandbox is None or not sandbox.settings.host_controller or artifacts is None:
+                raise ValueError("Native host execution requires a host controller and database")
+            if processes is None:
+                raise ValueError("Native host execution requires a process manager")
+            # In the host-controller build the manager holds native children only:
+            # container exec is one-shot and the container `process` tool is absent.
+            registry.register(NativeHostExecTool(artifacts.database, processes))
+            registry.register(NativeHostProcessTool(artifacts.database, processes))
+            registry.register(SiteTool(sandbox, artifacts.database))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
         if allow_workspace_writes and not readonly_code:

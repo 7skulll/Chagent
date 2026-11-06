@@ -34,6 +34,15 @@ function find(node, selector, first) {
   return first ? (out[0] || null) : out;
 }
 
+/* Parent links make `remove()` and `insertBefore(node, ref)` behave, which is
+ * what a re-rendered list depends on. They are non-enumerable so the existing
+ * "serialise the DOM" assertions stay acyclic. */
+function adopt(parent, node) {
+  if (!node || node.nodeType !== 1) return node;
+  Object.defineProperty(node, "_parent", {value: parent, writable: true, configurable: true, enumerable: false});
+  return node;
+}
+
 export function makeEl(tag) {
   const el = {
     nodeType: 1, tagName: String(tag || "div").toUpperCase(), children: [], dataset: {}, style: {},
@@ -44,12 +53,29 @@ export function makeEl(tag) {
     set className(value) { this._classes = new Set(String(value).split(/\s+/).filter(Boolean)); },
     set innerHTML(value) { this._html = String(value); },
     get innerHTML() { return this._html || ""; },
-    append(...nodes) { for (const node of nodes) if (node) this.children.push(node); },
-    prepend(...nodes) { this.children = [...nodes, ...this.children]; },
-    replaceChildren(...nodes) { this.children = nodes.filter(Boolean); },
-    appendChild(node) { this.children.push(node); return node; },
-    insertBefore(node) { this.children.unshift(node); },
-    remove() {}, replaceWith() {},
+    append(...nodes) { for (const node of nodes) if (node) this.children.push(adopt(this, node)); },
+    prepend(...nodes) { this.children = [...nodes.map(node => adopt(this, node)), ...this.children]; },
+    replaceChildren(...nodes) { this.children = nodes.filter(Boolean).map(node => adopt(this, node)); },
+    appendChild(node) { this.children.push(adopt(this, node)); return node; },
+    insertBefore(node, reference) {
+      adopt(this, node);
+      const index = reference ? this.children.indexOf(reference) : -1;
+      if (index < 0) this.children.push(node); else this.children.splice(index, 0, node);
+      return node;
+    },
+    remove() {
+      const parent = this._parent;
+      if (!parent) return;
+      const index = parent.children.indexOf(this);
+      if (index >= 0) parent.children.splice(index, 1);
+    },
+    replaceWith(node) {
+      const parent = this._parent;
+      if (!parent) return;
+      const index = parent.children.indexOf(this);
+      adopt(parent, node);
+      if (index >= 0) parent.children.splice(index, 1, node);
+    },
     addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
     removeEventListener() {},
     fire(type, event = {}) { for (const fn of this.listeners[type] || []) fn({preventDefault() {}, stopPropagation() {}, ...event}); },
@@ -95,17 +121,36 @@ export function installDom() {
     createTextNode: text => ({nodeType: 3, textContent: String(text), children: []}),
     querySelector: () => makeEl("div"), querySelectorAll: () => [],
     addEventListener() {}, body: makeEl("body"),
+    /* The file panel installs its resize CSS custom properties through one
+     * inserted rule and reads the viewport width to clamp them. */
+    documentElement: {clientWidth: 1200, clientHeight: 900},
+    styleSheets: [{cssRules: [], insertRule() {
+      this.cssRules.push({style: {setProperty() {}}});
+      return this.cssRules.length - 1;
+    }}],
   });
   setGlobal("window", {addEventListener() {}, matchMedia: query => {
     if (!MEDIA.has(query)) MEDIA.set(query, {matches: false, addEventListener(type, fn) { this.changed = fn; }});
     return MEDIA.get(query);
   }});
   setGlobal("matchMedia", globalThis.window.matchMedia);
-  setGlobal("localStorage", {store: new Map(), getItem(k) { return this.store.has(k) ? this.store.get(k) : null; },
-    setItem(k, v) { this.store.set(k, String(v)); }, removeItem(k) { this.store.delete(k); }});
+  setGlobal("localStorage", {
+    store: new Map(),
+    get length() { return this.store.size; },
+    key(index) { return [...this.store.keys()][index] ?? null; },
+    getItem(k) { return this.store.has(k) ? this.store.get(k) : null; },
+    setItem(k, v) { this.store.set(k, String(v)); },
+    removeItem(k) { this.store.delete(k); },
+  });
   setGlobal("navigator", {clipboard: {writeText: async () => {}}});
   setGlobal("requestAnimationFrame", cb => setTimeout(cb, 0));
   setGlobal("cancelAnimationFrame", id => clearTimeout(id));
+  /* The page polls the file panel every five seconds. A real interval would keep
+   * the Node process alive after the verdict is printed, and the Python test
+   * would time out with a passing assert already in hand. */
+  setGlobal("setInterval", () => 0);
+  // Layout sizes for the panel resize rules: no CSS, one number.
+  setGlobal("getComputedStyle", () => ({getPropertyValue: () => "240"}));
   setGlobal("EventSource", class { addEventListener() {} close() {} });
   setGlobal("XMLHttpRequest", class {
     upload = {addEventListener() {}}; listeners = {};

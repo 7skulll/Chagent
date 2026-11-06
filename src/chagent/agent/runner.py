@@ -1,6 +1,7 @@
 """Model/tool loop with commit-driven state, bounded batches and explicit endings."""
 
 import asyncio
+import inspect
 import logging
 import math
 from collections.abc import Callable
@@ -14,6 +15,7 @@ from chagent.boundaries import validate_workspace
 from chagent.agent.budget import RunBudget
 from chagent.agent.types import FinishDecision, RunState
 from chagent.agent.stream_writer import TextStreamWriter
+from chagent.agent.turn_note import turn_note
 from chagent.context.builder import ContextBudgetError, ContextBuilder
 from chagent.context.manager import ContextManager
 from chagent.memory.service import MemoryService
@@ -28,6 +30,8 @@ from chagent.tools.executor import ToolExecutor
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
 from chagent.tools.scheduler import ToolScheduler
+from chagent.workspace_manifest import snapshot, diff
+from chagent.hostexec.network_audit import NetworkAudit
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +65,14 @@ class AgentRunner:
     def __init__(
         self, model: Model, client: ModelClient, context: ContextBuilder,
         tools: ToolExecutor, conversations: ConversationRepository, runs: RunRepository,
-        max_turns: int = 8, timeout: float = 60,
+        max_turns: int = 8, timeout: float = 60, wall_timeout: float | None = None,
         context_manager: ContextManager | None = None,
         memory_service: MemoryService | None = None,
         max_tool_concurrency: int = 4,
         memory_worker=None,
     ):
-        if max_turns < 1 or not math.isfinite(timeout) or timeout <= 0:
+        if max_turns < 1 or not math.isfinite(timeout) or timeout <= 0 or (wall_timeout is not None and
+                (not math.isfinite(wall_timeout) or wall_timeout <= 0)):
             raise ValueError("Run limits must be positive and finite")
         self.model = model
         self.client = client
@@ -84,6 +89,7 @@ class AgentRunner:
         self.scheduler = ToolScheduler(runs, max_concurrency=max_tool_concurrency)
         self.max_turns = max_turns
         self.timeout = timeout
+        self.wall_timeout = wall_timeout
         self._tasks: dict[UUID, asyncio.Task] = {}
         self._states: dict[UUID, RunState] = {}
         # Set by bootstrap; absent in tests that drive the loop directly.
@@ -91,6 +97,8 @@ class AgentRunner:
         # Session processes outlive their invocation, never their run.
         self.processes = None
         self._workspace_identities = {}
+        self._manifest_after_recorded: set[UUID] = set()
+        self._network_after_recorded: set[UUID] = set()
 
     def cancel(self, run_id: UUID) -> bool:
         task = self._tasks.get(run_id)
@@ -134,13 +142,25 @@ class AgentRunner:
         heartbeat_task = asyncio.create_task(heartbeat(), name=f"run-heartbeat-{run_id}")
         # A pausable budget rather than asyncio.timeout: waiting for a human is
         # not the run spending its execution time (see agent/budget.py).
-        budget = RunBudget(self.timeout, lambda: task.cancel() if task is not None else None)
+        budget = RunBudget(self.timeout, lambda: task.cancel() if task is not None else None,
+                           wall_seconds=self.wall_timeout)
+        manifest_root = None
+        manifest_before = None
+        network_audit = None
         try:
             budget.start()
             if on_started is not None:
                 on_started(run_id)
             state = await self._load_state(run_id, session_id)
             self._states[run_id] = state
+            manifest_root = state.session.workspace
+            manifest_before = await self._record_manifest_before(run_id, manifest_root)
+            if self.sandbox is not None and self.sandbox.settings.host_controller:
+                network_audit = NetworkAudit(self.sandbox, manifest_root, run_id)
+                available = await network_audit.start()
+                await self.runs.event(run_id, "network_monitor_started", {"available": available})
+                if not available:
+                    raise RunExecutionError("Workspace network monitor is unavailable", "execution_error")
             command = (self.memory_service.explicit_command(state)
                        if self.memory_service is not None else None)
             result = (await self._explicit_memory(state, command) if command is not None
@@ -150,6 +170,8 @@ class AgentRunner:
                 # enqueues a job so this answer never waits for a second model call.
                 await self.memory_service.on_completed(
                     connection, session_id, run_id, state=state, has_answer=result.message is not None)
+            await self._record_network_after(run_id, network_audit)
+            await self._record_manifest_after(run_id, manifest_root, manifest_before)
             await self.runs.finish(run_id, "completed", end_reason=result.end_reason,
                                    on_completed=commit if self.memory_service is not None else None)
             if self.memory_worker is not None and result.message is not None:
@@ -158,9 +180,11 @@ class AgentRunner:
             if heartbeat_error is not None:
                 raise RunFailedError(run_id, "Run heartbeat failed; ownership is uncertain", "storage_error") from heartbeat_error
             if budget.expired:
-                await self._close_if_running(run_id, "failed", "Run exceeded its time budget", "run_timeout")
+                await self._close_if_running(run_id, "failed", "Run exceeded its time budget", "run_timeout",
+                                             manifest_root, manifest_before, network_audit)
                 raise RunFailedError(run_id, "Run exceeded its time budget", "run_timeout") from None
-            await self._close_if_running(run_id, "cancelled", "Run cancelled", "user_cancelled")
+            await self._close_if_running(run_id, "cancelled", "Run cancelled", "user_cancelled",
+                                         manifest_root, manifest_before, network_audit)
             raise
         except RunOwnershipLost as error:
             raise RunFailedError(run_id, str(error), "storage_error") from error
@@ -177,12 +201,15 @@ class AgentRunner:
             else:
                 end_reason = "execution_error"
             status = "cancelled" if end_reason == "model_aborted" else "failed"
-            await self._close_if_running(run_id, status, reason, end_reason)
+            await self._close_if_running(run_id, status, reason, end_reason,
+                                         manifest_root, manifest_before, network_audit)
             raise RunFailedError(run_id, reason, end_reason) from error
         else:
             return result
         finally:
             budget.stop()
+            if network_audit is not None and network_audit.finished is None:
+                await network_audit.stop()
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
             processes_reaped = self.processes is None
@@ -201,8 +228,10 @@ class AgentRunner:
                     logger.warning("Could not terminate run processes (%s)", type(error).__name__)
             if self.sandbox is not None and processes_reaped:
                 try:
-                    self.sandbox.release(run_id)
-                except OSError:
+                    cleanup = self.sandbox.release(run_id)
+                    if inspect.isawaitable(cleanup):
+                        await cleanup
+                except (OSError, RuntimeError):
                     logger.exception("Could not remove run scratch")
             try:
                 # Stops the flush task and commits or drops the tail. A cancelled
@@ -213,6 +242,8 @@ class AgentRunner:
             self.runs.database.run_owners.pop(run_id, None)
             self._tasks.pop(run_id, None)
             self._states.pop(run_id, None)
+            self._manifest_after_recorded.discard(run_id)
+            self._network_after_recorded.discard(run_id)
             if self.context_manager is not None:
                 self.context_manager.release(run_id)
             try:
@@ -231,7 +262,54 @@ class AgentRunner:
             if self.memory_service is not None:
                 self.memory_service.release(run_id)
 
-    async def _close_if_running(self, run_id: UUID, status: str, reason: str, end_reason: RunEndReason) -> None:
+    def _note_fits(self, messages) -> bool:
+        """Whether the assembled request still fits after the progress note.
+
+        The builder reports a token estimate per selection; adding to the tail
+        after the fact means nothing re-checked the total. Counting here is
+        cheap next to a provider call, and dropping the note on overflow is
+        always better than a request the provider rejects.
+        """
+        counter = getattr(self.context, "counter", None)
+        budget_of = getattr(self.context, "input_budget", None)
+        if counter is None or budget_of is None:
+            return True
+        return counter.count(messages) <= budget_of(self.model)
+
+    async def _record_manifest_before(self, run_id: UUID, root) -> dict | None:
+        try:
+            before = await asyncio.to_thread(snapshot, root)
+            await self.runs.event(run_id, "workspace_manifest_before", before)
+            return before
+        except (OSError, ValueError) as error:
+            logger.warning("Could not inventory workspace before run (%s)", type(error).__name__)
+            await self.runs.event(run_id, "workspace_manifest_error",
+                                  {"phase": "before", "reason": type(error).__name__})
+            return None
+
+    async def _record_manifest_after(self, run_id: UUID, root, before: dict | None) -> None:
+        if run_id in self._manifest_after_recorded or root is None:
+            return
+        try:
+            after = await asyncio.to_thread(snapshot, root)
+            summary = diff(before, after) if before is not None else None
+            await self.runs.event(run_id, "workspace_manifest_after", {**after, "diff": summary})
+            self._manifest_after_recorded.add(run_id)
+        except (OSError, ValueError) as error:
+            logger.warning("Could not inventory workspace after run (%s)", type(error).__name__)
+            await self.runs.event(run_id, "workspace_manifest_error",
+                                  {"phase": "after", "reason": type(error).__name__})
+
+    async def _record_network_after(self, run_id: UUID, audit: NetworkAudit | None) -> None:
+        if audit is None or run_id in self._network_after_recorded:
+            return
+        data = await audit.stop()
+        await self.runs.event(run_id, "network_observed", data)
+        self._network_after_recorded.add(run_id)
+
+    async def _close_if_running(self, run_id: UUID, status: str, reason: str, end_reason: RunEndReason,
+                                manifest_root=None, manifest_before: dict | None = None,
+                                network_audit: NetworkAudit | None = None) -> None:
         """Close a run from an exception handler without leaking storage errors.
 
         ``finish`` re-checks ownership, and an exception raised inside an
@@ -244,6 +322,13 @@ class AgentRunner:
         if row is None or row["status"] != "running":
             return
         try:
+            try:
+                await self._record_network_after(run_id, network_audit)
+                await self._record_manifest_after(run_id, manifest_root, manifest_before)
+            except (DatabaseError, PoolTimeout):
+                # An already failed event buffer can still be dropped by finish.
+                # Preserve the original storage failure and terminal run event.
+                logger.warning("Could not persist final workspace inventory after storage failure")
             await self.runs.finish(run_id, status, reason, end_reason=end_reason)
         except RunOwnershipLost as error:
             raise RunFailedError(run_id, str(error), "storage_error") from error
@@ -289,11 +374,20 @@ class AgentRunner:
         if self.sandbox is not None:
             settings = self.sandbox.settings
             if settings.containerized:
-                state.environment = (
-                    "Boundary: container. Commands run inside the container, can access the network, "
-                    "and see only mounted workspaces. Maven, Java and Node are installed. "
-                    "Use process(action='read' or 'stop') for long-running commands; do not use nohup."
-                )
+                if settings.host_controller:
+                    state.environment = (
+                        "Boundary: container per workspace. Ordinary commands, tests and builds run in the "
+                        "workspace's Docker container. host_exec runs a command on the user's computer and "
+                        "needs one page approval per request; a native process started with yield_time_ms is "
+                        "managed with host_process, where every stdin write needs its own approval. "
+                        "Maven, Java and Node are installed. Do not use nohup."
+                    )
+                else:
+                    state.environment = (
+                        "Boundary: container. Commands run inside the container, can access the network, "
+                        "and see only mounted workspaces. Maven, Java and Node are installed. "
+                        "Use process(action='read' or 'stop') for long-running commands; do not use nohup."
+                    )
         if self.memory_service is not None and self.memory_service.explicit_command(state) is not None:
             # The command is answered without a model, so nothing reads the
             # workspace: skipping the scan keeps it out of large trees' way.
@@ -359,7 +453,24 @@ class AgentRunner:
                 raise
             if self.memory_service is not None:
                 built = await self.memory_service.enrich(built, session_id, run_id, state=state)
+            # Trailing, unpersisted, and outside the cached system prefix. The
+            # model cannot see the loop, so without this it cannot tell a first
+            # turn from the last one it will get. The transcript renderer merges
+            # consecutive user-role messages, so on the wire this rides with the
+            # tool result as a second part rather than as a new turn.
+            if iteration:
+                messages = built.request.messages
+                messages.append(UserMessage(turn_note(iteration, self.max_turns), time_ns() // 1_000_000))
+                # Selection sized this request to fit, and compaction may have
+                # just run. A few dozen tokens of advice is not worth pushing
+                # the request past the window, so the note yields.
+                if not self._note_fits(messages):
+                    messages.pop()
             model_call_id = await self.runs.start_model_call(run_id, iteration, built)
+            # Local outbound metadata is deliberately absent from the stored
+            # model-call request, which remains an audit of the raw transcript.
+            built.request.workspace = state.session.workspace
+            built.request.run_id = run_id
             state.active_model_call_id = model_call_id
             message = await self._response(run_id, built.request)
             record = await self.runs.save_response(run_id, session_id, model_call_id, message)
@@ -381,6 +492,9 @@ class AgentRunner:
                 raise RunExecutionError("Tool calls require toolUse stop reason", "model_protocol_error")
             if len({call.id for call in calls}) != len(calls):
                 raise RunExecutionError("Duplicate tool call IDs in one response", "model_protocol_error")
+            from chagent.models.outbound import invocation_to_host
+            for call in calls:
+                call.arguments = invocation_to_host(call.arguments, state.session.workspace)
             batch = await self.scheduler.execute_batch(calls, context=tool_context, model_call_id=model_call_id,
                                                         executor=executor, on_committed=state.append_committed,
                                                         budget=budget)

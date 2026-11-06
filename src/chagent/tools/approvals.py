@@ -23,7 +23,12 @@ from chagent.storage.repositories import RunRepository
 from chagent.tools.policy import fingerprint, subject as subject_of
 
 
-POLL_SECONDS = 0.25
+#: How long a waiter sleeps before looking at the database again. A decision in
+#: this process arrives as an in-process wakeup and a decision from another
+#: process arrives over LISTEN/NOTIFY, so this is not how the wait works any
+#: more: it is the bound on how long a *lost* notification can go unnoticed. It
+#: was 0.25 s when polling was the mechanism.
+POLL_SECONDS = 1.0
 
 # A refusal is a policy decision, not a failure. Saying so is the difference
 # between a model that explains the block and one that retries with new flags.
@@ -61,6 +66,20 @@ WRITE_REFUSALS = {
 
 ApprovalDecider = Callable[[ApprovalRequest], Awaitable[bool | None]]
 
+# Who answered, written into ``note`` for audit. These are not words anyone
+# said, so they never reach the model as a remark from the user.
+INTERNAL_NOTES = frozenset({"local prompt", "no viewer", "no interactive approver"})
+
+
+def public_note(note: str | None) -> str:
+    """The user's own words about the decision, or nothing.
+
+    A note is also how the broker records *who* answered; that is audit data,
+    not something the user said, and the model must not read it as one.
+    """
+    text = (note or "").strip()
+    return "" if text in INTERNAL_NOTES else text
+
 
 @dataclass(frozen=True, slots=True)
 class ApprovalOutcome:
@@ -68,6 +87,11 @@ class ApprovalOutcome:
     approval_id: UUID | None
     message: str = ""
     reason: str = ""
+    # What the user wrote with their decision. It travels with the grant
+    # because the model's only record of the exchange is the tool result: a
+    # model that is not told the page answered reports that nothing was asked
+    # (measured in the C5 acceptance, where every run had a real approval card).
+    note: str = ""
 
 
 class ApprovalBroker:
@@ -96,9 +120,11 @@ class ApprovalBroker:
             ttl=self.timeout)
         asked = False
         unwatched_since: float | None = None
-        # A human deciding is not the run spending its execution budget.
+        # A human deciding is not the run spending its execution budget, and the
+        # wait is already bounded by ``self.timeout``: the run budget's pause
+        # ceiling must not cut a correct wait short.
         if budget is not None:
-            budget.pause()
+            budget.pause(capped=False)
         try:
             with self.runs.notifications.subscribe(run_id) as subscription:
                 while True:
@@ -110,9 +136,11 @@ class ApprovalBroker:
                     if current is None:
                         return ApprovalOutcome(False, None, UNAVAILABLE, "unavailable")
                     if current.status == "approved":
-                        return ApprovalOutcome(True, current.id)
+                        note = public_note(current.note)
+                        return ApprovalOutcome(True, current.id, note=note)
                     if current.status == "denied":
-                        return ApprovalOutcome(False, current.id, DENIED, "denied")
+                        return ApprovalOutcome(False, current.id, DENIED, "denied",
+                                               public_note(current.note))
                     if current.status == "expired":
                         return ApprovalOutcome(False, current.id, EXPIRED, "expired")
                     if current.status == "cancelled":
@@ -151,6 +179,81 @@ class ApprovalBroker:
         finally:
             if budget is not None:
                 budget.resume()
+
+    async def request_batch(self, *, run_id: UUID, items: list[dict],
+                            signal: asyncio.Event | None = None, budget=None) -> list[ApprovalOutcome]:
+        """Ask one question about several writes, and answer it for all of them.
+
+        ``items`` is ``[{tool_record_id, tool_name, arguments, cwd, subject}]``,
+        one entry per call the model wants to make in this turn. Each row keeps
+        its own fingerprint and is consumed separately; the decision is shared,
+        because a page that showed three files and got one answer must not apply
+        it to two of them.
+
+        The outcome is per row: a sibling that expired before the decision stays
+        refused as expired, which is the only state that can differ inside one
+        batch.
+        """
+        requests = await self.approvals.create_batch(
+            run_id=run_id, ttl=self.timeout,
+            items=[{**item, "fingerprint": fingerprint(item["tool_name"], item["arguments"], item["cwd"])}
+                   for item in items])
+        batch_id = requests[0].batch_id
+        asked = False
+        unwatched_since: float | None = None
+        if budget is not None:
+            budget.pause(capped=False)
+        try:
+            with self.runs.notifications.subscribe(run_id) as subscription:
+                while True:
+                    version = subscription.version
+                    rows = await self.approvals.batch(batch_id)
+                    if signal is not None and signal.is_set():
+                        await self.approvals.cancel_pending(run_id, "run_cancelled")
+                        return [ApprovalOutcome(False, row.id, CANCELLED, "cancelled") for row in rows]
+                    pending = [row for row in rows if row.status == "pending"]
+                    if not pending:
+                        return [self._outcome(row) for row in rows]
+                    if pending[0].expires_at <= datetime.now(timezone.utc):
+                        await self.approvals.expire_due(run_id=run_id)
+                        continue
+                    if self.remote and self.audience is not None and self.grace > 0:
+                        if self.audience(run_id):
+                            unwatched_since = None
+                        elif unwatched_since is None:
+                            unwatched_since = monotonic()
+                        elif monotonic() - unwatched_since >= self.grace:
+                            if await self.approvals.decide(pending[0].id, approve=False,
+                                                           note="no viewer") == "conflict":
+                                continue
+                            continue
+                    if self.decider is not None and not asked:
+                        asked = True
+                        answer = await self.decider(pending[0])
+                        if answer is None and not self.remote:
+                            await self.approvals.decide(pending[0].id, approve=False,
+                                                        note="no interactive approver")
+                            continue
+                        if answer is not None:
+                            await self.approvals.decide(pending[0].id, approve=answer, note="local prompt")
+                            continue
+                    await subscription.wait(version, timeout=self.poll)
+        finally:
+            if budget is not None:
+                budget.resume()
+
+    @staticmethod
+    def _outcome(row: ApprovalRequest) -> ApprovalOutcome:
+        note = public_note(row.note)
+        if row.status == "approved":
+            return ApprovalOutcome(True, row.id, note=note)
+        if row.status == "denied":
+            return ApprovalOutcome(False, row.id, DENIED, "denied", note)
+        if row.status == "expired":
+            return ApprovalOutcome(False, row.id, EXPIRED, "expired")
+        if row.status == "cancelled":
+            return ApprovalOutcome(False, row.id, CANCELLED, "cancelled")
+        return ApprovalOutcome(False, row.id, UNAVAILABLE, "unavailable")
 
     async def cancel(self, run_id: UUID, note: str = "run_ended") -> int:
         return await self.approvals.cancel_pending(run_id, note)

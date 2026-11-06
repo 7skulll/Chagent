@@ -40,7 +40,11 @@ class ModelSettings:
     context_window: int = 65_536
     max_tokens: int = 8192
     request_timeout: float = 60
-    run_timeout: float = 180
+    #: Wall-clock ceiling for one run. Tool time is paused out of it (the
+    #: scheduler calls ``RunBudget.pause`` around execution), so this covers
+    #: model turns and bookkeeping, not a Maven build. At 180 seconds a single
+    #: verified build consumed most of the budget before the fix loop started.
+    run_timeout: float = 600
     # A transient 429/5xx used to consume the whole turn, and sometimes the whole
     # run. Model requests have no side effects, so retrying is safe; ``0`` keeps
     # the pre-retry behaviour exactly.
@@ -156,7 +160,7 @@ class ModelSettings:
                 context_window=int(values.get("CHAGENT_CONTEXT_WINDOW", "65536")),
                 max_tokens=int(values.get("CHAGENT_MAX_TOKENS", "8192")),
                 request_timeout=float(values.get("CHAGENT_MODEL_TIMEOUT", "60")),
-                run_timeout=float(values.get("CHAGENT_RUN_TIMEOUT", "180")),
+                run_timeout=float(values.get("CHAGENT_RUN_TIMEOUT", "600")),
                 retry_attempts=int(values.get("CHAGENT_RETRY_ATTEMPTS", "2")),
                 thinking=thinking,
                 thinking_source=thinking_source,

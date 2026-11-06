@@ -71,12 +71,16 @@ class ExecCommandTool(AgentTool):
         with filesystem.directory(parts):
             pass
         cwd = filesystem.root.joinpath(*parts)
+        if self.sandbox is not None and self.sandbox.settings.host_controller and "yield_time_ms" in params:
+            raise ValueError("Use site_start for a persistent website; container commands are one-shot")
         # The profile is built from the resolved root, which is what the kernel
         # matches on; a symlinked workspace (/tmp -> /private/tmp) would
         # otherwise produce a profile that denies even its own directory.
         argv, sandbox_record = ["/bin/sh", "-c", params["cmd"]], {}
         if self.sandbox is not None:
-            argv, sandbox_record = await self.sandbox.wrap(argv, filesystem.root, owner=context.run_id)
+            argv, sandbox_record = await self.sandbox.wrap(argv, filesystem.root, owner=context.run_id,
+                                                           workdir=cwd,
+                                                           timeout_seconds=params.get("timeout_ms", 10000) / 1000)
         child_env = self.sandbox.environment(filesystem.root, owner=context.run_id) if self.sandbox is not None else None
         started = monotonic()
         if "yield_time_ms" in params:
@@ -147,6 +151,8 @@ class ExecCommandTool(AgentTool):
                 cancellation.cancel()
                 with suppress(asyncio.CancelledError):
                     await cancellation
+        timed_out = timed_out or (self.sandbox is not None and self.sandbox.settings.host_controller
+                                   and process.returncode == 124)
         text = output.decode("utf-8", errors="replace")
         if truncated:
             text += "\n[Output truncated]"

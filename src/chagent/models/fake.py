@@ -5,6 +5,7 @@ from copy import deepcopy
 from time import time_ns
 from uuid import uuid4
 
+from chagent.agent.turn_note import last_request_message
 from chagent.domain.messages import AssistantMessage, JsonObject, TextContent, ToolCall, ToolResultMessage, UserMessage
 from chagent.models.base import ModelRequest
 from chagent.models.events import (
@@ -32,7 +33,7 @@ class FakeModelClient:
             final.stop_reason = "stop"
             yield DoneEvent(reason="stop", message=final)
             return
-        last = request.messages[-1]
+        last = last_request_message(request.messages)
         if isinstance(last, UserMessage):
             text = last.content if isinstance(last.content, str) else "\n".join(
                 block.text for block in last.content if isinstance(block, TextContent)

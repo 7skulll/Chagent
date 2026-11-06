@@ -75,6 +75,27 @@ class ApprovalPolicyTests(unittest.TestCase):
         self.assertNotEqual(base, fingerprint("exec_command", {"cmd": "ls -a"}, "/w"))
         self.assertNotEqual(base, fingerprint("exec_command", {"cmd": "ls"}, "/other"))
 
+    def test_managed_container_gates_native_launch_and_every_stdin_write(self):
+        # The host controller's own gate: a native launch asks once, and every
+        # later write to that native process asks again — the launch grant
+        # never covers input, and one write grant never covers a second write.
+        managed = ApprovalPolicy("on-request")
+        write = {"action": "write", "process_id": "p1", "chars": "你\n"}
+        self.assertTrue(managed.requires_approval("host_process", write, sandbox="managed-container"))
+        for action in ("read", "stop", "list"):
+            self.assertFalse(managed.requires_approval(
+                "host_process", {"action": action, "process_id": "p1"}, sandbox="managed-container"))
+        self.assertTrue(managed.requires_approval("host_exec", {"command": "pwd"}, sandbox="managed-container"))
+        self.assertIn("4 UTF-8 bytes", subject("host_process", write))
+        self.assertIn("close_stdin=False", subject("host_process", write))
+        for changed in ({**write, "process_id": "p2"}, {**write, "chars": "你"},
+                        {**write, "close_stdin": True}):
+            self.assertNotEqual(fingerprint("host_process", write, "/w"),
+                                fingerprint("host_process", changed, "/w"))
+        # A container-side policy must not start asking about a tool that
+        # does not exist outside the host controller.
+        self.assertFalse(managed.requires_approval("host_process", write, sandbox="off"))
+
     def test_on_failure_is_rejected_not_mapped(self):
         with self.assertRaises(ValueError):
             Settings.from_env({"CHAGENT_APPROVAL": "on-failure"})

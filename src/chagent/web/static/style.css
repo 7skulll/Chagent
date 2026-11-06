@@ -171,6 +171,9 @@ body.sidebar-collapsed .sidebar{display:none}
 #workspace-parent{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-4)}
 .workspace-label #workspace{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ink-2)}
 .workspace:hover{background:var(--surface-2);color:var(--ink)}
+.site-access{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px var(--sp-2);font-size:var(--text-meta)}
+.site-access[hidden]{display:none}
+.site-access a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
 
 /* ---------- 中间聊天区 ---------- */
 .chat{display:flex;flex-direction:column;flex:1;min-width:0;background:var(--bg)}
@@ -340,6 +343,12 @@ body.sidebar-collapsed .sidebar{display:none}
 .tool-status{margin:var(--sp-2) 0;padding:2px var(--sp-3);border-left:2px solid var(--line);
   font-size:var(--text-label);color:var(--ink-2)}
 .tool-status.failed{border-left-color:var(--danger-line);color:var(--danger)}
+
+/* 运行收尾记录：终态后仍在转录里的一段事实，不是实时提示 */
+.run-summary{margin:var(--sp-3) 0;padding:var(--sp-2) var(--sp-3);border:1px solid var(--line);
+  border-radius:var(--radius);background:var(--surface-2);font-size:var(--text-label)}
+.run-summary-title{margin:0 0 var(--sp-1);font-size:var(--text-meta);color:var(--ink-3);font-weight:600}
+.run-summary-facts{margin:0;padding-left:1.1em;color:var(--ink-2);line-height:var(--leading-ui)}
 
 /* 审批 */
 .approval{display:flex;flex-direction:column;gap:var(--sp-1);margin:var(--sp-3) 0;padding:var(--sp-3);
@@ -898,3 +907,7 @@ textarea#input::placeholder{color:#a2a29c}
   .rail-icon{width:40px;height:40px}
   .file-panel-tabs button{min-height:40px}
 }
+
+/* 批量写审批：一张卡里列出每个文件 */
+.approval-items{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:2px}
+.approval-item code{font-size:var(--text-label)}

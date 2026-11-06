@@ -12,6 +12,7 @@ from chagent.domain.messages import AssistantMessage
 from chagent.models.base import ModelRequest
 from chagent.models.events import AssistantMessageEvent, ErrorEvent, StartEvent
 from chagent.models.settings import ModelSettings
+from chagent.models.outbound import ProtectedPathError, protect_payload
 
 
 class ModelProtocolError(ValueError):
@@ -166,7 +167,13 @@ class HTTPModelClient:
                 raise ModelProtocolError("Request provider does not match configured credential")
             if request.model.endpoint is not None and request.model.endpoint != self.settings.base_url:
                 raise ModelProtocolError("Request endpoint does not match configured credential")
-            payload = self.payload(request)
+            try:
+                payload = protect_payload(self.payload(request), request.workspace)
+            except ProtectedPathError:
+                audit = getattr(self, "outbound_audit", None)
+                if audit is not None and request.run_id is not None:
+                    await audit(request.run_id, request.purpose)
+                raise
             if self._client is None:
                 self._client = httpx.AsyncClient(
                     timeout=httpx.Timeout(self.settings.request_timeout),

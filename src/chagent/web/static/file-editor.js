@@ -1,8 +1,22 @@
-"use strict";
-// Drafts live in this page, keyed by workspace ID and relative path. Opening a
-// file does not add it to model context. Only Save writes an editing draft.
-(() => {
-  const $ = id => document.getElementById(id);
+/* The file panel: tree, tabs, drafts, save, conflicts, preview, layout.
+ *
+ * Drafts live in this page, keyed by workspace ID and relative path. Opening a
+ * file does not add it to model context. Only Save writes an editing draft.
+ *
+ * It used to be an IIFE that published itself on the page global and called
+ * back into the chat through it. Both directions are arguments now:
+ * `initFileEditor(ui)` returns the panel's actions, and the panel calls the
+ * chat's through the same object, so a rename breaks at the call site instead
+ * of leaving a button silently dead.
+ */
+
+import { $ } from "./core/dom.js";
+import { renderMarkdown } from "./core/markdown.js";
+import { createLayout } from "./views/layout.js";
+import { createPreview } from "./views/preview.js";
+import { createDraftStore, restorable } from "./views/drafts.js";
+
+export function initFileEditor(ui) {
   const spaces = new Map();
   let current = null, choices = Promise.resolve(), tabSignature = "";
   const node = (tag, text, cls) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (cls) n.className = cls; return n; };
@@ -20,6 +34,19 @@
   const normalized = text => text.replace(/\r\n?/g, "\n");
   const serialized = tab => tab.readonly ? tab.raw : tab.newline === "cr" ? tab.draft.replace(/\n/g,"\r") : tab.newline === "crlf" ? tab.draft.replace(/\r?\n/g, "\r\n") : tab.draft;
   const active = () => current && current.tabs.get(current.active);
+  // Drafts are per workspace id + path, so switching workspaces cannot mix them
+  // and a reload can find them again. Storage failures are silent by design.
+  const drafts = createDraftStore(globalThis.localStorage);
+  let draftTimer = 0;
+  function rememberDraft(space, tab) {
+    if (!space || !tab || tab.kind !== "text" || tab.readonly) return;
+    if (!dirty(tab)) { drafts.drop(space.id, tab.path); return; }
+    drafts.save(space.id, tab.path, {draft: tab.draft, version: tab.version, identity: tab.identity});
+  }
+  function rememberDraftSoon(space, tab) {
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => { draftTimer = 0; rememberDraft(space, tab); }, 300);
+  }
 
   function choose(message, options, title="确认操作") {
     const run = () => new Promise(resolve => {
@@ -51,7 +78,7 @@
     if (decision === "cancel") return false;
     if (decision === "save") {
       for (const tab of tabs) if (!await saveTab(space,tab)) return false;
-    } else for (const tab of tabs) { tab.draft = tab.original; tab.changed = false; }
+    } else for (const tab of tabs) { tab.draft = tab.original; tab.changed = false; drafts.drop(space.id, tab.path); }
     paint(); return true;
   }
   function takeRead(tab, data) {
@@ -71,7 +98,7 @@
       const list = await request("/api/workspaces");
       const target = list.items.find(item => String(item.id) === String(spaceId));
       if (!target || !target.available) throw new Error("文件所属工作区不可用");
-      await window.ChagentWorkspaceSwitch(target.path);
+      await ui.switchWorkspace(target.path);
       if (!current || current.id !== String(spaceId)) return;
     }
     const space = current;
@@ -88,10 +115,17 @@
         await readPreview(space,tab);tab.info.reason=error.message;
       }
     } space.tabs.set(path,tab); space.active=path;
+    // A draft from before a reload (or a crash) comes back here, never silently
+    // over a newer file: a version mismatch is shown as a conflict.
+    const stored = tab.kind === "text" && !tab.readonly ? restorable(drafts.load(space.id, path), tab) : null;
+    if (stored) {
+      tab.draft = stored.draft;
+      tab.changed = stored.conflict;
+    }
     selectFile(space,path);
-    if (current === space) { reveal(); paint(); notice(tab.kind!=="text"?"预览不会把文件内容自动发送给模型。":tab.readonly ? "混合换行文件当前只读，避免破坏原换行。" : "输入仅修改草稿；点击保存或按 ⌘S 写入磁盘。"); }
+    if (current === space) { reveal(); paint(); notice(tab.kind!=="text"?"预览不会把文件内容自动发送给模型。":tab.readonly ? "混合换行文件当前只读，避免破坏原换行。" : stored ? (stored.conflict ? "已恢复未保存的草稿，但磁盘版本已变化：保存前请先对照。" : "已恢复上次未保存的草稿。") : "输入仅修改草稿；点击保存或按 ⌘S 写入磁盘。"); }
   }
-  function reveal() { window.ChagentShowFiles?.(); selectPane("files"); }
+  function reveal() { ui.showFiles(); selectPane("files"); }
   function paint() {
     const space = current, tab = active();
     const signature=JSON.stringify([space?.id,space?.active,space?[...space.tabs.values()].map(t=>[t.path,dirty(t)]):[]]);
@@ -101,7 +135,7 @@
       const wrapper = node("div",null,"file-tab"+(item===tab?" active":""));
       const select = button((dirty(item)?"● ":"")+item.path, () => { selectFile(space,item.path);space.active=item.path; paint(); });
       select.setAttribute("role","tab"); select.setAttribute("aria-selected",String(item===tab));
-      wrapper.append(select,button("×",async () => { if (!await guard(space,[item.path])) return; space.tabs.delete(item.path); if (space.active===item.path) space.active=space.tabs.keys().next().value; paint(); }));
+      wrapper.append(select,button("×",async () => { if (!await guard(space,[item.path])) return; drafts.drop(space.id, item.path); space.tabs.delete(item.path); if (space.active===item.path) space.active=space.tabs.keys().next().value; paint(); }));
       return wrapper;
     }) : []));
     }
@@ -118,10 +152,10 @@
     $("file-markdown-view").hidden = binary || !tab?.preview;
     $("file-conflict").hidden = !tab || !tab.changed;
     $("file-editor").readOnly = !!tab?.readonly;
-    if (binary) { paintPreview(space,tab); }
+    if (binary) { preview.show(space,tab); }
     else if (tab) {
       if ($("file-editor").value !== tab.draft) $("file-editor").value = tab.draft;
-      if (tab.preview) $("file-markdown-view").innerHTML = window.ChagentMarkdown.renderMarkdown(tab.draft);
+      if (tab.preview) $("file-markdown-view").innerHTML = renderMarkdown(tab.draft);
     }
   }
   async function readPreview(space,tab) {
@@ -129,47 +163,6 @@
     Object.assign(tab,{kind:info.kind,info,identity:info.identity,version:info.version,readonly:true,unavailable:false});
     tab.page=Math.min(tab.page||1,info.pages||1);
   }
-  function imageSize() {
-    const tab=active(),img=$("preview-image");if(!tab||!img.naturalWidth) return;
-    img.width=Math.round(tab.zoom===null?Math.min(img.naturalWidth,Math.max(100,$("preview-viewport").clientWidth-24)):img.naturalWidth*tab.zoom);
-    $("preview-scale").textContent=tab.zoom===null?"适应":Math.round(tab.zoom*100)+"%";
-  }
-  function paintPreview(space,tab) {
-    const pdf=tab.kind==="pdf",supported=pdf||tab.kind==="image";
-    for(const id of ["preview-prev","preview-page","preview-pages","preview-next"]) $(id).hidden=!pdf;
-    $("preview-page").value=tab.page;$("preview-page").max=tab.info.pages||1;
-    $("preview-pages").textContent="/ "+(tab.info.pages||1);
-    $("preview-prev").disabled=tab.page<=1;$("preview-next").disabled=tab.page>=(tab.info.pages||1);
-    for(const id of ["preview-out","preview-in","preview-fit"]) $(id).disabled=!supported;
-    const link=$("preview-download");link.href=downloadUrl(space.id,tab.path);link.download=tab.path.split("/").pop();link.hidden=tab.info.download_available===false;
-    $("preview-note").textContent=supported?(pdf?"PDF 分页预览":"图片静态预览 · "+tab.info.width+" × "+tab.info.height)+"；仅供本机查看，不代表模型已理解图片或具备 OCR。":tab.info.reason;
-    const image=$("preview-image");image.hidden=!supported||tab.unavailable||!!tab.previewError;
-    if(!supported) { image.removeAttribute("src");image.dataset.key="";return; }
-    const url=base(space)+"/preview/page?"+new URLSearchParams({path:tab.path,version:tab.version,page:tab.page});
-    if(image.dataset.key!==url || tab.imageKey===null) {
-      tab.imageKey=url;tab.previewError=false;image.hidden=false;image.dataset.key=url;$("preview-error").hidden=true;
-      image.onload=()=>{if(active()===tab){tab.previewError=false;$("preview-error").hidden=true;imageSize();}};
-      image.onerror=()=>{if(active()===tab){tab.previewError=true;$("preview-error").textContent="预览加载失败或文件已变化，请重新加载；也可下载原文件查看。";$("preview-error").hidden=false;image.hidden=true;}};
-      image.src=url;
-    }
-    imageSize();
-  }
-  async function retryPreview() {
-    const space=current,tab=active();if(!tab||tab.kind==="text") return;
-    await readPreview(space,tab);tab.imageKey=null;if(current===space) paint();
-  }
-  function changePage(delta,absolute=false) {
-    const tab=active();if(tab?.kind!=="pdf") return;
-    tab.page=Math.max(1,Math.min(tab.info.pages,absolute?Number(delta)||1:tab.page+delta));paint();
-  }
-  $("preview-prev").addEventListener("click",()=>changePage(-1));
-  $("preview-next").addEventListener("click",()=>changePage(1));
-  $("preview-page").addEventListener("change",()=>changePage($("preview-page").value,true));
-  $("preview-out").addEventListener("click",()=>{const tab=active();if(tab){tab.zoom=Math.max(.25,(tab.zoom||1)/1.25);imageSize();}});
-  $("preview-in").addEventListener("click",()=>{const tab=active();if(tab){tab.zoom=Math.min(4,(tab.zoom||1)*1.25);imageSize();}});
-  $("preview-fit").addEventListener("click",()=>{const tab=active();if(tab){tab.zoom=null;imageSize();}});
-  $("preview-retry").addEventListener("click",()=>retryPreview().catch(fail));
-  window.addEventListener("resize",imageSize);
   async function saveTab(space, tab, revision=null) {
     if (tab.saving || tab.readonly || tab.kind!=="text") return false;
     const submitted=tab.draft, content=serialized(tab);
@@ -180,6 +173,8 @@
       tab.newline=result.newline; tab.changed=false; tab.unavailable=false;
       // Further input during the request is still a draft, not marked saved.
       if (tab.draft===submitted) tab.draft=tab.original;
+      // The draft is only "kept" while it differs from the disk.
+      rememberDraft(space, tab);
       if(current===space) notice(dirty(tab)?"已保存提交的版本；仍有后续修改待保存。":"已保存到工作区。");
       return !dirty(tab);
     } catch(error) {
@@ -321,7 +316,7 @@
           for(const b of row.querySelectorAll("button")) b.disabled=true;
           try {
             const output=await request(base(space)+`/outputs/${item.id}/decision`,"POST",{token:item.token,choice});
-            window.dispatchEvent(new CustomEvent("chagent-output-decision",{detail:output}));
+            ui.outputChanged(output);
             notice(choice==="cancel"?"已取消输出，未修改文件。":"输出已保存。");
           } finally { space.pendingSignature=null;await loadPending(space);await renderTree(space);await checkExternal(space); }
         }));
@@ -360,10 +355,13 @@
     for(const [key,id] of [["files","workspace-files"],["context","file-context-pane"],["history","file-history-pane"]]) {
       $(id).hidden=key!==name;$("show-"+key).setAttribute("aria-selected",String(key===name));
     }
-    if(name==="context") { $("context-panel").open=true;window.ChagentLoadContext?.(); }
+    if(name==="context") { $("context-panel").open=true;ui.loadContext(); }
   }
   const downloadUrl=(id,path)=>`/api/workspaces/${id}/content?${new URLSearchParams({path})}`;
-  window.ChagentFiles={
+  const preview=createPreview({active,current:()=>current,readPreview,paint,downloadUrl});
+  $("preview-retry").addEventListener("click",()=>preview.retry().catch(fail));
+  const layout=createLayout();
+  const api_ = {
     async beforeWorkspace(path) { return !current||current.path===path||await guard(current); },
     workspace(workspace) {
       const id=String(workspace.id);
@@ -371,8 +369,10 @@
       current=spaces.get(id);$("file-tree").replaceChildren(node("p","正在加载…"));$("file-confirmations").replaceChildren();current.pendingSignature=null;$("file-hidden").checked=current.hidden;notice("当前工作区："+workspace.path+"；打开文件后手动保存。");paint();refresh().catch(fail);
     },
     open,refresh,downloadUrl,selectFiles:()=>selectPane("files"), async outputChanged(){await refresh();},
+    // Declared below the returned object; called only by the layout code.
+    panelsChanged: () => layout.clampAll(),
   };
-  $("file-editor").addEventListener("input",()=>{const tab=active();if(!tab) return;tab.draft=$("file-editor").value;paint();});
+  $("file-editor").addEventListener("input",()=>{const tab=active();if(!tab) return;tab.draft=$("file-editor").value;paint();rememberDraftSoon(current,tab);});
   $("file-save").addEventListener("click",()=>{const tab=active();if(tab) saveTab(current,tab);});
   $("file-save-as").addEventListener("click",()=>saveAs().catch(fail));
   $("file-markdown").addEventListener("click",()=>{const tab=active();if(tab){tab.preview=!tab.preview;paint();}});
@@ -395,48 +395,12 @@
   setInterval(async()=>{
     if(document.hidden||!current||polling) return;polling=true;
     const space=current;
-    try { await checkExternal(space);if(!space.showingTrash) await loadPending(space);await window.ChagentCheckUploads?.(); }
+    try { await checkExternal(space);if(!space.showingTrash) await loadPending(space);await ui.checkPendingUploads(); }
     catch { /* Explicit refresh and save surface errors. */ }
     finally { polling=false; }
   },5000);
   document.addEventListener("keydown",event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="s"){event.preventDefault();const tab=active();if(tab) saveTab(current,tab);}});
-  // Pointer and keyboard resize share clamps. CSSOM updates are compatible with
-  // the self-only CSP (no style element or injected style attribute required).
-  const sheet=document.styleSheets[0];
-  const index=sheet.insertRule(":root {}",sheet.cssRules.length), vars=sheet.cssRules[index].style;
-  const maxWidth=()=>document.documentElement.clientWidth;
-  function dimension(kind,value) {
-    let min,max,property;
-    if(kind==="sidebar"){
-      const files=document.body.classList.contains("tools-collapsed")?0:Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--tools-w"))||320;
-      min=180;max=Math.max(min,Math.min(400,maxWidth()-files-370));property="--sidebar-w";
-    }
-    else if(kind==="files"){
-      const sidebar=document.body.classList.contains("sidebar-collapsed")?0:Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w"))||216;
-      min=320;max=Math.max(min,maxWidth()-sidebar-370);property="--tools-w";
-    }
-    else {min=70;max=Math.max(min,($("conversation-tools").clientHeight||document.documentElement.clientHeight)-330);property="--tree-h";}
-    value=Math.round(Math.max(min,Math.min(max,value)));
-    const handle=$(kind==="sidebar"?"sidebar-resize":kind==="files"?"files-resize":"tree-resize");
-    handle.setAttribute("aria-valuemin",String(min));handle.setAttribute("aria-valuemax",String(max));handle.setAttribute("aria-valuenow",String(value));
-    handle.setAttribute("aria-orientation",kind==="tree"?"horizontal":"vertical");
-    vars.setProperty(property,value+"px");localStorage.setItem("chagent.layout."+kind,String(value));return value;
-  }
-  for(const [id,kind] of [["sidebar-resize","sidebar"],["files-resize","files"],["tree-resize","tree"]]) {
-    const handle=$(id),saved=Number(localStorage.getItem("chagent.layout."+kind));let value=saved||({sidebar:216,files:320,tree:190}[kind]);
-    value=dimension(kind,value);
-    handle.addEventListener("pointerdown",event=>{
-      event.preventDefault();handle.setPointerCapture(event.pointerId);
-      const start=kind==="tree"?event.clientY:event.clientX, initial=value;
-      const move=e=>{const delta=(kind==="tree"?e.clientY:e.clientX)-start;value=dimension(kind,initial+(kind==="files"?-delta:delta));};
-      const end=()=>{handle.removeEventListener("pointermove",move);handle.removeEventListener("pointerup",end);handle.removeEventListener("pointercancel",end);};
-      handle.addEventListener("pointermove",move);handle.addEventListener("pointerup",end);handle.addEventListener("pointercancel",end);
-    });
-    handle.addEventListener("keydown",event=>{if(["ArrowLeft","ArrowUp","ArrowRight","ArrowDown"].includes(event.key)){event.preventDefault();value=dimension(kind,value+(["ArrowLeft","ArrowUp"].includes(event.key)?-20:20));}});
-  }
-  const clampLayout=()=>{for(const kind of ["sidebar","files","tree"]) dimension(kind,Number(localStorage.getItem("chagent.layout."+kind)));};
-  window.addEventListener("resize",clampLayout);
-  window.addEventListener("chagent-panels-changed",clampLayout);
   paint();
-  if(window.ChagentCurrentWorkspace) window.ChagentFiles.workspace(window.ChagentCurrentWorkspace);
-})();
+  if (ui.state.currentWorkspace) api_.workspace(ui.state.currentWorkspace);
+  return api_;
+}

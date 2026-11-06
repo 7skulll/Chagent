@@ -463,6 +463,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         await self.wait_run(run_id)
         run = (await self.client.get(f"/api/runs/{run_id}")).json()
         self.assertEqual((run["status"], run["end_reason"]), ("completed", "tool_requested_stop"))
+        self.assertEqual(run["file_diff"]["counts"], {"added": 0, "modified": 0, "deleted": 0})
         self.assertIsNone(run["error"])
         detail = (await self.client.get(f"/api/sessions/{session}")).json()
         self.assertEqual(detail["latest_run"]["end_reason"], "tool_requested_stop")
