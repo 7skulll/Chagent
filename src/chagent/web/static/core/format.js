@@ -142,6 +142,7 @@ export const approvalTitle = toolName => WRITE_LABELS[toolName] || toolName;
 export const CONFIG_LABELS = [
   ["provider", "供应商"], ["model", "模型"], ["tools", "工具数"],
   ["controller", "主控位置"],
+  ["container_idle_seconds", "容器空闲回收"], ["container_state", "工作区容器"], ["image_stale", "执行镜像过期"],
   ["run_timeout", "活动时间上限"], ["run_wall_timeout", "运行墙钟上限"], ["boundary", "执行边界"], ["capability", "执行能力"], ["gate", "门禁"], ["approval", "审批"],
   ["host_commands", "命令执行"], ["workspace_writable", "工作区写入"], ["process_stdin", "交互输入"], ["web_access", "网页搜索"], ["compaction", "上下文压缩"],
   ["tokenizer", "token 计数"], ["max_turns", "最大轮数"], ["max_processes", "会话进程"],
@@ -156,6 +157,9 @@ export function configValue(key, c) {
     case "capability": return c.capability === "full" ? "可执行命令" : "只读，不执行命令";
     case "gate": return c.controller === "host-controller" ? "仅宿主原生操作逐次审批" : c.gate === "approval" ? "逐次审批" : "无需审批";
     case "controller": return c.controller === "host-controller" ? "本机；每工作区独立 Docker 执行容器" : c.controller;
+    case "container_idle_seconds": return c.container_idle_seconds === 0 ? "关闭" : `${c.container_idle_seconds} 秒`;
+    case "container_state": return c.container_state ?? "未选择工作区";
+    case "image_stale": return c.image_stale == null ? "未选择工作区" : c.image_stale ? "是，可显式重建" : "否";
     case "approval": return `${c.approval}，等待 ${Math.round(c.approval_timeout)} 秒，` +
       (c.approval_grace ? `无人查看 ${Math.round(c.approval_grace)} 秒后放弃` : "无人查看也等到超时");
     case "workspace_writable": return c.workspace_writable ? "允许" : "关闭";

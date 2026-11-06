@@ -97,7 +97,7 @@ async def info(current: Current):
 
 
 @api.get("/config", response_model=ConfigView, tags=["本地 Agent"])
-async def config(current: Current):
+async def config(current: Current, workspace_id: UUID | None = None):
     """The resolved switches, so the browser is not blind to what the CLI prints."""
     settings = current.settings
     axes = settings.axes
@@ -108,6 +108,12 @@ async def config(current: Current):
     tools = len(current.runner.tools.registry.definitions())
     from chagent.tools.builtin import WRITE_TOOLS
     work_writable = WRITE_TOOLS <= {tool.name for tool in current.runner.tools.registry.definitions()}
+    container = None
+    if workspace_id is not None and settings.execution_profile == "host-controller":
+        root = next((root for root in current.roots if current._workspace_ids.get(root) == workspace_id), None)
+        if root is not None:
+            await current.workspace_id(root)
+            container = await current.runner.sandbox.container_detail(root)
     return {
         "provider": current.runner.model.provider, "model": current.runner.model.id,
         "run_timeout": current.runner.timeout,
@@ -121,6 +127,8 @@ async def config(current: Current):
         "approval": settings.approval, "approval_timeout": settings.approval_timeout,
         "approval_grace": settings.approval_unwatched_grace,
         "container_idle_seconds": settings.container_idle_seconds,
+        "container_state": container["state"] if container else None,
+        "image_stale": container["image_stale"] if container else None,
         "host_commands": current.runner.tools.allow_host_commands,
         "host_execution": current.runner.tools.registry.get("host_exec") is not None,
         "host_workspace_path": os.environ.get("CHAGENT_HOST_WORKSPACE_PATH", ""),

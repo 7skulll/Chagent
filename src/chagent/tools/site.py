@@ -106,16 +106,19 @@ class SiteTool(AgentTool):
                         "WHERE workspace_id=(SELECT id FROM workspaces WHERE root_path=%s)",
                         (str(fs.root),))
                 state = {"state": "stopped", "reason": "container_missing" if code else "container_stopped"}
-                return AgentToolResult(content=[TextContent(json.dumps({"url": None, "service": state}))],
-                                       details={"url": None, "service": state})
+                stale = (await self.sandbox.container_detail(fs.root))["image_stale"]
+                return AgentToolResult(content=[TextContent(json.dumps({"url": None, "service": state, "image_stale": stale}))],
+                                       details={"url": None, "service": state, "image_stale": stale})
         name = await self.sandbox.ensure_container(fs.root)
         current = await self._state(name)
         host_port = await self._port(name)
         url = f"http://127.0.0.1:{host_port}"
         if action == "status":
             await self._reconcile(fs.root, name, host_port, current)
-            return AgentToolResult(content=[TextContent(json.dumps({"url": url, "service": current}, ensure_ascii=False))],
+            stale = (await self.sandbox.container_detail(fs.root))["image_stale"]
+            return AgentToolResult(content=[TextContent(json.dumps({"url": url, "service": current, "image_stale": stale}, ensure_ascii=False))],
                                    details={"url": url, "service": current,
+                                            "image_stale": stale,
                                             "log": f"docker:{name}:/cache/site/chagent-site.log"})
         if action == "logs":
             code, output = await self.sandbox._docker("exec", name, "tail", "-c", "4000", "/cache/site/chagent-site.log")
@@ -125,6 +128,11 @@ class SiteTool(AgentTool):
         if action == "stop":
             if current and current.get("state") == "running":
                 await self.sandbox._docker("exec", name, "/bin/sh", "-c", 'kill -TERM "$1"', "sh", str(current["worker_pid"]))
+                for _ in range(30):
+                    await asyncio.sleep(0.1)
+                    observed = await self._state(name)
+                    if observed is None or observed.get("state") not in {"running", "starting"}:
+                        break
             await self._save(fs.root, name, (current or {}).get("command", ""),
                              (current or {}).get("actual_port", 1), host_port, "stopped")
             return AgentToolResult(content=[TextContent(f"Website stop requested. {url}")],
@@ -137,7 +145,7 @@ class SiteTool(AgentTool):
             if current and current.get("state") in {"running", "starting"}:
                 return AgentToolResult(content=[TextContent("A website is already running; inspect or stop it first.")],
                                        is_error=True, details={"url": url, "service": current})
-            parts = fs.parts(params.get("workdir", "."))
+            parts = fs.parts(params.get("workdir") or (current or {}).get("workdir", "."))
             with fs.directory(parts):
                 pass
             cwd = fs.root.joinpath(*parts)

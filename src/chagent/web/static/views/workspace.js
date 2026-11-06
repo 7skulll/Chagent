@@ -33,11 +33,30 @@ export function createWorkspaceView(ui) {
     const row = $("site-access");
     if (state.config?.controller !== "host-controller" || !workspace?.id) { row.hidden = true; return; }
     const result = await api(`/api/workspaces/${workspace.id}/site`);
-    if (result.service?.state !== "running") { row.hidden = true; return; }
-    $("site-link").href = result.url;
-    $("site-link").title = result.url;
+    const container = await api(`/api/workspaces/${workspace.id}/container`);
+    const running = result.service?.state === "running";
+    $("site-link").hidden = !running;
+    if (running) { $("site-link").href = result.url; $("site-link").title = result.url; }
+    $("site-state").textContent = running ? "运行中" : result.service?.state === "stopped" ? "已停止" : "状态未知";
+    $("site-restart").hidden = running;
+    $("site-stop").hidden = !running;
+    $("container-rebuild").hidden = !container.image_stale;
     row.hidden = false;
   }
+
+  on($("site-restart"), "click", async () => {
+    const workspace = state.currentWorkspace;
+    if (!workspace?.id) return;
+    try { await post(`/api/workspaces/${workspace.id}/site/restart`, {}); await loadSiteAccess(workspace); }
+    catch (error) { ui.showError(error); }
+  });
+
+  on($("container-rebuild"), "click", async () => {
+    const workspace = state.currentWorkspace;
+    if (!workspace?.id) return;
+    try { await post(`/api/workspaces/${workspace.id}/container/rebuild`, {}); await loadSiteAccess(workspace); }
+    catch (error) { ui.showError(error); }
+  });
 
   on($("site-stop"), "click", async () => {
     const workspace = state.currentWorkspace;

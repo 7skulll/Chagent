@@ -105,6 +105,7 @@ class ContainerLifecycleTests(TestCase):
             with TemporaryDirectory() as directory:
                 tool = SiteTool(sandbox, Database())
                 with patch.object(sandbox, "_docker", AsyncMock(return_value=(0, "false"))), \
+                     patch.object(sandbox, "container_detail", AsyncMock(return_value={"image_stale": False})), \
                      patch.object(sandbox, "ensure_container", AsyncMock()) as ensure:
                     result = await tool.execute("status", {"action": "status"},
                                                 context=ToolContext(workspace=Path(directory)))
@@ -133,6 +134,7 @@ class ContainerLifecycleTests(TestCase):
                     workspace_id=AsyncMock(), require_programming=AsyncMock(),
                     runner=SimpleNamespace(tools=SimpleNamespace(registry=SimpleNamespace(get=lambda _: tool))))
                 with patch.object(sandbox, "_docker", AsyncMock(return_value=(0, "false"))), \
+                     patch.object(sandbox, "container_detail", AsyncMock(return_value={"image_stale": False})), \
                      patch.object(sandbox, "ensure_container", AsyncMock()) as ensure:
                     result = await workspace_site(workspace_id, current)
                 self.assertEqual(result["service"]["state"], "stopped")

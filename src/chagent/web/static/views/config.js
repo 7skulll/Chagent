@@ -11,7 +11,8 @@ import { usageTable } from "../render/usage.js";
 
 export function createConfigView(ui) {
   async function loadConfig() {
-    const config = await api("/api/config");
+    const workspaceId = ui.state.currentWorkspace?.id;
+    const config = await api(`/api/config${workspaceId ? `?workspace_id=${workspaceId}` : ""}`);
     const target = $("config-list"); target.replaceChildren();
     for (const [key, label] of CONFIG_LABELS) {
       target.append(textNode("dt", label), textNode("dd", configValue(key, config)));

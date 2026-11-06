@@ -93,14 +93,80 @@ class Sandbox:
     async def _touch_container(self, root: Path, name: str, image_id: str) -> None:
         if self.database is None:
             return
+        stale = await self.image_stale(image_id)
+        state = "stale_image" if stale else "ready"
         async with self.database.connection() as connection:
             await connection.execute(
                 "INSERT INTO workspace_containers (workspace_id,container_name,image_id,state,last_used_at) "
-                "SELECT w.id,%s,%s,'ready',now() FROM workspaces w "
+                "SELECT w.id,%s,%s,%s,now() FROM workspaces w "
                 "JOIN workspace_bindings b ON b.workspace_id=w.id AND b.state='active' "
                 "WHERE w.root_path=%s ON CONFLICT (workspace_id) DO UPDATE SET "
-                "container_name=EXCLUDED.container_name,image_id=EXCLUDED.image_id,state='ready',last_used_at=now()",
-                (name, image_id, str(root)))
+                "container_name=EXCLUDED.container_name,image_id=EXCLUDED.image_id,"
+                "state=EXCLUDED.state,last_used_at=now()",
+                (name, image_id, state, str(root)))
+
+    async def image_stale(self, container_image_id: str) -> bool:
+        image = os.environ.get("CHAGENT_EXECUTOR_IMAGE", "chagent:local")
+        code, current = await self._docker("image", "inspect", image, "--format", "{{.Id}}")
+        if code:
+            raise RuntimeError("Configured executor image is unavailable")
+        return current.strip() != container_image_id
+
+    async def container_detail(self, workspace: Path) -> dict:
+        root = validate_workspace(Path(workspace))
+        name = self.container_name(root)
+        code, raw = await self._docker("inspect", name, "--format", "{{json .}}")
+        if code:
+            return {"container_name": name, "state": "missing", "image_stale": False,
+                    "image_id": None, "running": False}
+        details = json.loads(raw)
+        image_id = details.get("Image", "")
+        return {"container_name": name,
+                "state": "running" if details.get("State", {}).get("Running") else "stopped",
+                "image_stale": await self.image_stale(image_id), "image_id": image_id,
+                "running": bool(details.get("State", {}).get("Running")),
+                "started_at": details.get("State", {}).get("StartedAt")}
+
+    async def rebuild_container(self, workspace: Path, workspace_id, database) -> str:
+        """Explicit replacement; refuse all active work and retain the cache volume."""
+        root = validate_workspace(Path(workspace))
+        name = self.container_name(root)
+        async with self._lease_lock(name):
+            if self._site_uses.get(name) or name in self._run_containers.values():
+                raise RuntimeError("Workspace container is in use")
+            async with self._locks.setdefault(name, asyncio.Lock()):
+                async with database.connection() as connection:
+                    cursor = await connection.execute(
+                        "SELECT EXISTS (SELECT 1 FROM runs r JOIN sessions s ON s.id=r.session_id "
+                        "WHERE s.workspace_id=%s AND r.status IN ('queued','running')) AS active_run, "
+                        "EXISTS (SELECT 1 FROM workspace_services "
+                        "WHERE workspace_id=%s AND status IN ('starting','running')) AS active_site",
+                        (workspace_id, workspace_id))
+                    guard = await cursor.fetchone()
+                if guard["active_run"] or guard["active_site"]:
+                    raise RuntimeError("Stop the active run or website before rebuilding")
+                image = os.environ.get("CHAGENT_EXECUTOR_IMAGE", "chagent:local")
+                image_code, _ = await self._docker("image", "inspect", image, "--format", "{{.Id}}")
+                if image_code:
+                    raise RuntimeError("Configured executor image is unavailable")
+                code, raw = await self._docker("inspect", name, "--format", "{{json .}}")
+                if code == 0:
+                    details = json.loads(raw)
+                    expected_hash = sha256(os.fsencode(root)).hexdigest()
+                    mounts = details.get("Mounts") or []
+                    if (details.get("Config", {}).get("Labels", {}).get("chagent.workspace") != expected_hash
+                            or not any(m.get("Type") == "bind" and m.get("Source") == str(root)
+                                       and m.get("Destination") == str(root) for m in mounts)):
+                        raise RuntimeError("Container identity does not match this workspace")
+                    if details.get("State", {}).get("Running") and await self._site_worker_running(name):
+                        raise RuntimeError("Stop the website before rebuilding")
+                    code, output = await self._docker("rm", "-f", name)
+                    if code:
+                        raise RuntimeError("Could not remove old workspace container: " + output[-200:])
+                async with database.connection() as connection:
+                    await connection.execute("UPDATE workspace_containers SET state='reaped' WHERE workspace_id=%s",
+                                             (workspace_id,))
+        return await self.ensure_container(root)
 
     @classmethod
     def from_settings(cls, settings) -> "Sandbox":

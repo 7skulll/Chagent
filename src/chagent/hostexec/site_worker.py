@@ -40,12 +40,13 @@ async def main():
         parser.error("Site port must be 1–65535 and not the reserved proxy port 18080")
     STATUS.parent.mkdir(parents=True, exist_ok=True)
     worker_start = process_start(os.getpid())
+    workdir = os.getcwd()
     with LOG.open("ab", buffering=0) as log:
         child = await asyncio.create_subprocess_exec("/bin/sh", "-c", args.command,
             stdin=asyncio.subprocess.DEVNULL, stdout=log, stderr=log,
             start_new_session=True)
         write_status(state="starting", worker_pid=os.getpid(), worker_start=worker_start, child_pid=child.pid,
-                     actual_port=args.port, command=args.command)
+                     actual_port=args.port, command=args.command, workdir=workdir)
 
         async def handle(client_reader, client_writer):
             try:
@@ -58,7 +59,7 @@ async def main():
 
         server = await asyncio.start_server(handle, "0.0.0.0", 18080)
         write_status(state="running", worker_pid=os.getpid(), worker_start=worker_start, child_pid=child.pid,
-                     actual_port=args.port, command=args.command)
+                     actual_port=args.port, command=args.command, workdir=workdir)
         try:
             stopping = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -84,7 +85,7 @@ async def main():
             server.close()
             await server.wait_closed()
             write_status(state="stopped", worker_pid=os.getpid(), worker_start=worker_start, child_pid=child.pid,
-                         actual_port=args.port, command=args.command, exit_code=child.returncode)
+                         actual_port=args.port, command=args.command, workdir=workdir, exit_code=child.returncode)
 
 
 if __name__ == "__main__":

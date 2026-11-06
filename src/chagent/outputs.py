@@ -4,12 +4,15 @@ A staged intent is durable before disk mutation. A process crash between disk
 and DB commit is reported as staged/unknown and never automatically replayed.
 """
 import asyncio
+import logging
 from hashlib import sha256
 from pathlib import PurePosixPath
 from uuid import uuid4
 
 from chagent.files import FileService, FileConflict
 from chagent.tools.workspace import coordinated
+
+logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_BYTES = 20 * 1024 * 1024
 
@@ -172,4 +175,15 @@ class OutputService:
             raise FileConflict('文件再次变化，旧确认失效；请查看新版本并重新确认')
         if updated['status']=='expired':
             raise FileConflict('确认已超时，未写入；请重新提交输出')
+        if updated['status']=='committed' and row['run_id'] is not None and row['source'].startswith('container:'):
+            from chagent.storage.repositories import RunRepository
+            try:
+                await RunRepository(self.database).audit_event(row['run_id'], 'file_collected', {
+                    'status': 'committed', 'output_id': str(identity),
+                    'container_path': row['source'].removeprefix('container:'),
+                    'workspace_path': updated['output_path'], 'size': row['size'],
+                    'sha256': row['content_hash'],
+                })
+            except Exception as error:
+                logger.warning('Could not audit confirmed container output (%s)', type(error).__name__)
         return public(updated)

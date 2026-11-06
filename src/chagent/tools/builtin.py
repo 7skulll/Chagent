@@ -32,6 +32,7 @@ from chagent.tools.web import WebAccess, create_web_tools
 from chagent.tools.host import HostExecTool
 from chagent.hostexec.native import NativeHostExecTool, NativeHostProcessTool
 from chagent.tools.site import SiteTool
+from chagent.tools.collect_file import CollectFileTool
 
 
 #: Tools that change files in the workspace. Shared by both modes; what a
@@ -113,6 +114,7 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
             registry.register(NativeHostExecTool(artifacts.database, processes))
             registry.register(NativeHostProcessTool(artifacts.database, processes))
             registry.register(SiteTool(sandbox, artifacts.database))
+            registry.register(CollectFileTool(sandbox, artifacts.database))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
         if allow_workspace_writes and not readonly_code:

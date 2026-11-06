@@ -49,6 +49,38 @@ async def containers(current: deps.Current):
     return {"items": await current.runner.sandbox.container_inventory(current.runner.runs.database)}
 
 
+@router.get("/workspaces/{workspace_id}/container")
+async def workspace_container(workspace_id: UUID, current: deps.Current):
+    if current.settings.execution_profile != "host-controller":
+        raise HTTPException(404, "Container management requires the host controller")
+    root = next((root for root in current.roots if current._workspace_ids.get(root) == workspace_id), None)
+    if root is None:
+        raise HTTPException(404, "Workspace is not open")
+    await current.workspace_id(root)
+    detail = await current.runner.sandbox.container_detail(root)
+    async with current.runner.runs.database.connection() as connection:
+        cursor = await connection.execute(
+            "SELECT last_used_at FROM workspace_containers WHERE workspace_id=%s", (workspace_id,))
+        row = await cursor.fetchone()
+    return {**detail, "idle_seconds": current.settings.container_idle_seconds,
+            "last_used_at": row["last_used_at"] if row else None}
+
+
+@router.post("/workspaces/{workspace_id}/container/rebuild")
+async def rebuild_workspace_container(workspace_id: UUID, current: deps.Current):
+    if current.settings.execution_profile != "host-controller":
+        raise HTTPException(404, "Container management requires the host controller")
+    root = next((root for root in current.roots if current._workspace_ids.get(root) == workspace_id), None)
+    if root is None:
+        raise HTTPException(404, "Workspace is not open")
+    await current.require_programming(root)
+    try:
+        name = await current.runner.sandbox.rebuild_container(root, workspace_id, current.runner.runs.database)
+    except RuntimeError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"container_name": name, "state": "running"}
+
+
 @router.post("/workspaces", response_model=WorkspaceView, status_code=201)
 async def open_workspace(value: WorkspaceCreate, current: deps.Current):
     """Open one directory; from then on requests may name it as their workspace."""
@@ -88,4 +120,26 @@ async def stop_workspace_site(workspace_id: UUID, current: deps.Current):
     await current.require_programming(root)
     site = current.runner.tools.registry.get("site")
     result = await site.execute("web-stop", {"action": "stop"}, context=ToolContext(workspace=root))
+    return result.details
+
+
+@router.post("/workspaces/{workspace_id}/site/restart")
+async def restart_workspace_site(workspace_id: UUID, current: deps.Current):
+    if current.settings.execution_profile != "host-controller":
+        raise HTTPException(404, "Site management requires the host controller")
+    root = next((root for root in current.roots if current._workspace_ids.get(root) == workspace_id), None)
+    if root is None:
+        raise HTTPException(404, "Workspace is not open")
+    await current.require_programming(root)
+    async with current.runner.runs.database.connection() as connection:
+        cursor = await connection.execute(
+            "SELECT command,internal_port,status FROM workspace_services WHERE workspace_id=%s", (workspace_id,))
+        saved = await cursor.fetchone()
+    if not saved or not saved["command"]:
+        raise HTTPException(409, "No saved website command is available")
+    site = current.runner.tools.registry.get("site")
+    result = await site.execute("web-restart", {"action": "start", "command": saved["command"],
+                        "port": saved["internal_port"]}, context=ToolContext(workspace=root))
+    if result.is_error:
+        raise HTTPException(409, result.content[0].text)
     return result.details
