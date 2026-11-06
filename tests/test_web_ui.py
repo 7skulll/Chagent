@@ -113,11 +113,11 @@ class WebSurfaceTests(unittest.TestCase):
 
     def test_button_surface_is_pinned(self):
         # The original 50 controls plus six functional rail shortcuts, the
-        # sidebar search disclosure, and the four in-page directory picker
-        # controls that stand in where the host has no system dialog. Every
+        # sidebar search disclosure, four in-page directory picker controls,
+        # and the task-history disclosure. Every
         # added button must still pass the handler check above; this count only
         # prevents accidental duplicates.
-        self.assertEqual(len(self.page.buttons), 59)
+        self.assertEqual(len(self.page.buttons), 60)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)

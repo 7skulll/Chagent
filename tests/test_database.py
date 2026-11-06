@@ -1,10 +1,14 @@
 """Opt-in PostgreSQL checks, isolated in a fresh schema for every test."""
 
 import asyncio
+from hashlib import sha256
 import os
 import sys
 from importlib.resources import files
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 from psycopg import AsyncConnection, errors, sql
@@ -48,6 +52,69 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT count(*) AS total FROM schema_migrations")
             self.assertEqual((await cursor.fetchone())["total"], expected)
+
+    async def test_mount_rotation_never_reuses_legacy_or_other_host_identity(self):
+        from chagent.storage.repositories import ConversationRepository
+        from chagent.storage.memories import MemoryRepository
+        from chagent.domain.memories import MemoryProposal
+        from chagent.sessions.errors import SessionNotFoundError
+        await migrate(self.database)
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            legacy_id, legacy_session = uuid4(), uuid4()
+            async with self.database.connection() as connection:
+                await connection.execute("INSERT INTO workspaces (id, root_path) VALUES (%s, %s)",
+                                         (legacy_id, str(runtime)))
+                await connection.execute("INSERT INTO sessions (id, workspace_id) VALUES (%s, %s)",
+                                         (legacy_session, legacy_id))
+            repository = ConversationRepository(self.database)
+            with patch.dict(os.environ, {"CHAGENT_WORKSPACE_ROOT": str(runtime),
+                                      "CHAGENT_HOST_WORKSPACE_PATH": "/host/project-a"}):
+                first = await repository.create_session(runtime)
+                first_id = (await repository.get_session(first)).workspace_id
+                remembered = await MemoryRepository(self.database).propose(
+                    MemoryProposal("project.identity", "belongs to project A", origin="manual"), first_id)
+                self.assertNotEqual(first_id, legacy_id)
+                with self.assertRaises(SessionNotFoundError):
+                    await repository.get_session(legacy_session)
+            with patch.dict(os.environ, {"CHAGENT_WORKSPACE_ROOT": str(runtime),
+                                      "CHAGENT_HOST_WORKSPACE_PATH": "/host/project-b"}):
+                second = await repository.create_session(runtime)
+                second_id = (await repository.get_session(second)).workspace_id
+                self.assertNotEqual(second_id, first_id)
+                self.assertEqual(await MemoryRepository(self.database).recall(second_id, ["identity"]), [])
+                with self.assertRaises(SessionNotFoundError):
+                    await repository.get_session(first)
+                self.assertEqual([item.id for item in (await repository.list_sessions(workspace=runtime)).items], [second])
+            with patch.dict(os.environ, {"CHAGENT_WORKSPACE_ROOT": str(runtime),
+                                      "CHAGENT_HOST_WORKSPACE_PATH": "/host/project-a"}):
+                resumed = await repository.create_session(runtime)
+                self.assertEqual((await repository.get_session(resumed)).workspace_id, first_id)
+                self.assertEqual([item.id for item in await MemoryRepository(self.database).recall(first_id, ["identity"])], [remembered.id])
+            async with self.database.connection() as connection:
+                cursor = await connection.execute("SELECT binding_status FROM workspaces WHERE id = %s", (legacy_id,))
+                self.assertEqual((await cursor.fetchone())["binding_status"], "unbound")
+
+    async def test_migration_quarantines_legacy_user_memory(self):
+        migrations = files("chagent.storage").joinpath("migrations")
+        async with self.database.transaction() as connection:
+            await connection.execute("CREATE TABLE schema_migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())")
+            for path in sorted(migrations.iterdir(), key=lambda item: item.name):
+                if not path.name.endswith(".sql") or path.name >= "0020":
+                    continue
+                source = path.read_text(encoding="utf-8")
+                await connection.execute(source)
+                await connection.execute("INSERT INTO schema_migrations (name, checksum) VALUES (%s, %s)",
+                                         (path.name, sha256(source.encode()).hexdigest()))
+            legacy_id, memory_id = uuid4(), uuid4()
+            await connection.execute("INSERT INTO workspaces (id, root_path) VALUES (%s, '/workspaces')", (legacy_id,))
+            await connection.execute("INSERT INTO memories (id, scope, key, content, content_hash, status, origin) VALUES (%s, 'user', 'response.language', 'legacy preference', 'digest', 'active', 'manual')", (memory_id,))
+        self.assertEqual(await migrate(self.database), ["0020_workspace_host_identity.sql", "0021_memory_usage_index.sql", "0022_task_history.sql"])
+        async with self.database.connection() as connection:
+            cursor = await connection.execute("SELECT status, revision FROM memories WHERE id = %s", (memory_id,))
+            self.assertEqual(tuple((await cursor.fetchone()).values()), ("quarantined", 2))
+            cursor = await connection.execute("SELECT binding_status FROM workspaces WHERE id = %s", (legacy_id,))
+            self.assertEqual((await cursor.fetchone())["binding_status"], "unbound")
 
     async def test_run_owner_token_and_expired_lease_reject_writes_and_renewal(self):
         from pathlib import Path

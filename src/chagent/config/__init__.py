@@ -58,6 +58,8 @@ class Settings:
     # tools run inside the agent process, so the sandbox does not apply to them
     # and this switch is the only gate on leaving the machine.
     web_access: str = "off"
+    #: Index large, late-needed tools instead of declaring them every request.
+    deferred_tools: bool = True
     #: Its own name, not ``DEEPSEEK_API_KEY``: the search key is a separate
     #: credential even when the same value is used for both. ``from_env`` falls
     #: back to the provider key so one key is enough to try it.
@@ -127,6 +129,8 @@ class Settings:
             raise ValueError("CHAGENT_MEMORY_WORKER_CONCURRENCY must be an integer between 1 and 4")
         if not isinstance(self.sandbox_writable, bool):
             raise ValueError("CHAGENT_SANDBOX_WRITABLE must be true or false")
+        if not isinstance(self.deferred_tools, bool):
+            raise ValueError("CHAGENT_DEFERRED_TOOLS must be true or false")
         if not math.isfinite(self.approval_timeout) or self.approval_timeout <= 0:
             raise ValueError("CHAGENT_APPROVAL_TIMEOUT must be finite and positive")
         if not math.isfinite(self.approval_unwatched_grace) or self.approval_unwatched_grace < 0:
@@ -183,6 +187,9 @@ class Settings:
         container_declared = values.get("CHAGENT_CONTAINER_DECLARED", "false").lower()
         if container_declared not in {"true", "false"}:
             raise ValueError("CHAGENT_CONTAINER_DECLARED must be true or false")
+        deferred_tools = values.get("CHAGENT_DEFERRED_TOOLS", "true").lower()
+        if deferred_tools not in {"true", "false"}:
+            raise ValueError("CHAGENT_DEFERRED_TOOLS must be true or false")
         return cls(
             execution_profile=values.get("CHAGENT_EXECUTION_PROFILE", "configured").strip().lower(),
             container_declared=container_declared == "true",
@@ -205,6 +212,7 @@ class Settings:
             max_processes=int(values.get("CHAGENT_MAX_PROCESSES", "4")),
             process_timeout=float(values.get("CHAGENT_PROCESS_TIMEOUT", "600")),
             web_access=values.get("CHAGENT_WEB_ACCESS", "off").strip().lower(),
+            deferred_tools=deferred_tools == "true",
             **_search_api_key(values),
             code_mode=code_mode == "on",
         )

@@ -53,7 +53,7 @@ class ToolExecutor:
             effective_timeout = min(self.ceiling, max(self.timeout, requested or self.timeout))
             async with asyncio.timeout(effective_timeout):
                 execution_started = True
-                if tool.requires_workspace:
+                if tool.requires_workspace or tool.requires_run_context:
                     result = await tool.execute(call.id, deepcopy(arguments), signal=signal,
                                                 on_update=on_update, context=context)
                 else:

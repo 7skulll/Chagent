@@ -1463,7 +1463,17 @@ async function loadMemories(append = false) {
         for (const revision of revisions) source.append(textNode("pre", `v${revision.revision} ${revision.action}\n${revision.payload.content}`));
       } catch (error) { memoryNotice(error.message, true); }
     });
-    source.append(history); card.append(source);
+    source.append(history);
+    const usage = textNode("button", "查看使用情况", "quiet");
+    usage.addEventListener("click", async () => {
+      try {
+        const result = await api(withWorkspace(`/api/memories/${memory.id}/usage`));
+        const recent = result.last_injected_at ? new Date(result.last_injected_at).toLocaleString() : "尚未使用";
+        source.append(textNode("p", `注入 ${result.injection_count} 次；最近：${recent}；修正 ${result.correction_count} 次`, "muted"));
+        usage.remove();
+      } catch (error) { memoryNotice(error.message, true); }
+    });
+    source.append(usage); card.append(source);
     if (memory.status === "candidate") {
       const detail = await api(withWorkspace(`/api/memories/${memory.id}`));
       if (version !== memoryState.version) return;
@@ -1502,6 +1512,33 @@ async function loadMemories(append = false) {
 }
 $("open-memory").addEventListener("click", () => {
   $("memory-dialog").showModal(); memoryNotice(""); loadMemories().catch(error => memoryNotice(error.message, true));
+});
+$("task-history-button").addEventListener("click", async () => {
+  const list = $("task-history-list");
+  if (!list.hidden) { list.hidden = true; return; }
+  try {
+    const page = await api(withWorkspace("/api/task-history"));
+    list.replaceChildren(textNode("p", "以下是历史任务线索；项目现状请重新核实。", "muted"));
+    if (!page.items.length) list.append(textNode("p", "暂无任务经历。", "muted"));
+    for (const item of page.items) {
+      const card = document.createElement("article"); card.className = "memory-card";
+      card.append(textNode("div", item.request_excerpt, "memory-body"));
+      const open = textNode("button", "查看来源与结果", "quiet");
+      open.addEventListener("click", async () => {
+        try {
+          const detail = await api(withWorkspace(`/api/task-history/${item.run_id}`));
+          card.append(textNode("pre", JSON.stringify({session_id: detail.session_id,
+            user_message_id: detail.user_message_id, answer_message_id: detail.answer_message_id,
+            run_outcome: detail.run_outcome, task_completion: detail.task_completion,
+            task_state: detail.task_state, request: detail.request_detail,
+            answer: detail.answer_detail}, null, 2)));
+          open.remove();
+        } catch (error) { memoryNotice(error.message, true); }
+      });
+      card.append(open); list.append(card);
+    }
+    list.hidden = false;
+  } catch (error) { memoryNotice(error.message, true); }
 });
 $("close-memory").addEventListener("click", () => $("memory-dialog").close());
 $("new-memory").addEventListener("click", () => editMemory());

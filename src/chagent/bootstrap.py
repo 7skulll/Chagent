@@ -38,6 +38,8 @@ def _tool_faces(
     unified: bool = False,
     containerized: bool = False,
     host_exec: tuple[str, str] | None = None,
+    defer_tools: bool = False,
+    history_tools: bool = True,
 ) -> dict[str, ToolExecutor]:
     """Build a unified executor or diagnostic mode-specific executors.
 
@@ -75,7 +77,7 @@ def _tool_faces(
             process_stdin=process_stdin, versioned_files=versioned_files,
             artifacts=ArtifactRepository(database), sandbox=sandbox,
             processes=processes, web=web, include_echo=include_echo,
-            host_exec=host_exec,
+            host_exec=host_exec, defer_tools=defer_tools, history_tools=history_tools,
         )
         faces[mode] = ToolExecutor(registry, allow_host_commands=allow_host_commands)
     if unified:
@@ -105,6 +107,7 @@ def create_demo_runner(
     work_only: bool = False,
     allow_workspace_writes: bool = True,
     versioned_files: bool = False,
+    defer_tools: bool = False,
 ) -> AgentRunner:
     return create_runner(
         database, Model(id="fake-echo", provider="local-test", api="fake", context_window=12_288, max_tokens=512),
@@ -126,6 +129,8 @@ def create_demo_runner(
         # ``create_builtin_registry``, not here.
         code_mode=not work_only, single_face=not work_only,
         allow_workspace_writes=allow_workspace_writes, versioned_files=versioned_files,
+        defer_tools=defer_tools,
+        history_tools=False,
         # ``echo`` is the neutral tool that needs no filesystem: this is the only
         # path that gets it.
         include_echo=True,
@@ -159,6 +164,8 @@ def create_runner(
     unified: bool = False,
     containerized: bool = False,
     host_exec: tuple[str, str] | None = None,
+    defer_tools: bool = False,
+    history_tools: bool = True,
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -169,11 +176,12 @@ def create_runner(
                         sandbox=sandbox, processes=processes, web=web, include_echo=include_echo,
                         single_face=single_face, allow_workspace_writes=allow_workspace_writes,
                         process_stdin=process_stdin, versioned_files=versioned_files,
-                        unified=unified, containerized=containerized, host_exec=host_exec)
+                        unified=unified, containerized=containerized, host_exec=host_exec,
+                        defer_tools=defer_tools, history_tools=history_tools)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))
-    builder = BasicContextBuilder(policy=context_policy,
+    builder = BasicContextBuilder(policy=context_policy or ContextPolicy.from_env(),
                                   counter=token_counter or select_counter(model))
     conversations, runs = ConversationRepository(database), RunRepository(database)
     jobs = MemoryJobRepository(database)

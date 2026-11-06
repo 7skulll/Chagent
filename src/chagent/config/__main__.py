@@ -20,6 +20,7 @@ from psycopg.conninfo import conninfo_to_dict
 from chagent.config import Settings
 from chagent.config import dotenv
 from chagent.context.tokens import select_counter
+from chagent.domain.context import DEFAULT_OUTPUT_RESERVATION, ContextPolicy
 from chagent.diagnostics.behavior import describe as describe_behavior
 from chagent.domain.summaries import CompactionPolicy
 from chagent.models.settings import ModelConfigurationError, ModelSettings
@@ -81,6 +82,24 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
                                   f"speculative={str(compaction.speculative).lower()}"
                                   + (f"/{compaction.speculative_trigger:g}" if compaction.speculative else "")
                                   + f" fresh_window={compaction.fresh_window}")
+    try:
+        context_policy = ContextPolicy.from_env(env)
+        # The reserved amount is what the request actually asks for, which is not
+        # CHAGENT_MAX_TOKENS once there is a calibrated ceiling: printing only the
+        # ceiling would misreport the budget this process will use.
+        reserved = (context_policy.reservation(model.model()) if model is not None
+                    else context_policy.output_tokens or DEFAULT_OUTPUT_RESERVATION)
+        ceiling = context_policy.output_tokens or (
+            f"min(max_tokens, {DEFAULT_OUTPUT_RESERVATION})" if model is not None
+            else DEFAULT_OUTPUT_RESERVATION)
+        sections["context"] = (f"output_reserved={reserved} of {ceiling} "
+                               f"safety={context_policy.safety_tokens} "
+                               f"max_history={context_policy.max_history_messages} "
+                               f"max_tool_result={context_policy.max_tool_result_tokens}")
+    except ValueError as error:
+        problems.append(f"context: {error}")
+    if settings is not None:
+        sections["tools"] = f"deferred={str(settings.deferred_tools).lower()}"
     sections["env_file"] = (f"{env_file.resolve()} ({len(file_env)} keys)" if file_env
                             else f"none ({env_file})")
     sections["shadowed"] = dotenv.describe(dotenv.shadowed(env, file_env))

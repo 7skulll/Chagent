@@ -216,14 +216,16 @@ class RunStateTests(unittest.IsolatedAsyncioTestCase):
         self.runner.conversations.messages = AsyncMock(wraps=original)
         self.runner.conversations.task_state = AsyncMock(wraps=self.runner.conversations.task_state)
         self.runner.context_manager.summaries.latest = AsyncMock(wraps=self.runner.context_manager.summaries.latest)
-        self.runner.tools.registry.definitions = Mock(wraps=self.runner.tools.registry.definitions)
+        # The declared face is built once per run; a per-turn rebuild would copy
+        # every schema again for a prefix that has not changed.
+        self.runner.tools.registry.declarations = Mock(wraps=self.runner.tools.registry.declarations)
         states = self.capture_states()
         result = await self.runner.run(self.session, "eight tool steps")
         self.assertEqual(len(self.runner.client.requests), 9)
         self.assertEqual(self.runner.conversations.messages.await_count, 1)
         self.assertEqual(self.runner.conversations.task_state.await_count, 1)
         self.assertEqual(self.runner.context_manager.summaries.latest.await_count, 1)
-        self.assertEqual(self.runner.tools.registry.definitions.call_count, 1)
+        self.assertEqual(self.runner.tools.registry.declarations.call_count, 1)
         self.assertTrue(all(state is states[0] for state in states))
         self.assertEqual(states[0].history, await original(self.session, current_run=result.run_id, project_artifacts=True))
         await self.ending(result.run_id, "completed", "model_stop")

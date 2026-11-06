@@ -149,7 +149,8 @@ class AgentRunner:
                 # Explicit memories are deterministic; automatic extraction only
                 # enqueues a job so this answer never waits for a second model call.
                 await self.memory_service.on_completed(
-                    connection, session_id, run_id, state=state, has_answer=result.message is not None)
+                    connection, session_id, run_id, state=state, has_answer=result.message is not None,
+                    end_reason=result.end_reason)
             await self.runs.finish(run_id, "completed", end_reason=result.end_reason,
                                    on_completed=commit if self.memory_service is not None else None)
             if self.memory_worker is not None and result.message is not None:
@@ -333,27 +334,35 @@ class AgentRunner:
         prompt_mode = self.prompt_mode_for(state.session.mode)
         tool_context = ToolContext(
             workspace=state.session.workspace, session_id=session_id, run_id=run_id,
-            workspace_identity=state.workspace_identity,
+            workspace_identity=state.workspace_identity, deferred=state.deferred,
         )
         for iteration in range(self.max_turns):
             from chagent.tools.workspace import WorkspaceFS
             WorkspaceFS(state.session.workspace, expected_identity=state.workspace_identity)
             state.iteration = iteration
-            if state.tool_revision != executor.registry.revision:
-                state.tools = executor.registry.definitions()
-                state.tool_revision = executor.registry.revision
+            # The declared face, not the registry, decides the prefix: a tool the
+            # model loaded through tool_search changes it just as a registry change
+            # would, and neither may go unnoticed. The key is O(1) so an unchanged
+            # face costs nothing per turn.
+            key = (executor.registry.revision, len(state.deferred.names))
+            if key != state.declared_key:
+                state.tools = executor.registry.declarations(state.deferred.names)
+                state.declared_key = key
+                state.tool_revision += 1
                 state.context_revision += 1
                 # Tool declarations live in the system message; a new set means
                 # the anchor describes a prompt this run will never send again.
                 state.observed = None
             try:
                 if self.context_manager is not None:
-                    built = await self.context_manager.prepare(session_id, run_id, self.model, self.client,
-                                                                state.tools, state=state, prompt_mode=prompt_mode)
+                    built = await self.context_manager.prepare(
+                        session_id, run_id, self.model, self.client, state.tools, state=state,
+                        prompt_mode=prompt_mode, deferred=executor.registry.deferred_index())
                 else:
                     built = await self.context.build(state.history, self.model, state.tools,
                                                      task_state=state.task_state, current_run_id=run_id,
-                                                     recovery=state.recovery, environment=state.environment)
+                                                     recovery=state.recovery, environment=state.environment,
+                                                     deferred=executor.registry.deferred_index())
             except ContextBudgetError as error:
                 await self.runs.event(run_id, "context_rejected", {
                     "reason": str(error), "required_tokens": error.required_tokens,

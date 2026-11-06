@@ -22,3 +22,4 @@ dist/
 # Documents uploaded from the page land in <workspace>/uploads. When the
 # workspace is this checkout, they are the user's files, never project content.
 /uploads/
+/.backups/

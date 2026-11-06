@@ -78,7 +78,7 @@ class UsageRepository:
                 " FROM runs r JOIN sessions s ON s.id = r.session_id "
                 " JOIN workspaces w ON w.id = s.workspace_id "
                 " LEFT JOIN model_calls m ON m.run_id = r.id "
-                " WHERE r.started_at >= date_trunc('day', now()) - make_interval(days => %s)" + clause +
+                " WHERE w.binding_status = 'bound' AND r.started_at >= date_trunc('day', now()) - make_interval(days => %s)" + clause +
                 " GROUP BY 1 ORDER BY 1 DESC", params)
             items = [{"day": row["day"], **self._row(row)} for row in await cursor.fetchall()]
         return {"days": days, "items": items, "totals": self.totals(items)}

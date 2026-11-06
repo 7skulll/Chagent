@@ -60,6 +60,32 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()["id"]
 
+    async def test_memory_usage_endpoint_reports_snapshot_reads(self):
+        created = await self.client.post("/api/memories", json={"key": "project.database", "content": "数据库使用 PostgreSQL", "scope": "workspace", "pinned": False})
+        self.assertEqual(created.status_code, 201, created.text)
+        memory_id = created.json()["id"]
+        session_id = await self.create_session()
+        started = await self.client.post(f"/api/sessions/{session_id}/runs", json={"text": "数据库如何配置？"})
+        self.assertEqual(started.status_code, 202, started.text)
+        await self.wait_run(started.json()["run_id"])
+        usage = await self.client.get(f"/api/memories/{memory_id}/usage")
+        self.assertEqual(usage.status_code, 200, usage.text)
+        self.assertEqual(usage.json()["injection_count"], 1)
+
+    async def test_task_history_routes_are_workspace_scoped(self):
+        session_id = await self.create_session()
+        started = await self.client.post(f"/api/sessions/{session_id}/runs", json={"text": "检查数据库迁移"})
+        self.assertEqual(started.status_code, 202, started.text)
+        run_id = started.json()["run_id"]
+        await self.wait_run(run_id)
+        page = await self.client.get("/api/task-history", params={"query": "数据库"})
+        self.assertEqual(page.status_code, 200, page.text)
+        self.assertEqual([item["run_id"] for item in page.json()["items"]], [run_id])
+        detail = await self.client.get(f"/api/task-history/{run_id}")
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(detail.json()["session_id"], session_id)
+        self.assertIn("检查数据库迁移", detail.json()["request_detail"])
+
     async def wait_run(self, identity):
         async with asyncio.timeout(5):
             while True:

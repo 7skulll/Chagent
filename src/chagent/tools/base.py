@@ -50,6 +50,11 @@ class AgentTool(Tool, ABC):
     replay: Literal["never", "safe"] = "never"
     execution_mode: ToolExecutionMode = "sequential"
     requires_workspace: bool = False
+    #: Needs the run's context without touching its workspace — today only the
+    #: tool loader, which records what it loaded into the run state. Declared
+    #: rather than assumed: a tool that does not declare it is handed None and
+    #: therefore cannot quietly start depending on the session.
+    requires_run_context: bool = False
     requires_host_execution: bool = False
     # A successful call means the workspace changed, so earlier identical calls
     # are no longer the same attempt (see tools/progress.py). Declared by the

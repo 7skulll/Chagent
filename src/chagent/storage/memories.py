@@ -37,7 +37,7 @@ class MemoryRepository:
         return Memory(**row)
 
     async def list(self, workspace_id, *, status="active", limit=50, before=None):
-        if status not in {"active", "candidate", "deleted", "rejected", "all"} or not 1 <= limit <= 100:
+        if status not in {"active", "candidate", "deleted", "rejected", "quarantined", "all"} or not 1 <= limit <= 100:
             raise ValueError("Invalid memory list bounds")
         if before is not None:
             await self.get(before, workspace_id)
@@ -170,14 +170,43 @@ class MemoryRepository:
             cursor = await connection.execute("SELECT revision, action, payload, created_at FROM memory_revisions WHERE memory_id = %s ORDER BY revision DESC LIMIT 100", (identity,))
             return await cursor.fetchall()
 
-    async def recall(self, workspace_id, terms, limit=8):
+    async def recall(self, workspace_id, terms, limit=8, *, workspace_slots=None):
+        workspace_slots = max(1, limit - 2) if workspace_slots is None else workspace_slots
         async with self.database.connection() as connection:
             cursor = await connection.execute(
-                "SELECT m.* FROM memories m WHERE status = 'active' AND (scope = 'user' OR workspace_id = %s) "
-                "AND NOT (scope = 'user' AND EXISTS (SELECT 1 FROM memories w WHERE w.workspace_id = %s AND w.status = 'active' AND w.key = m.key)) "
-                "AND (pinned OR scope = 'user' OR EXISTS (SELECT 1 FROM memories u WHERE u.scope = 'user' AND u.status = 'active' AND u.key = m.key) "
-                "OR EXISTS (SELECT 1 FROM unnest(%s::text[]) term WHERE strpos(lower(m.key || ' ' || m.content), term) > 0)) "
-                "ORDER BY pinned DESC, (SELECT count(*) FROM unnest(%s::text[]) term WHERE strpos(lower(m.key || ' ' || m.content), term) > 0) DESC, "
-                "(scope = 'workspace') DESC, updated_at DESC, id DESC LIMIT %s", (workspace_id, workspace_id, terms, terms, limit),
+                "WITH ranked AS (SELECT m.id, m.scope, m.pinned, m.updated_at, score.hits, "
+                "row_number() OVER (PARTITION BY m.scope ORDER BY score.hits DESC, m.pinned DESC, m.updated_at DESC, m.id DESC) AS scope_rank "
+                "FROM memories m "
+                "CROSS JOIN LATERAL (SELECT count(*) AS hits FROM unnest(%s::text[]) term "
+                "WHERE strpos(lower(m.key || ' ' || m.content), term) > 0) score "
+                "WHERE m.status = 'active' AND (m.scope = 'user' OR m.workspace_id = %s) "
+                "AND NOT (m.scope = 'user' AND EXISTS (SELECT 1 FROM memories w WHERE w.workspace_id = %s AND w.status = 'active' AND w.key = m.key)) "
+                "AND (m.pinned OR m.scope = 'user' OR score.hits > 0 "
+                "OR EXISTS (SELECT 1 FROM memories u WHERE u.scope = 'user' AND u.status = 'active' AND u.key = m.key))) "
+                "SELECT m.* FROM ranked r JOIN memories m ON m.id = r.id "
+                "ORDER BY CASE WHEN r.scope = 'workspace' AND r.hits > 0 AND r.scope_rank <= %s THEN 0 "
+                "WHEN r.scope = 'user' AND r.hits > 0 THEN 1 "
+                "WHEN r.scope = 'workspace' AND r.hits > 0 THEN 2 "
+                "WHEN r.scope = 'workspace' THEN 3 "
+                "WHEN r.pinned THEN 4 ELSE 5 END, r.hits DESC, r.pinned DESC, "
+                "r.updated_at DESC, r.id DESC LIMIT %s", (terms, workspace_id, workspace_id, workspace_slots, limit),
             )
             return [Memory(**row) for row in await cursor.fetchall()]
+
+    async def usage(self, identity: UUID, workspace_id: UUID) -> dict:
+        """Count runs that actually received this memory, using durable snapshots."""
+        await self.get(identity, workspace_id)
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT count(*) AS injection_count, max(created_at) AS last_injected_at "
+                "FROM model_calls WHERE iteration = 0 "
+                "AND (context_snapshot->'memory_references') @> "
+                "jsonb_build_array(jsonb_build_object('id', %s::text))", (str(identity),),
+            )
+            result = dict(await cursor.fetchone())
+            cursor = await connection.execute(
+                "SELECT count(*) AS correction_count FROM memory_revisions "
+                "WHERE memory_id = %s AND action IN ('edit', 'replaced', 'delete')", (identity,),
+            )
+            result["correction_count"] = (await cursor.fetchone())["correction_count"]
+            return result

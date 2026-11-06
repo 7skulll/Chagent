@@ -50,12 +50,16 @@ class RestoreInput(InputModel):
 
 async def service(current, workspace_id):
     async with current.runner.conversations.database.connection() as connection:
-        cursor = await connection.execute('SELECT root_path FROM workspaces WHERE id = %s', (workspace_id,))
+        cursor = await connection.execute("SELECT root_path, host_path FROM workspaces WHERE id = %s AND binding_status = 'bound'", (workspace_id,))
         row = await cursor.fetchone()
     if row is None:
         raise HTTPException(404, '工作区不存在')
     try:
-        fs = FileService(current.root(row['root_path']))
+        from chagent.storage.workspace_identity import host_path_for
+        root = current.root(row['root_path'])
+        if host_path_for(root) != row['host_path']:
+            raise ValueError("Workspace binding does not match this host mount")
+        fs = FileService(root)
         fs.audit_database = current.runner.conversations.database
         fs.audit_workspace_id = workspace_id
         return fs

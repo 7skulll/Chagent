@@ -412,6 +412,12 @@ class MemoryDetail(BaseModel):
     conflict: Memory | None
 
 
+class MemoryUsageView(BaseModel):
+    injection_count: int
+    last_injected_at: datetime | None
+    correction_count: int
+
+
 class MemoryJobView(BaseModel):
     id: UUID
     run_id: UUID

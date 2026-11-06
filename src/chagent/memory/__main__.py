@@ -12,6 +12,7 @@ from chagent.domain.memories import MemoryProposal
 from chagent.storage.database import Database
 from chagent.storage.memories import MemoryRepository
 from chagent.storage.migrate import migrate
+from chagent.storage.workspace_identity import ensure_workspace
 
 
 async def run(args):
@@ -21,9 +22,7 @@ async def run(args):
     async with Database(Settings.from_env()) as database:
         await migrate(database)
         async with database.connection() as connection:
-            cursor = await connection.execute("INSERT INTO workspaces (id, root_path) VALUES (%s, %s) ON CONFLICT (root_path) DO UPDATE SET root_path = EXCLUDED.root_path RETURNING id",
-                                              (uuid4(), str(workspace)))
-            workspace_id = (await cursor.fetchone())["id"]
+            workspace_id = await ensure_workspace(connection, workspace)
         repository = MemoryRepository(database)
         if args.command == "list":
             page = await repository.list(workspace_id, status=args.status, limit=args.limit, before=args.before)
@@ -47,7 +46,7 @@ def main():
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
     commands = parser.add_subparsers(dest="command", required=True)
     listing = commands.add_parser("list")
-    listing.add_argument("--status", choices=("active", "candidate", "deleted", "rejected", "all"), default="active")
+    listing.add_argument("--status", choices=("active", "candidate", "deleted", "rejected", "quarantined", "all"), default="active")
     listing.add_argument("--limit", type=int, default=50)
     listing.add_argument("--before", type=UUID)
     create = commands.add_parser("create")

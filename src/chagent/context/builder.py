@@ -108,7 +108,16 @@ MODE_SECTIONS = {
 # once per run and never re-ordered. Naming the parts makes a prompt change
 # auditable as "which section moved" instead of a diff of one long string, and
 # gives the cache audit a stable label per section.
-SECTION_ORDER = ("preamble", "tools", "mode", "rules", "environment", "state")
+SECTION_ORDER = ("preamble", "tools", "tool_index", "mode", "rules", "environment", "state")
+
+#: Names of tools whose declarations were deferred until asked for. The list is
+#: the only thing that tells the model they exist, so it sits next to the tools
+#: section rather than in a message.
+TOOL_INDEX_SECTION = (
+    "These tools exist but their parameters are not declared, to save context. "
+    "Call tool_search with what you want to do to load one; it becomes callable "
+    "on your next turn."
+)
 
 RULES_SECTION = (
     "Do not assume the working directory, operating system, repository, branch, file contents, "
@@ -140,6 +149,7 @@ class BasicContextBuilder:
         other_modes: tuple[str, ...] = (),
         observed: ObservedUsage | None = None,
         scale: float | None = None,
+        deferred: tuple[tuple[str, str], ...] = (),
     ) -> BuiltContext:
         """Compile the request the model sees, plus the audit trail for it.
 
@@ -160,7 +170,7 @@ class BasicContextBuilder:
         original = history
         history = self._replayable(history, summary, current_run_id)
         output, budget = self._limits(model)
-        system = self._system_message(tools, task_state, recovery, environment, mode, other_modes)
+        system = self._system_message(tools, task_state, recovery, environment, mode, other_modes, deferred)
         visible = self._project(history, cache)
         groups, pinned = self._turns(history, summary)
         required = self._required(groups, history, current_run_id)
@@ -208,7 +218,7 @@ class BasicContextBuilder:
 
     def _limits(self, model: Model) -> tuple[int, int]:
         """Reserve the reply and the safety margin; refuse an impossible budget."""
-        output = self.policy.output_tokens or model.max_tokens
+        output = self.policy.reservation(model)
         if output > model.max_tokens or output < 1 or model.context_window < 1:
             raise ContextBudgetError("Invalid model limits or output reservation")
         budget = model.context_window - output - self.policy.safety_tokens
@@ -219,6 +229,7 @@ class BasicContextBuilder:
     def _system_message(
         self, tools: list[Tool], task_state: TaskState | None, recovery: RecoveryNote | None,
         environment: str | None, mode: str | None, other_modes: tuple[str, ...],
+        deferred: tuple[tuple[str, str], ...] = (),
     ) -> SystemMessage:
         sections: dict[str, str] = {"preamble": self.instructions,
                                     "tools": TOOLS_SECTION, "rules": RULES_SECTION}
@@ -226,6 +237,9 @@ class BasicContextBuilder:
             # Computed once per run by the runner, so the prefix stays byte-identical
             # between turns; the timestamp below is fixed for the same reason.
             sections["environment"] = environment
+        if deferred:
+            sections["tool_index"] = TOOL_INDEX_SECTION + "\n" + "\n".join(
+                f"- {name}: {purpose}" if purpose else f"- {name}" for name, purpose in deferred)
         if mode in MODE_SECTIONS and (mode != "work" or "code" in other_modes):
             sections["mode"] = MODE_SECTIONS[mode]
         state = self._state_section(task_state, recovery)

@@ -131,7 +131,8 @@ class ContextManager:
         return built
 
     async def prepare(self, session_id: UUID, run_id: UUID, model: Model, client: ModelClient, tools,
-                      *, state: RunState | None = None, prompt_mode: str | None = None) -> BuiltContext:
+                      *, state: RunState | None = None, prompt_mode: str | None = None,
+                      deferred: tuple[tuple[str, str], ...] = ()) -> BuiltContext:
         """Build the request, compacting first when the budget demands it.
 
         The method reads as a guard sequence: load, try the baseline, adopt a
@@ -157,7 +158,8 @@ class ContextManager:
         scale = inputs.observed.scale if inputs.observed is not None else 1.0
 
         build = self._build_for(history=inputs.history, model=model, tools=tools, inputs=inputs,
-                                run_id=run_id, prompt_mode=prompt_mode, other_modes=other_modes, scale=scale)
+                                run_id=run_id, prompt_mode=prompt_mode, other_modes=other_modes,
+                                scale=scale, deferred=deferred)
 
         baseline = await build(inputs.previous, inputs.observed)
         forced = self._should_compact(baseline)
@@ -179,7 +181,7 @@ class ContextManager:
             await self._speculate(session_id=session_id, run_id=run_id, model=model, client=client,
                                   tools=tools, state=state, inputs=inputs, baseline=baseline,
                                   owned=owned, current_input=current_input, prompt_mode=prompt_mode,
-                                  other_modes=other_modes, scale=scale)
+                                  other_modes=other_modes, scale=scale, deferred=deferred)
             return self._checked(baseline)
         eligible = self._eligible(inputs.history, run_id, inputs.previous, owned, current_input)
         if not eligible:
@@ -214,7 +216,8 @@ class ContextManager:
         )
 
     def _build_for(self, *, history, model: Model, tools, inputs: _Inputs, run_id: UUID,
-                   prompt_mode: str | None, other_modes: tuple[str, ...], scale: float):
+                   prompt_mode: str | None, other_modes: tuple[str, ...], scale: float,
+                   deferred: tuple[tuple[str, str], ...] = ()):
         """Bind one build to one history.
 
         Background work gets its own list: the run keeps appending to
@@ -227,14 +230,16 @@ class ContextManager:
                                             current_run_id=run_id, summary=summary, allow_over_budget=True,
                                             cache=self._cache(run_id), recovery=inputs.recovery,
                                             environment=inputs.environment, mode=prompt_mode,
-                                            other_modes=other_modes, observed=observed, scale=scale)
+                                            other_modes=other_modes, observed=observed, scale=scale,
+                                            deferred=deferred)
 
         return build
 
     async def _speculate(self, *, session_id: UUID, run_id: UUID, model: Model, client: ModelClient,
                          tools, state: RunState | None, inputs: _Inputs, baseline: BuiltContext,
                          owned: bool, current_input: StoredMessage, prompt_mode: str | None,
-                         other_modes: tuple[str, ...], scale: float) -> None:
+                         other_modes: tuple[str, ...], scale: float,
+                         deferred: tuple[tuple[str, str], ...] = ()) -> None:
         """Start a summary before the budget forces it, when it is worth the risk.
 
         The calls overlap with the tool work that follows this request, which is
@@ -267,7 +272,8 @@ class ContextManager:
         # at may change after this point.
         frozen = list(inputs.history)
         build = self._build_for(history=frozen, model=model, tools=tools, inputs=inputs, run_id=run_id,
-                                prompt_mode=prompt_mode, other_modes=other_modes, scale=scale)
+                                prompt_mode=prompt_mode, other_modes=other_modes, scale=scale,
+                                deferred=deferred)
         # Revision 0 is a placeholder: the real one can only come from the
         # database, and it is assigned at adoption.
         checkpoint = self._checkpoint_maker(

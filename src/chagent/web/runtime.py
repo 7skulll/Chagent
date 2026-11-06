@@ -19,6 +19,7 @@ from chagent.sessions.errors import SessionNotFoundError
 from chagent.sessions.manager import SessionManager
 from chagent.storage.approvals import ApprovalRepository
 from chagent.web.policy import validate_web_runner
+from chagent.storage.workspace_identity import ensure_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +91,7 @@ class WebRuntime:
         root = self.workspace if workspace is None else workspace
         if root not in self._workspace_ids:
             async with self.runner.conversations.database.connection() as connection:
-                cursor = await connection.execute(
-                    "INSERT INTO workspaces (id, root_path) VALUES (%s, %s) ON CONFLICT (root_path) "
-                    "DO UPDATE SET root_path = EXCLUDED.root_path RETURNING id", (uuid4(), str(root)))
-                self._workspace_ids[root] = (await cursor.fetchone())["id"]
+                self._workspace_ids[root] = await ensure_workspace(connection, root)
         return self._workspace_ids[root]
 
     async def memory_scope(self, raw: str | None):

@@ -20,6 +20,7 @@ from chagent.domain.sessions import MessagePage, Session, SessionPage, TaskState
 from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError, StateConflictError
 from chagent.storage.database import Database
 from chagent.storage.artifacts import ArtifactRepository, INLINE_BYTES
+from chagent.storage.workspace_identity import ensure_workspace, host_path_for
 from chagent.storage.event_queue import EventItem, EventStream
 from chagent.tools.base import AgentToolResult
 
@@ -41,12 +42,7 @@ class ConversationRepository:
         mode = validate_mode(mode)
         session_id = uuid4()
         async with self.database.transaction() as connection:
-            cursor = await connection.execute(
-                "INSERT INTO workspaces (id, root_path) VALUES (%s, %s) "
-                "ON CONFLICT (root_path) DO UPDATE SET root_path = EXCLUDED.root_path RETURNING id",
-                (uuid4(), root),
-            )
-            workspace_id = (await cursor.fetchone())["id"]
+            workspace_id = await ensure_workspace(connection, Path(root))
             await connection.execute(
                 "INSERT INTO sessions (id, workspace_id, title, mode) VALUES (%s, %s, %s, %s)",
                 (session_id, workspace_id, title, mode),
@@ -65,11 +61,11 @@ class ConversationRepository:
     async def get_session(self, session_id: UUID) -> Session:
         async with self.database.connection() as connection:
             cursor = await connection.execute(
-                "SELECT s.*, w.root_path FROM sessions s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = %s",
+                "SELECT s.*, w.root_path, w.host_path FROM sessions s JOIN workspaces w ON w.id = s.workspace_id AND w.binding_status = 'bound' WHERE s.id = %s",
                 (session_id,),
             )
             row = await cursor.fetchone()
-            if row is None:
+            if row is None or host_path_for(Path(row["root_path"])) != row["host_path"]:
                 raise SessionNotFoundError("Session does not exist")
             return self._session(row)
 
@@ -99,6 +95,10 @@ class ConversationRepository:
             params.append(str(workspace.expanduser().resolve()))
             count_where.append("w.root_path = %s")
             count_params.append(str(workspace.expanduser().resolve()))
+            clauses.append("w.host_path = %s")
+            params.append(host_path_for(workspace))
+            count_where.append("w.host_path = %s")
+            count_params.append(host_path_for(workspace))
         if mode == "hide":
             clauses.append("s.archived_at IS NULL")
         elif mode == "only":
@@ -116,7 +116,9 @@ class ConversationRepository:
             anchor = await self.get_session(before)
             clauses.append("(s.created_at, s.id) < (%s, %s)")
             params.extend((anchor.created_at, anchor.id))
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        clauses.append("w.binding_status = 'bound'")
+        count_where.append("w.binding_status = 'bound'")
+        where = " WHERE " + " AND ".join(clauses)
         query_text = (
             "SELECT s.*, w.root_path FROM sessions s JOIN workspaces w ON w.id = s.workspace_id"
             + where + " ORDER BY s.created_at DESC, s.id DESC LIMIT %s"
@@ -141,11 +143,14 @@ class ConversationRepository:
         """
         async with self.database.connection() as connection:
             cursor = await connection.execute(
-                "SELECT w.id, w.root_path AS path, count(s.id) AS sessions, w.last_opened_at AS last_used "
+                "SELECT w.id, w.root_path AS path, w.host_path, count(s.id) AS sessions, w.last_opened_at AS last_used "
                 "FROM workspaces w LEFT JOIN sessions s ON s.workspace_id = w.id AND s.archived_at IS NULL "
+                "WHERE w.binding_status = 'bound' "
                 "GROUP BY w.id ORDER BY w.last_opened_at DESC, w.root_path"
             )
-            return [dict(row) for row in await cursor.fetchall()]
+            rows = await cursor.fetchall()
+            return [{key: value for key, value in row.items() if key != "host_path"}
+                    for row in rows if host_path_for(Path(row["path"])) == row["host_path"]]
 
     async def _lock_session(self, connection: AsyncConnection[DictRow], session_id: UUID, *, idle: bool = False) -> None:
         cursor = await connection.execute("SELECT archived_at FROM sessions WHERE id = %s FOR UPDATE", (session_id,))
@@ -306,11 +311,11 @@ class ConversationRepository:
     async def workspace(self, session_id: UUID) -> Path:
         async with self.database.connection() as connection:
             cursor = await connection.execute(
-                "SELECT w.root_path FROM sessions s JOIN workspaces w ON w.id = s.workspace_id "
+                "SELECT w.root_path, w.host_path FROM sessions s JOIN workspaces w ON w.id = s.workspace_id AND w.binding_status = 'bound' "
                 "WHERE s.id = %s", (session_id,),
             )
             row = await cursor.fetchone()
-            if row is None:
+            if row is None or host_path_for(Path(row["root_path"])) != row["host_path"]:
                 raise ValueError("Session does not exist")
             return Path(row["root_path"])
 

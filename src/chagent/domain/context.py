@@ -1,6 +1,8 @@
 """Context policy and inspectable selection results, separate from transcript storage."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+import os
 
 
 #: Model-visible cap for one tool result, in tokens. Over the cap the projection
@@ -8,6 +10,17 @@ from dataclasses import dataclass, field
 #: The storage layer independently turns results over 8000 bytes into artifacts,
 #: which carry a bounded excerpt and stay readable through ``read_artifact``.
 DEFAULT_MAX_TOOL_RESULT_TOKENS = 2000
+
+#: Ceiling on the output tokens reserved out of the context window when the caller
+#: does not name one. Calibrated on 319 real calls (2026-11-06): p50 98, p90 579,
+#: p95 1055, p99 3054, max 5140, and **zero ``output_limit`` failures** under the
+#: previous 16384 reservation. 8192 keeps a 1.6x margin over the longest answer
+#: ever produced while handing half of a 16k reservation back to the input budget
+#: — a quarter of the window is a lot to hold for an answer that is usually 98
+#: tokens long. A cap that turns out too small is reported as ``output_limit``
+#: instead of being silently accepted, so the cost of guessing low is one failed
+#: turn, not a truncated artifact.
+DEFAULT_OUTPUT_RESERVATION = 8192
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +37,36 @@ class ContextPolicy:
             raise ValueError("Safety margin must be nonnegative and history limit positive")
         if not 1 <= self.max_tool_result_tokens <= 1_000_000:
             raise ValueError("Tool result token limit must be between 1 and 1000000")
+
+    def reservation(self, model) -> int:
+        """Output tokens held back from the window for this model.
+
+        A chat-completions provider enforces ``input + output <= window``, so the
+        amount reserved must be exactly what is requested: there is no way to ask
+        for 16k and plan against 4k. This is therefore also the request cap.
+        """
+        return self.output_tokens or min(model.max_tokens, DEFAULT_OUTPUT_RESERVATION)
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "ContextPolicy":
+        """Read the two budget knobs that change the size of a request.
+
+        Both were previously only settable in code, which made them invisible in
+        ``config show`` and in the snapshot's ``output_reserved``.
+        """
+        values = os.environ if env is None else env
+        defaults = cls()
+        try:
+            output = values.get("CHAGENT_OUTPUT_TOKENS", "").strip()
+            tool_result = values.get("CHAGENT_TOOL_RESULT_TOKENS", "").strip()
+            return cls(
+                output_tokens=int(output) if output else defaults.output_tokens,
+                safety_tokens=defaults.safety_tokens,
+                max_history_messages=defaults.max_history_messages,
+                max_tool_result_tokens=int(tool_result) if tool_result else defaults.max_tool_result_tokens,
+            )
+        except (ValueError, OverflowError):
+            raise ValueError("Invalid context budget configuration") from None
 
 
 @dataclass(slots=True)

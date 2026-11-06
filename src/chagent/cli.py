@@ -92,7 +92,8 @@ async def _run(
                                         approval_timeout=settings.approval_timeout,
                                         approval_decider=local_approver(), approval_remote=False,
                                         process_wall_timeout=settings.process_timeout,
-                                        max_processes=settings.max_processes, web=web)
+                                        max_processes=settings.max_processes, web=web,
+                                        defer_tools=settings.deferred_tools)
         else:
             assert client is not None
             runner = create_runner(database, model_settings.model(), client,

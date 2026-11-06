@@ -12,6 +12,7 @@ from chagent.domain.sessions import Session, TaskState
 from chagent.domain.summaries import SessionSummary
 from chagent.domain.tools import Tool
 from chagent.domain.usage import Usage
+from chagent.tools.context import DeferredTools
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +32,17 @@ class RunState:
     active_model_call_id: UUID | None = None
     context_revision: int = 0
     tools: list[Tool] = field(default_factory=list)
+    #: Changes whenever the *declared* set changes, which includes a tool loaded
+    #: through ``tool_search``: the prompt prefix changes with it.
     tool_revision: int = -1
+    #: Cheap identity of the declarations last handed to the builder: the registry
+    #: revision plus how many deferred tools have been loaded. Names only ever get
+    #: added, so the count is enough — and rebuilding every schema on every turn to
+    #: compare them would defeat the point of declaring them once per run.
+    declared_key: tuple[int, int] = (-1, -1)
+    #: Which deferrable tools the model has loaded. Shared with every
+    #: ``ToolContext`` of the run, so ``tool_search`` records into the run state.
+    deferred: DeferredTools = field(default_factory=DeferredTools)
     # Facts from earlier runs that ended without a normal stop; loaded once per
     # run so every turn sees the same note and no turn re-queries it.
     recovery: RecoveryNote | None = None
