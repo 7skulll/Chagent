@@ -1,0 +1,4436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2001-2021年中国主要部门煤炭和石油产品的碳排放量</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { background:#000; color:#fff; }
+  body {
+    font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC","Hiragino Sans GB",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  #viewer { position:relative; width:100%; display:flex; justify-content:center; background:#000; overflow:hidden; }
+  #stage {
+    position:relative;
+    flex:0 0 auto;
+    width:1260px; height:2025px;
+    transform-origin:top center;
+    overflow:hidden;
+    background:
+      radial-gradient(circle at 82% 17%, rgba(255,255,255,.055) 0%, rgba(255,255,255,0) 27%),
+      radial-gradient(ellipse 62% 13% at 54% 46%, rgba(255,255,255,.035) 0%, rgba(255,255,255,0) 72%),
+      radial-gradient(ellipse 58% 11% at 52% 61%, rgba(255,255,255,.03) 0%, rgba(255,255,255,0) 72%),
+      radial-gradient(ellipse 60% 13% at 51% 85%, rgba(255,255,255,.032) 0%, rgba(255,255,255,0) 72%),
+      radial-gradient(ellipse 90% 60% at 50% 38%, #0b0b0b 0%, #050505 48%, #010101 100%);
+    opacity:0;
+    animation:stageIn 1.1s ease .05s forwards;
+  }
+  @keyframes stageIn { to { opacity:1; } }
+
+  .vignette {
+    position:absolute; inset:0; pointer-events:none; z-index:55;
+    background:radial-gradient(ellipse 78% 68% at 50% 40%, rgba(0,0,0,0) 58%, rgba(0,0,0,.4) 100%);
+  }
+  /* 第三张的画面本来就压得很暗，不需要再压一层重暗角——参考图底部的数据点仍是接近纯白的 */
+  #stageLife .vignette {
+    background:radial-gradient(ellipse 88% 80% at 50% 36%, rgba(0,0,0,0) 72%, rgba(0,0,0,.10) 100%);
+  }
+  /* 底部红条：参考图是 y2005–2023 的一条高饱和条，左端绛红、右端偏鲑橘 */
+  #stageLife .stripe {
+    bottom:4px; height:19px;
+    background:linear-gradient(90deg,#d93a4c 0%,#e0505c 32%,#e4666d 58%,#e87d76 80%,#e9805b 100%);
+    box-shadow:0 -1px 9px rgba(224,80,70,.40), 0 0 18px rgba(255,120,90,.20) inset;
+  }
+
+  /* ---------- 标题 ---------- */
+  .t1, .t2 { position:absolute; left:57px; white-space:nowrap; font-weight:900; color:#fff; line-height:1; }
+  .t1 { top:18px; font-size:79px; letter-spacing:.5px; }
+  .t2 { top:100px; font-size:85px; letter-spacing:-1px; }
+  .sub {
+    position:absolute; left:68px; top:197px; white-space:nowrap;
+    font-size:17.5px; font-weight:300; letter-spacing:2.2px;
+    color:#9d9d9d; font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  }
+  .logo { position:absolute; right:24px; top:20px; text-align:right; z-index:5; }
+  .logo .en {
+    display:block; font-family:"Segoe Script","Brush Script MT",cursive;
+    font-size:12px; color:#e8e8e8; opacity:.85; letter-spacing:.5px; margin-right:6px;
+    transform:rotate(-4deg);
+  }
+  .logo .cn { display:flex; align-items:flex-end; justify-content:flex-end; gap:1px; margin-top:-1px; }
+  .logo .cn b { font-size:33px; line-height:1; font-weight:900; letter-spacing:1px;
+    text-shadow:0 0 12px rgba(255,255,255,.25); }
+  .logo .cn i { font-style:normal; font-size:19px; line-height:1; font-weight:900; padding-bottom:2px; }
+
+  /* ---------- 引言 ---------- */
+  .intro {
+    position:absolute; top:246px; font-size:14px; line-height:1.55;
+    color:#c9c9c9; text-align:justify; text-justify:inter-ideograph;
+    letter-spacing:0;
+  }
+  .intro span { display:block; text-indent:2em; }
+  .intro span + span { margin-top:10px; }
+  .intro.a { left:68px; width:368px; }
+  .intro.b { left:511px; width:360px; }
+
+  /* ---------- 图例 ---------- */
+  #lgCanvas { position:absolute; left:1000px; top:128px; width:200px; height:232px; z-index:4; }
+  .lg-lab { position:absolute; font-size:10px; line-height:1.25; color:#d6d6d6; z-index:5; letter-spacing:.2px; }
+  .lg-lab.muted { color:#9a9a9a; }
+  .lg-lab.toggle { cursor:pointer; transition:opacity .2s ease, color .2s ease; user-select:none; }
+  .lg-lab.toggle:hover { color:#fff; }
+  .lg-lab.off { opacity:.32; }
+  .lg-item { position:absolute; display:flex; align-items:center; gap:0; z-index:5; font-size:10px; color:#cfcfcf; }
+  .lg-item span:last-child { margin-left:5px; }
+  .dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
+  .dot.gray { background:radial-gradient(circle at 38% 35%,#d9d9d9,#8c8c8c 72%); box-shadow:0 0 6px rgba(200,200,200,.35); }
+  .dot.white { background:radial-gradient(circle at 38% 35%,#fff,#d5d5d5 70%); box-shadow:0 0 7px rgba(255,255,255,.6); }
+  .ln { display:inline-block; height:1px; background:rgba(220,220,220,.55); margin:0 0 0 4px; }
+  #pieSize { position:absolute; left:1013px; top:284px; width:175px; height:112px; z-index:5; overflow:visible; }
+  .badge {
+    position:absolute; width:19px; height:19px; border-radius:50%;
+    border:1px solid rgba(235,235,235,.9); background:rgba(5,5,5,.92);
+    color:#f0f0f0; font-size:9px; font-weight:700; line-height:1;
+    display:flex; align-items:center; justify-content:center; z-index:8;
+    letter-spacing:0;
+  }
+  #badge1 { left:878px; top:274px; }
+  #badge2 { left:958px; top:1284px; }
+  #badge3 { left:160px; top:1162px; }
+  #badge4 { left:235px; top:1845px; }
+  .pie-wrap { position:absolute; z-index:6; }
+  .pie-wrap::before {
+    content:""; position:absolute; inset:-16px; border-radius:50%;
+    background:radial-gradient(circle, rgba(3,3,3,.92) 48%, rgba(3,3,3,0) 74%);
+    z-index:-1;
+  }
+  #pie1wrap { left:882px; top:262px; width:66px; height:66px; }
+  #pie2wrap { left:982px; top:1277px; width:54px; height:54px; }
+  .pie-svg { width:100%; height:100%; overflow:visible; }
+  .pie-svg .slice { cursor:pointer; transition:filter .18s ease; stroke:#0a0a0a; stroke-width:.8; }
+  .pie-svg .slice:hover { filter:brightness(1.32); }
+  .callout { position:absolute; overflow:visible; pointer-events:none; z-index:5; }
+  .star { position:absolute; z-index:6; pointer-events:none; animation:twinkle 3.4s ease-in-out infinite; }
+  @keyframes twinkle { 0%,100%{opacity:.72; transform:scale(.94);} 50%{opacity:1; transform:scale(1.06);} }
+  .star svg { display:block; overflow:visible; }
+
+  /* ---------- 数据网格 ---------- */
+  .grid-canvas { position:absolute; z-index:2; cursor:crosshair; animation:breathe 10s ease-in-out infinite; }
+  @keyframes breathe { 0%,100%{opacity:1;} 50%{opacity:.93;} }
+  #grid1 { left:390px; top:450px; width:870px; height:365px; }
+  #grid2 { left:390px; top:852px; width:870px; height:420px; }
+  #grid3 { left:390px; top:1272px; width:870px; height:508px; }
+
+  .row-lab {
+    position:absolute; left:0; width:392px; text-align:right;
+    font-size:14.2px; color:#e2e2e2; letter-spacing:.1px;
+    transform:translateY(-50%); white-space:nowrap; z-index:6;
+    padding-right:24px; cursor:pointer; transition:color .16s ease, text-shadow .16s ease;
+  }
+  .row-lab.hot { color:#fff; text-shadow:0 0 10px rgba(255,255,255,.85); }
+  .row-lab .dash {
+    position:absolute; right:2px; top:50%; transform:translateY(-50%);
+    width:18px; height:1.5px; margin:0;
+    background:#fff; border-radius:2px;
+    box-shadow:0 0 5px rgba(255,255,255,.7);
+  }
+  .row-tick {
+    position:absolute; left:396px; width:13px; height:1.5px; z-index:5;
+    background:rgba(255,255,255,.85); border-radius:2px;
+    box-shadow:0 0 6px rgba(255,255,255,.55);
+    transform:translateY(-50%); pointer-events:none;
+  }
+  .year-lab {
+    position:absolute; transform:translate(-50%,0);
+    font-size:14.5px; font-weight:400; color:#d9d9d9; letter-spacing:.5px;
+    z-index:6; white-space:nowrap; cursor:pointer;
+    transition:color .16s ease, text-shadow .16s ease;
+  }
+  .year-lab.hot { color:#fff; text-shadow:0 0 12px rgba(255,255,255,.95); }
+  .s-year {
+    position:absolute; font-size:11px; color:#cfcfcf; z-index:5;
+    transform:rotate(-90deg); transform-origin:left top; letter-spacing:.5px;
+    white-space:nowrap;
+  }
+
+  /* ---------- 折线图 ③ ---------- */
+  #lineSvg { position:absolute; left:62px; top:895px; width:330px; height:290px; z-index:4; overflow:visible; }
+  #lineSvg text { font-family:"Microsoft YaHei",sans-serif; }
+  #lineSvg .yr { font-size:11px; fill:#d7d7d7; }
+  #lineSvg .val { font-size:10.5px; fill:#c9c9c9; }
+  #lineSvg .gridln { stroke:#8e8e8e; stroke-width:.6; stroke-dasharray:1.5 4.5; opacity:.5; }
+  #lineSvg .lpath { fill:none; stroke:rgba(240,240,240,.5); stroke-width:.7; }
+  #lineSvg .pt { fill:#f4f4f0; cursor:pointer; transition:r .12s ease; filter:url(#glowDot); }
+  #lineSvg .pt:hover { r:6; }
+
+  /* ---------- 城乡发展 ④ ---------- */
+  #strandSvg { position:absolute; left:62px; top:1266px; width:180px; height:510px; z-index:4; overflow:visible; }
+  #strandSvg .sp { fill:#f6f6f3; cursor:pointer; filter:url(#glowDot2); transition:fill .15s ease; }
+  #strandSvg .sp:hover { fill:#fff; }
+  #strandSvg .bracket { fill:none; stroke:#8d8d8d; stroke-width:.7; }
+  #strandSvg text { fill:#cfcfcf; font-family:"Microsoft YaHei",sans-serif; }
+
+  .s-lab {
+    position:absolute; writing-mode:vertical-rl; font-size:9.4px; color:#c9c9c9;
+    letter-spacing:1.5px; z-index:5; transform:translateX(-50%);
+  }
+  .s-group {
+    position:absolute; writing-mode:vertical-rl; font-size:9.6px; color:#cfcfcf;
+    letter-spacing:2px; z-index:5; transform:translateX(-50%);
+  }
+
+  /* ---------- 底部注释 ---------- */
+  .note { position:absolute; display:flex; gap:8px; width:392px; z-index:5; }
+  .note .nb {
+    flex:0 0 auto; width:15px; height:15px; border-radius:50%;
+    border:1px solid rgba(220,220,220,.85); color:#e8e8e8;
+    font-size:8px; font-weight:700; display:flex; align-items:center; justify-content:center;
+    margin-top:1px;
+  }
+  .note p { font-size:10.4px; line-height:1.52; color:#b9b9b9; letter-spacing:.1px; }
+  .note .nt { color:#eaeaea; font-weight:700; }
+  .note .nd { display:block; color:#adadad; margin-top:1px; }
+
+  .stripe {
+    position:absolute; left:0; right:0; bottom:0; height:10px; z-index:20;
+    background:linear-gradient(90deg,#a8141b 0%,#d92a24 18%,#ff5b43 38%,#f04a36 55%,#c01c22 76%,#8e0f17 100%);
+    box-shadow:0 -1px 14px rgba(255,70,50,.55), 0 0 22px rgba(255,90,60,.28) inset;
+  }
+
+  /* ---------- 提示框 ---------- */
+  #tip {
+    position:fixed; z-index:999; min-width:190px; max-width:290px;
+    background:rgba(10,10,10,.92); border:1px solid rgba(255,255,255,.22);
+    box-shadow:0 10px 34px rgba(0,0,0,.75), 0 0 0 1px rgba(0,0,0,.4);
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+    padding:10px 12px 9px; border-radius:3px;
+    pointer-events:none; opacity:0; transform:translateY(4px);
+    transition:opacity .13s ease, transform .13s ease;
+    font-size:11px; line-height:1.55; color:#e7e7e7;
+  }
+  #tip.show { opacity:1; transform:translateY(0); }
+  #tip .tt { font-size:11.5px; font-weight:700; color:#fff; letter-spacing:.3px; margin-bottom:5px; }
+  #tip .tr { display:flex; align-items:center; white-space:nowrap; }
+  #tip .sw { width:7px; height:7px; border-radius:50%; margin-right:6px; flex:0 0 auto;
+    background:#fff; box-shadow:0 0 6px rgba(255,255,255,.7); }
+  #tip .sw.coal { background:#fffdf4; }
+  #tip .sw.oil { background:#e9edff; }
+  #tip .tr span:nth-child(2) { color:#bdbdbd; margin-right:auto; }
+  #tip .tr b { color:#fff; font-weight:700; margin-left:12px; font-variant-numeric:tabular-nums; }
+  #tip .tr.dim { opacity:.45; }
+  #tip .ts { margin-top:5px; padding-top:5px; border-top:1px solid rgba(255,255,255,.12);
+    color:#9f9f9f; font-size:10px; }
+  #tip .big { font-size:13px; }
+
+  /* ================= 第二张：瓦里关温室气体 ================= */
+  #viewerSpiral { position:relative; width:100%; display:none; justify-content:center; background:#000; overflow:hidden; }
+  #stageSpiral {
+    position:relative; flex:0 0 auto;
+    width:1260px; height:2044px;
+    transform-origin:top center; overflow:hidden;
+    background:
+      radial-gradient(circle at 46% 32%, rgba(255,255,255,.06) 0%, rgba(255,255,255,0) 36%),
+      radial-gradient(circle at 84% 9%, rgba(255,255,255,.04) 0%, rgba(255,255,255,0) 24%),
+      radial-gradient(ellipse 90% 58% at 50% 30%, #0a0a0a 0%, #050505 52%, #010101 100%);
+    opacity:0;
+    animation:stageIn 1.1s ease .05s forwards;
+  }
+  .sp-t1, .sp-t2 { position:absolute; left:57px; white-space:nowrap; font-weight:900; color:#fff; line-height:1; }
+  .sp-t1 { top:22px; font-size:69px; letter-spacing:.3px; }
+  .sp-t2 { top:100px; font-size:77px; letter-spacing:-.5px; }
+  .sp-sub {
+    position:absolute; left:68px; top:195px; white-space:nowrap;
+    font-size:15px; font-weight:300; letter-spacing:1.9px;
+    color:#a0a0a0; font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  }
+  .sp-intro {
+    position:absolute; left:68px; top:226px; width:430px;
+    font-size:12.5px; line-height:1.62; color:#d0d0d0;
+    text-align:justify; text-justify:inter-ideograph; z-index:8;
+  }
+  .sp-intro span { display:block; text-indent:2em; }
+  .sp-intro span + span { margin-top:6px; }
+  .sp-lab { position:absolute; font-size:9.3px; line-height:1.4; color:#cfcfcf; z-index:6; letter-spacing:.1px; }
+  .sp-lab.dim { color:#949494; }
+  .sp-leftpara {
+    position:absolute; left:64px; top:1026px; width:392px;
+    font-size:12px; line-height:1.72; color:#d4d4d4; z-index:9;
+    text-shadow:0 2px 12px #000, 0 0 4px #000;
+    text-align:justify; text-justify:inter-ideograph;
+  }
+  .sp-leftpara u { color:#fff; text-decoration-thickness:1px; text-underline-offset:2px; }
+
+  .sp-area { position:absolute; left:896px; top:207px; width:152px; height:58px; z-index:4; overflow:visible; }
+  #spDial { position:absolute; left:1002px; top:277px; width:148px; height:148px; z-index:4; overflow:visible; }
+  .sp-dial-lab { position:absolute; z-index:6; font-size:8.6px; color:#c5c5c5; line-height:1.35; }
+  #spSemi { position:absolute; left:918px; top:401px; width:122px; height:80px; z-index:4; overflow:visible; }
+  .sp-semi-lab { position:absolute; z-index:6; font-size:8.3px; color:#b7b7b7; line-height:1.5; }
+  .sp-leglist { position:absolute; left:1045px; top:462px; z-index:6; }
+  .sp-legrow {
+    display:flex; align-items:center; gap:7px; height:19px;
+    font-size:9.6px; color:#d2d2d2; letter-spacing:.15px; white-space:nowrap;
+    cursor:pointer; transition:color .15s ease;
+  }
+  .sp-legrow:hover { color:#fff; }
+  .sp-legrow i {
+    width:16px; height:16px; border:1px solid rgba(235,235,235,.8); border-radius:50%;
+    font-style:normal; font-size:8px; font-weight:700; color:#eee;
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+  }
+  .sp-legrow .ld { width:15px; height:1px; border-radius:0; background:rgba(225,225,225,.72); flex:0 0 auto; }
+
+  /* 注：这里曾用过 filter: brightness(.93) 来压亮度。现在螺旋的亮度是「就地」调准的
+     （色板目标亮度 T + 丝的不透明度 al 直接落在原图 192–207 的亮台上），
+     再叠一层全局 filter 只会把已经对准的亮台整体推到 184，所以已移除 */
+  #spiralWrap { position:absolute; left:89px; top:248px; width:1000px; height:1000px; z-index:3; cursor:crosshair; }
+  #spiralBase, #spiralHover { position:absolute; left:0; top:0; width:1000px; height:1000px; }
+  #spiralHover { pointer-events:none; }
+  .sp-badge {
+    position:absolute; width:18px; height:18px; border-radius:50%;
+    border:1px solid rgba(240,240,240,.9); background:rgba(4,4,4,.9);
+    color:#f5f5f5; font-size:8px; font-weight:700; line-height:1;
+    display:flex; align-items:center; justify-content:center; z-index:9;
+  }
+
+  #spCo2 { position:absolute; left:1028px; top:926px; width:168px; height:168px; z-index:5; overflow:visible; }
+  .sp-callout { position:absolute; font-size:8.4px; color:#bdbdbd; z-index:6; line-height:1.3; white-space:nowrap; }
+
+  #ridgeSvg { position:absolute; left:872px; top:1102px; width:352px; height:222px; z-index:4; overflow:visible; }
+  #ridgeSvg text { font-family:"Microsoft YaHei",sans-serif; }
+  #ridgeSvg .rl { font-size:7px; fill:#bcbcbc; letter-spacing:.4px; }
+  #ridgeSvg .rh { cursor:pointer; }
+
+  .sp-h2 { position:absolute; left:57px; top:1239px; font-size:27px; font-weight:900; color:#fff; letter-spacing:.5px; white-space:nowrap; z-index:7; }
+  .sp-h2line {
+    position:absolute; left:57px; top:1275px; width:388px; height:3px; z-index:7;
+    background:linear-gradient(90deg,#ff614a 0%,#d9241f 42%,#a80e16 72%,rgba(120,10,15,0) 100%);
+    box-shadow:0 0 10px rgba(255,70,50,.35);
+  }
+  .sp-h2sub { position:absolute; left:57px; top:1284px; font-size:11.5px; color:#cfcfcf; z-index:7; letter-spacing:.4px; }
+
+  #molSvg { position:absolute; left:38px; top:1306px; width:624px; height:380px; z-index:5; overflow:visible; }
+  #molSvg .mol { cursor:pointer; transition:opacity .18s ease; }
+  #molSvg .mol:hover { opacity:1; }
+  #molSvg text { font-family:"Microsoft YaHei",sans-serif; }
+
+  #orbLayer { position:absolute; inset:0; z-index:5; pointer-events:none; }
+  .gwp-orb {
+    position:absolute; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    z-index:5; cursor:pointer; pointer-events:auto; color:#191919; font-weight:500;
+    text-align:center; line-height:1.12; letter-spacing:.3px;
+    background:radial-gradient(circle at 34% 27%,
+      rgba(255,255,255,.97) 0%, rgba(240,240,238,.92) 19%, rgba(178,178,174,.78) 45%,
+      rgba(86,86,82,.88) 70%, rgba(15,15,14,.95) 100%);
+    box-shadow:inset -7px -9px 22px rgba(0,0,0,.62), inset 5px 5px 16px rgba(255,255,255,.2),
+      0 0 30px rgba(255,255,255,.16);
+    transition:filter .2s ease, box-shadow .2s ease;
+  }
+  .gwp-orb::after {
+    content:""; position:absolute; inset:0; border-radius:50%;
+    background:radial-gradient(circle at 29% 23%, rgba(255,255,255,.55), rgba(255,255,255,0) 46%);
+    mix-blend-mode:screen;
+  }
+  .gwp-orb:hover { filter:brightness(1.18); box-shadow:inset -7px -9px 22px rgba(0,0,0,.5), 0 0 46px rgba(255,255,255,.4); }
+  .gwp-v { position:absolute; z-index:6; font-size:8.6px; color:#bfbfbf; text-align:center; letter-spacing:.4px; line-height:1.3; }
+  .sp-key { position:absolute; z-index:6; display:flex; align-items:center; gap:6px; font-size:8.5px; color:#b9b9b9; }
+  .sp-key .k { width:11px; height:11px; border-radius:50%; background:radial-gradient(circle at 35% 28%,#fff,#9a9a96 62%,#333 100%); box-shadow:0 0 8px rgba(255,255,255,.3); }
+
+  .sp-note {
+    position:absolute; z-index:7; font-size:10.6px; line-height:1.72; color:#c6c6c6;
+    text-align:justify; text-justify:inter-ideograph;
+  }
+
+  #earthSvg { position:absolute; left:0; top:1748px; width:1260px; height:296px; z-index:2; overflow:hidden; }
+  #earthSvg text { font-family:"Microsoft YaHei",sans-serif; font-size:8.3px; fill:#c8c8c8; letter-spacing:.15px; }
+  #earthSvg .elab { cursor:help; transition:fill .15s ease; }
+  #earthSvg .elab:hover { fill:#fff; }
+  #earthSvg .earrow { stroke:rgba(215,220,230,.62); stroke-width:.65; fill:none; }
+
+  /* ================= 第三张：衣食住行中的碳数据 ================= */
+  #viewerLife { position:relative; width:100%; display:none; justify-content:center; background:#000; overflow:hidden; }
+  #stageLife {
+    position:relative; flex:0 0 auto;
+    width:1260px; height:2027px;
+    transform-origin:top center; overflow:hidden;
+    background:
+      radial-gradient(circle at 44% 30%, rgba(255,255,255,.016) 0%, rgba(255,255,255,0) 34%),
+      radial-gradient(circle at 86% 12%, rgba(255,255,255,.008) 0%, rgba(255,255,255,0) 22%),
+      radial-gradient(ellipse 92% 60% at 50% 28%, #040404 0%, #020202 54%, #000 100%);
+    opacity:0;
+    animation:stageIn 1.1s ease .05s forwards;
+  }
+  .lf-t1 { position:absolute; left:49px; top:15px; white-space:nowrap; font-weight:900; color:#fff; line-height:1; font-size:75px; letter-spacing:5px; }
+  .lf-sub {
+    position:absolute; left:51px; top:105px; white-space:nowrap;
+    font-size:17.5px; font-weight:600; letter-spacing:3px;
+    color:#b4b4b4; font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  }
+  .lf-rule { position:absolute; z-index:6; top:1512px; height:3px; }
+  .lf-rule.s { left:66px; width:404px; background:rgba(150,46,46,.92); }
+  .lf-rule.d { left:719px; width:375px; background:repeating-linear-gradient(90deg, rgba(255,255,255,.52) 0, rgba(255,255,255,.52) 3px, rgba(0,0,0,0) 3px, rgba(0,0,0,0) 9px); }
+  .lf-h { position:absolute; z-index:9; display:flex; align-items:center; gap:7px; white-space:nowrap; }
+  .lf-h i {
+    width:17px; height:17px; flex:0 0 auto; border:1px solid rgba(233,233,233,.72); border-radius:50%;
+    box-shadow:0 0 9px rgba(255,255,255,.16);
+  }
+  .lf-h b { font-size:15px; font-weight:600; color:#efefef; letter-spacing:.7px; }
+  .lf-p {
+    position:absolute; z-index:9; letter-spacing:.2px; color:#d0d0d0;
+    text-align:justify; text-justify:inter-ideograph;
+    text-shadow:0 2px 14px #000, 0 0 5px #000;
+  }
+  .lf-p.l { font-size:13px; line-height:1.46; }
+  .lf-p.r { font-size:12px; line-height:1.58; }
+  .lf-cap {
+    position:absolute; z-index:9; left:256px; top:1259px; width:272px;
+    font-size:13px; line-height:19px; color:#d2d2d2; letter-spacing:3.4px;
+    text-align:justify; text-justify:inter-ideograph;
+    text-shadow:0 2px 14px #000, 0 0 5px #000;
+  }
+  .lf-cap2 {
+    position:absolute; z-index:9; left:67px; top:1478px; white-space:nowrap;
+    font-size:28px; line-height:1; font-weight:600; color:#ffffff; letter-spacing:.8px;
+    text-shadow:0 2px 16px #000, 0 0 6px #000, 0 0 11px rgba(255,255,255,.42);
+  }
+  #lfArt { position:absolute; left:85px; top:150px; width:1120px; height:1320px; z-index:1; }
+  #lfPlume { position:absolute; left:150px; top:1530px; width:1060px; height:470px; z-index:2; }
+  #lfBand { position:absolute; left:150px; top:1530px; width:1060px; height:470px; z-index:3; overflow:visible; }
+  #lfBand text { font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif; font-variant-numeric:tabular-nums; }
+  #lfBand .lf-num { font-size:11.4px; fill:#e8e8e8; }
+  #lfBand .lf-unit { font-size:12px; fill:#efefef; letter-spacing:.15px; }
+  /* 连线层：把左右两侧的“衣食住行”说明接到下方数据矩阵的各列上 */
+  #lfLink { position:absolute; left:0; top:0; width:1260px; height:2027px; z-index:1; pointer-events:none; }
+  #lfLink path { fill:none; stroke-linecap:round; }
+  #lfLink text { font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif; }
+  #lfLink .lf-n { font-size:11.4px; fill:#d8d8d8; }
+
+  /* ---------- 海报切换 ---------- */
+  #boardNav {
+    position:fixed; z-index:1200; left:50%; bottom:15px; transform:translateX(-50%);
+    display:flex; align-items:center; gap:3px; padding:5px;
+    border:1px solid rgba(255,255,255,.16); border-radius:999px;
+    background:rgba(8,8,8,.8); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    box-shadow:0 10px 34px rgba(0,0,0,.65);
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif; user-select:none;
+    opacity:.66; transition:opacity .2s ease;
+  }
+  #boardNav:hover { opacity:1; }
+  #boardNav .bn {
+    appearance:none; -webkit-appearance:none; border:0; background:transparent;
+    color:#a8a8a8; font-family:inherit; font-size:11px; letter-spacing:.4px;
+    padding:7px 13px; border-radius:999px; cursor:pointer; white-space:nowrap;
+    display:flex; align-items:center; gap:6px;
+    transition:background .18s ease,color .18s ease;
+  }
+  #boardNav .bn .bi { font-size:8.5px; opacity:.58; font-variant-numeric:tabular-nums; letter-spacing:.5px; }
+  #boardNav .bn:hover { color:#fff; background:rgba(255,255,255,.075); }
+  #boardNav .bn.on { color:#141414; background:#ececec; }
+  #boardNav .bn.on .bi { opacity:.5; }
+  @media (max-width:720px) {
+    #boardNav { bottom:8px; padding:4px; }
+    #boardNav .bn { font-size:10px; padding:6px 9px; gap:4px; }
+  }
+  /* 阅读版式：先说明，再图表，最后给出与图表对应的注释。 */
+  body { font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif; padding-bottom:72px; }
+  .t1,.t2,.sp-t1,.sp-t2,.lf-t1 { font-weight:800; letter-spacing:.2px; }
+  .sub,.sp-sub,.lf-sub { color:#bcbcbc; font-weight:500; letter-spacing:1.1px; }
+  .intro.a { left:68px; width:408px; }
+  .intro.b { left:512px; width:410px; }
+  .intro { font-size:14.3px; line-height:1.55; color:#e0e0e0; }
+  .row-lab { font-size:15px; color:#eee; padding-right:27px; }
+  .year-lab { font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .row-lab.hot,.year-lab.hot { text-shadow:0 0 4px rgba(255,255,255,.5); }
+  .s-lab,.s-group { font-size:11px; color:#e2e2e2; }
+  .period-head {
+    position:absolute; left:412px; z-index:5; display:flex; align-items:center; gap:14px;
+    color:#f0f0f0; font-size:13px; font-weight:700; letter-spacing:.8px;
+  }
+  .period-head::before { content:""; display:block; width:24px; height:2px; background:#ee7665; box-shadow:0 0 9px rgba(238,118,101,.5); }
+  .period-head small { color:#aaa; font-size:10px; font-weight:400; letter-spacing:.3px; }
+  .year-explorer { position:absolute; left:404px; top:1786px; width:790px; height:29px; z-index:12; display:flex; align-items:center; gap:10px; padding:0 10px; background:rgba(23,23,23,.92); border:1px solid rgba(255,255,255,.2); border-radius:4px; color:#e8e8e8; }
+  .year-explorer button { width:24px; height:24px; flex:0 0 auto; border:1px solid #a8a8a8; border-radius:50%; background:#292929; color:#fff; cursor:pointer; }
+  .year-explorer button:hover { background:#a93d34; }
+  .year-explorer input { flex:1; accent-color:#ef7966; cursor:pointer; }
+  .year-explorer .ey { min-width:40px; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .year-explorer .em { min-width:153px; font-size:11px; font-variant-numeric:tabular-nums; }
+  .year-beam { position:absolute; z-index:4; pointer-events:none; width:80px; opacity:0; transform:translateX(-50%); transition:left .45s ease,top .45s ease,height .45s ease,opacity .2s; background:linear-gradient(90deg,transparent,rgba(255,164,130,.065) 45%,rgba(255,220,190,.1) 50%,transparent); }
+  .year-beam.active { opacity:1; }
+  .year-beam::before { content:""; position:absolute; left:50%; top:0; bottom:0; width:1px; background:linear-gradient(transparent,rgba(255,206,175,.6),transparent); box-shadow:0 0 9px #eb7b60; }
+  .lg-lab { font-size:10.5px; line-height:1; color:#f1f1f1; text-shadow:0 1px 3px #000; }
+  .lg-lab.muted { color:#a8a8a8; }
+  .note {
+    width:400px; min-height:82px; padding:9px 12px; gap:10px;
+    background:linear-gradient(110deg,rgba(30,30,30,.92),rgba(18,18,18,.55));
+    border-left:2px solid rgba(243,103,81,.72); border-radius:3px;
+  }
+  .note .nb { width:19px; height:19px; font-size:10px; }
+  .note p { font-size:11.5px; line-height:1.38; color:#e4e4e4; }
+  .note .nt { color:#fff; }
+  .sp-intro { width:470px; font-size:13.5px; line-height:1.58; color:#ededed; }
+  .sp-leftpara {
+    top:1128px; font-size:12.5px; line-height:1.55; color:#f1f1f1;
+    padding:12px 14px; background:rgba(6,8,10,.95);
+    border:1px solid rgba(205,225,239,.28); border-left:2px solid #b9d6ed;
+    border-radius:3px; text-shadow:none;
+  }
+  .sp-lab { font-size:10.5px; color:#e5e5e5; }
+  .sp-legrow { font-size:10.8px; height:21px; color:#e5e5e5; }
+  .sp-note {
+    font-size:12px; line-height:1.48; padding:4px 12px; color:#e8edf1;
+    background:rgba(18,22,25,.72); border-top:1px solid rgba(184,214,237,.35);
+  }
+  #stageSpiral .sp-key span:last-child { font-size:9.8px !important; line-height:1.45 !important; }
+  #spiralWrap { left:70px; top:325px; width:795px; height:795px; }
+  #spiralBase,#spiralHover { width:795px; height:795px; }
+  .lf-p { padding:8px 9px; color:#f0f0f0; text-shadow:0 1px 2px #000; background:linear-gradient(90deg,rgba(0,0,0,.94),rgba(0,0,0,.75)); border-left:2px solid rgba(255,255,255,.42); }
+  #stageLife::before,#stageLife::after {
+    content:""; position:absolute; top:145px; height:1325px; z-index:8; pointer-events:none;
+    background:linear-gradient(90deg,rgba(0,0,0,.96),rgba(0,0,0,.82));
+    border-right:1px solid rgba(255,255,255,.12);
+  }
+  #stageLife::before { left:74px; width:181px; }
+  #stageLife::after { left:1011px; width:195px; border-right:0; border-left:1px solid rgba(255,255,255,.12); }
+  .lf-p.l,.lf-p.r { font-size:12.8px; line-height:1.48; }
+  .lf-h b { font-size:16px; }
+  .lf-cap { width:295px; font-size:13.5px; line-height:1.52; letter-spacing:.5px; color:#f0f0f0; padding:9px 11px; background:rgba(0,0,0,.88); border-left:2px solid #e36a5a; }
+  #lfBand .lf-num { font-size:12.4px; font-weight:600; fill:#fff; paint-order:stroke; stroke:#000; stroke-width:2px; }
+  #lfBand .lf-unit,#lfLink .lf-n { fill:#fff; paint-order:stroke; stroke:#000; stroke-width:2px; }
+  #tip { min-width:215px; max-width:330px; font-size:12px; line-height:1.6; border-color:rgba(255,255,255,.36); }
+  #tip .tt { font-size:13px; }
+  #tip .ts { font-size:11px; }
+  #boardNav { opacity:.88; }
+  #boardNav:focus-within { opacity:1; }
+  #boardNav .bn:focus-visible { outline:2px solid #ff9d87; outline-offset:2px; }
+  @keyframes revealChart { from { clip-path:inset(0 100% 0 0); opacity:.3; } to { clip-path:inset(0); opacity:1; } }
+  @keyframes bloomChart { from { clip-path:circle(0% at 50% 50%); opacity:.25; } to { clip-path:circle(75% at 50% 50%); opacity:1; } }
+  #stage.motion-active #grid1 { animation:revealChart 1.2s ease-out .3s both; }
+  #stage.motion-active #grid2 { animation:revealChart 1.2s ease-out .48s both; }
+  #stage.motion-active #grid3 { animation:revealChart 1.2s ease-out .66s both; }
+  #stageSpiral.motion-active #spiralBase { animation:bloomChart 1.5s ease-out .2s both; }
+  #stageLife.motion-active #lfArt { animation:bloomChart 1.5s ease-out .2s both; }
+  @media (prefers-reduced-motion:reduce) { #stage.motion-active .grid-canvas,#stageSpiral.motion-active #spiralBase,#stageLife.motion-active #lfArt { animation:none; } .year-beam { transition:none; } }
+</style>
+</head>
+<body>
+<div id="viewer">
+  <div id="stage">
+    <!-- 标题 -->
+    <h1 class="t1">2001-2021年中国主要部门</h1>
+    <h1 class="t2">煤炭和石油产品的碳排放量</h1>
+    <div class="sub">CARBON EMISSIONS FROM COAL AND PETROLEUM PRODUCTS IN MAJOR SECTORS OF CHINA</div>
+    <div class="logo">
+      <span class="en">Overall from</span>
+      <div class="cn"><b>碳全</b><i>局</i></div>
+    </div>
+
+    <!-- 引言 -->
+    <p class="intro a"><span>我们在中国47个部门中选取碳排放量占据前10的部门对其碳排放量进行分析，按照年份、碳排产品性质进行信息可视化。用星号标注了中国碳排的重要时间节点。</span><span>根据我国2001-2021年碳排放数据可知，在整体上，我国碳排放呈现逐年递增态势。这是由于过去我国选择大量化石能源消费的发展模式造成的。</span></p>
+    <p class="intro b"><span>此后，在2012年以后，我国开始注意到二氧化碳等温室气体排放的持续增加对环境的危害，碳排放的增长速度有所放缓。主要原因是随着我国经济社会的进一步发展，国家开始转变经济发展模式，不再依托于不合理的能源消费和产业发展模式以换取经济增长。</span></p>
+
+    <!-- 图例：国家 -->
+    <div class="lg-item" style="left:1093px; top:100px;"><span class="dot gray"></span><span class="ln" style="width:28px;"></span><span>美国</span></div>
+    <div class="lg-item" style="left:1093px; top:122px;"><span class="dot white"></span><span class="ln" style="width:28px;"></span><span>中国</span></div>
+
+    <!-- 图例：气泡尺寸 + 煤/油产品 -->
+    <canvas id="lgCanvas" width="400" height="464"></canvas>
+    <div class="lg-lab" style="left:1141px; top:147px;">碳排总量</div>
+    <div class="lg-lab" style="left:1141px; top:158px;">5.00</div>
+    <div class="lg-lab muted" style="left:1141px; top:169px;">Mt CO2</div>
+    <div class="lg-lab" style="left:1141px; top:186px;">150.00</div>
+    <div class="lg-lab toggle" id="lgCoal" style="left:1141px; top:205px;" title="点击显示 / 隐藏煤炭产品">煤炭产品</div>
+    <div class="lg-lab toggle" id="lgOil" style="left:1150px; top:250px;" title="点击显示 / 隐藏石油产品">石油产品</div>
+
+    <!-- 图例：气泡圈 -->
+    <svg id="pieSize" viewBox="0 0 175 112" style="left:1013px; top:264px;">
+      <g fill="none" stroke="#d8d8d8" stroke-width=".8">
+        <circle cx="60" cy="50" r="33" opacity=".9"/>
+        <circle cx="60" cy="50" r="22" opacity=".85"/>
+        <circle cx="60" cy="83" r="2.4" opacity=".9"/>
+      </g>
+      <g stroke="rgba(220,220,220,.55)" stroke-width=".6">
+        <line x1="84" y1="24" x2="128" y2="17"/>
+        <line x1="87" y1="38" x2="128" y2="29"/>
+        <line x1="91" y1="49" x2="128" y2="55"/>
+        <line x1="62" y1="83" x2="128" y2="71"/>
+      </g>
+    </svg>
+    <div class="lg-lab" style="left:1145px; top:285px;">碳排放量</div>
+    <div class="lg-lab" style="left:1145px; top:296px;">7000.00</div>
+    <div class="lg-lab muted" style="left:1145px; top:307px;">Mt CO2</div>
+    <div class="lg-lab" style="left:1145px; top:322px;">5000.00</div>
+    <div class="lg-lab" style="left:1145px; top:338px;">20.00</div>
+
+    <!-- 饼图 ① -->
+    <div class="badge" id="badge1">1</div>
+    <div class="pie-wrap" id="pie1wrap"><svg class="pie-svg" id="pie1" viewBox="-52 -52 104 104"></svg></div>
+    <svg class="callout" style="left:900px; top:315px; width:125px; height:125px;" viewBox="0 0 125 125">
+      <path d="M22,10 C58,34 70,58 94,72" fill="none" stroke="rgba(235,235,235,.7)" stroke-width=".8"/>
+    </svg>
+    <div class="star" style="left:990px; top:374px; width:26px; height:26px;">
+      <svg viewBox="0 0 40 40" width="26" height="26">
+        <defs><filter id="stg1" x="-90%" y="-90%" width="280%" height="280%"><feGaussianBlur stdDeviation="3.6"/></filter></defs>
+        <path filter="url(#stg1)" d="M20 0c1.5 12 6 18 20 20-14 2-18.5 8-20 20-1.5-12-6-18-20-20 14-2 18.5-8 20-20z" fill="#fff"/>
+        <path d="M20 0c1.5 12 6 18 20 20-14 2-18.5 8-20 20-1.5-12-6-18-20-20 14-2 18.5-8 20-20z" fill="#fff"/>
+      </svg>
+    </div>
+
+    <!-- 饼图 ② -->
+    <div class="badge" id="badge2">2</div>
+    <div class="pie-wrap" id="pie2wrap"><svg class="pie-svg" id="pie2" viewBox="-52 -52 104 104"></svg></div>
+    <svg class="callout" style="left:992px; top:1312px; width:115px; height:100px;" viewBox="0 0 115 100">
+      <path d="M20,18 C60,34 74,60 92,74" fill="none" stroke="rgba(235,235,235,.7)" stroke-width=".8"/>
+    </svg>
+    <div class="star" style="left:1082px; top:1390px; width:24px; height:24px;">
+      <svg viewBox="0 0 40 40" width="24" height="24">
+        <defs><filter id="stg2" x="-90%" y="-90%" width="280%" height="280%"><feGaussianBlur stdDeviation="3.2"/></filter></defs>
+        <path filter="url(#stg2)" d="M20 0c1.5 12 6 18 20 20-14 2-18.5 8-20 20-1.5-12-6-18-20-20 14-2 18.5-8 20-20z" fill="#fff"/>
+        <path d="M20 0c1.5 12 6 18 20 20-14 2-18.5 8-20 20-1.5-12-6-18-20-20 14-2 18.5-8 20-20z" fill="#fff"/>
+      </svg>
+    </div>
+
+    <!-- 数据网格 -->
+    <div id="yearBeam" class="year-beam" aria-hidden="true"></div>
+    <div class="period-head" style="top:465px;">2001—2007 <small>部门排放量 · 煤炭与石油产品</small></div>
+    <div class="period-head" style="top:863px;">2008—2014 <small>部门排放量 · 煤炭与石油产品</small></div>
+    <div class="period-head" style="top:1285px;">2015—2021 <small>部门排放量 · 煤炭与石油产品</small></div>
+    <canvas class="grid-canvas" id="grid1" width="1740" height="730"></canvas>
+    <canvas class="grid-canvas" id="grid2" width="1740" height="840"></canvas>
+    <canvas class="grid-canvas" id="grid3" width="1740" height="1016"></canvas>
+    <div class="year-explorer" aria-label="逐年浏览部门排放量">
+      <button id="yearPlay" type="button" aria-label="播放年份变化">▶</button>
+      <span id="yearReadout" class="ey">2001</span>
+      <input id="yearRange" type="range" min="2001" max="2021" value="2001" aria-label="选择年份">
+      <span class="em">总量 <strong id="totalReadout">3,480</strong> Mt CO₂</span>
+    </div>
+
+    <div id="rowLabels"></div>
+    <div id="yearLabels"></div>
+
+    <!-- 折线图 ③ -->
+    <svg id="lineSvg" viewBox="0 0 330 290">
+      <defs>
+        <filter id="glowDot" x="-300%" y="-300%" width="700%" height="700%">
+          <feGaussianBlur stdDeviation="2.6" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+    </svg>
+
+    <!-- 城乡发展 ④ -->
+    <svg id="strandSvg" viewBox="0 0 180 510">
+      <defs>
+        <filter id="glowDot2" x="-260%" y="-140%" width="620%" height="380%">
+          <feGaussianBlur stdDeviation="2.2" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+    </svg>
+    <div class="badge" id="badge3">3</div>
+    <div class="badge" id="badge4">4</div>
+
+    <!-- 底部注释 -->
+    <div class="note" style="left:304px; top:1818px;">
+      <span class="nb">1</span>
+      <p><span class="nt">《2006年全球前十碳排放量国家碳排比例饼图》</span><span class="nd">自2006年起，中国超越美国，成为世界上最大的CO2排放国家。</span></p>
+    </div>
+    <div class="note" style="left:304px; top:1910px;">
+      <span class="nb">2</span>
+      <p><span class="nt">《2021年中国、美国、欧盟历史累积碳排放量比例饼图》</span><span class="nd">自工业革命以来至2021年，中国历史累积CO2排放量仅次于美国与欧盟。</span></p>
+    </div>
+    <div class="note" style="left:742px; top:1818px;">
+      <span class="nb">3</span>
+      <p><span class="nt">《2001-2021年中国人均碳排放量折线图》</span><span class="nd">我国在2012年前后人均碳排放量增幅有明显变化。</span></p>
+    </div>
+    <div class="note" style="left:742px; top:1910px;">
+      <span class="nb">4</span>
+      <p><span class="nt">《2001-2021年中国城乡发展碳排放量示意图》</span><span class="nd">中国城镇发展石油产品占比逐年增大，农村发展煤炭产品占比大于石油产品。</span></p>
+    </div>
+
+    <div class="stripe"></div>
+    <div class="vignette"></div>
+  </div>
+</div>
+
+<!-- ================= 第二张：瓦里关温室气体 ================= -->
+<div id="viewerSpiral">
+  <div id="stageSpiral">
+    <h1 class="sp-t1">2001-2021年中国瓦里关站</h1>
+    <h1 class="sp-t2">大气温室气体逐月平均浓度</h1>
+    <div class="sp-sub">MONTHLY GREENHOUSE GAS CONCENTRATIONS AT WALIGUAN STATION, 2001–2021</div>
+    <div class="logo">
+      <span class="en">Overall from</span>
+      <div class="cn"><b>碳全</b><i>局</i></div>
+    </div>
+
+    <p class="sp-intro"><span>温室气体指的是大气中能吸收地面反射的长波辐射，并重新发射辐射的一些气体，如水蒸气、二氧化碳、大部分制冷剂等。</span><span>二氧化碳（CO2）是影响地球辐射平衡最主要的长寿命温室气体。</span></p>
+
+    <!-- 右上：小型图表 -->
+    <svg class="sp-area" id="spArea" viewBox="0 0 152 58"></svg>
+    <div class="sp-lab" style="left:1052px; top:212px;">大气CO2月平均浓度（ppm）</div>
+    <div class="sp-lab" style="left:1052px; top:232px;">大气CH4月平均浓度（ppm）</div>
+
+    <svg id="spDial" viewBox="0 0 120 120" style="left:918px; top:290px; width:120px; height:120px;"></svg>
+    <div class="sp-dial-lab" style="left:1104px; top:326px;">每一季度</div>
+    <div class="sp-dial-lab" style="left:1108px; top:359px;">每一年份（取后两位标注）</div>
+
+    <div class="sp-lab" style="left:1004px; top:384px; font-size:9.2px;">碳排放强度（万吨/亿元）</div>
+    <svg id="spSemi" viewBox="0 0 120 64" style="left:900px; top:423px; width:120px; height:64px;"></svg>
+    <div class="sp-semi-lab" style="left:1092px; top:418px;">西部地区</div>
+    <div class="sp-semi-lab" style="left:1092px; top:434px;">中部地区</div>
+    <div class="sp-semi-lab" style="left:1092px; top:450px;">东部地区</div>
+
+    <div class="sp-leglist" id="spLeglist">
+      <div class="sp-legrow" data-s="1"><i>1</i><span class="ld"></span>大气CH4浓度数值</div>
+      <div class="sp-legrow" data-s="2"><i>2</i><span class="ld"></span>大气CO2浓度数值</div>
+      <div class="sp-legrow" data-s="3"><i>3</i><span class="ld"></span>我国温室气体排放来源</div>
+      <div class="sp-legrow" data-s="4"><i>4</i><span class="ld"></span>CO2增长率（ppm/年）</div>
+      <div class="sp-legrow" data-s="5"><i>5</i><span class="ld"></span>CH4增长率（ppb/年）</div>
+    </div>
+
+    <!-- 主螺旋 -->
+    <div id="spiralWrap">
+      <canvas id="spiralBase" width="2000" height="2000"></canvas>
+      <canvas id="spiralHover" width="2000" height="2000"></canvas>
+    </div>
+
+    <!-- 左下说明 -->
+    <p class="sp-leftpara">2021年，在位于青海的瓦里关全球大气本底站观测到的二氧化碳浓度较2020年增幅约2.3ppm，与全球增幅基本持平；过去10年（2012—2021年）二氧化碳浓度平均绝对增量为2.16ppm，低于全球同期增幅（2.46ppm）。</p>
+
+    <!-- CO2 占比球 -->
+    <svg id="spCo2" viewBox="0 0 168 168">
+      <defs>
+        <radialGradient id="co2orb" cx="35%" cy="27%" r="78%">
+          <stop offset="0" stop-color="#f4f5f1"/>
+          <stop offset=".32" stop-color="#d8dbd3"/>
+          <stop offset=".6" stop-color="#969b96"/>
+          <stop offset=".82" stop-color="#434743"/>
+          <stop offset="1" stop-color="#101110"/>
+        </radialGradient>
+        <filter id="co2glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="7" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="co2noise" x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.032 0.038" numOctaves="4" seed="9" result="n"/>
+          <feColorMatrix in="n" type="matrix" values="0 0 0 0 .9  0 0 0 0 .93  0 0 0 0 .95  0 0 0 .55 -.18" result="c"/>
+          <feComposite in="c" in2="SourceGraphic" operator="in"/>
+          <feBlend in="SourceGraphic" in2="c" mode="screen"/>
+        </filter>
+        <clipPath id="co2clip"><circle cx="84" cy="84" r="77"/></clipPath>
+      </defs>
+      <circle cx="84" cy="84" r="79" fill="rgba(255,255,255,.06)" filter="url(#co2glow)"/>
+      <circle cx="84" cy="84" r="77" fill="url(#co2orb)" filter="url(#co2noise)"/>
+      <g clip-path="url(#co2clip)" opacity=".5">
+        <path d="M8 62 C36 38 52 66 76 54 S120 18 156 42 L160 52 C128 32 102 66 74 64 S38 54 16 78 Z" fill="rgba(238,240,225,.45)"/>
+        <path d="M2 104 C28 82 54 108 78 96 S124 76 162 96 L162 112 C130 94 104 116 76 110 S36 94 8 118 Z" fill="rgba(215,222,213,.32)"/>
+        <ellipse cx="124" cy="120" rx="33" ry="13" fill="rgba(10,10,10,.25)" transform="rotate(-18 124 120)"/>
+        <ellipse cx="64" cy="36" rx="26" ry="9" fill="rgba(255,255,255,.22)" transform="rotate(22 64 36)"/>
+      </g>
+      <circle cx="84" cy="84" r="77" fill="none" stroke="rgba(240,240,235,.75)" stroke-width=".8"/>
+      <text x="84" y="76" text-anchor="middle" fill="#1b1c1a" font-size="12.5" font-family="'Microsoft YaHei',sans-serif">CO₂</text>
+      <text x="84" y="93" text-anchor="middle" fill="#20211f" font-size="11.5" font-family="'Microsoft YaHei',sans-serif">82.6%</text>
+    </svg>
+    <svg class="callout" style="left:1035px; top:1000px; width:80px; height:90px; z-index:6;" viewBox="0 0 80 90">
+      <g fill="none" stroke="rgba(220,220,215,.62)" stroke-width=".7">
+        <path d="M45,40 C34,58 24,68 12,82"/>
+        <path d="M51,44 C42,62 33,72 22,84"/>
+        <path d="M58,48 C50,65 41,75 32,86"/>
+      </g>
+    </svg>
+    <div class="sp-callout" style="left:1020px; top:1088px; writing-mode:vertical-rl;">其他气体</div>
+    <div class="sp-callout" style="left:1048px; top:1086px; writing-mode:vertical-rl;">N2O</div>
+    <div class="sp-callout" style="left:1070px; top:1082px; writing-mode:vertical-rl;">CH4</div>
+    <div class="sp-badge" style="left:1230px; top:1112px;">3</div>
+
+    <!-- 增长率山脊图 -->
+    <svg id="ridgeSvg" viewBox="0 0 352 222">
+      <defs>
+        <linearGradient id="rgA" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#dfe9ea"/><stop offset=".25" stop-color="#c8dcd5"/>
+          <stop offset=".5" stop-color="#e7d4e4"/><stop offset=".75" stop-color="#e9e1b8"/>
+          <stop offset="1" stop-color="#d7e6e6"/>
+        </linearGradient>
+        <linearGradient id="rgB" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#cfdde1"/><stop offset=".3" stop-color="#d3c9df"/>
+          <stop offset=".58" stop-color="#eee3b9"/><stop offset=".8" stop-color="#dfd5c7"/>
+          <stop offset="1" stop-color="#c9d9d8"/>
+        </linearGradient>
+        <linearGradient id="rgFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="rgba(245,245,240,.6)"/>
+          <stop offset=".38" stop-color="rgba(210,215,210,.24)"/>
+          <stop offset="1" stop-color="rgba(180,185,180,.02)"/>
+        </linearGradient>
+      </defs>
+      <g id="ridgeTop"></g>
+      <g id="ridgeBot"></g>
+    </svg>
+    <div class="sp-badge" style="left:1230px; top:1230px;">4</div>
+    <div class="sp-badge" style="left:1048px; top:1326px;">5</div>
+
+    <!-- 七种温室气体 -->
+    <h2 class="sp-h2">目前UNFCCC管控的7种温室气体</h2>
+    <div class="sp-h2line"></div>
+    <div class="sp-h2sub">温室气体种类及其分子比例模型</div>
+    <svg id="molSvg" viewBox="0 0 624 380"></svg>
+    <div id="orbLayer"></div>
+
+    <div class="sp-key" style="left:1100px; top:1352px; align-items:flex-start;">
+      <span class="k" style="width:24px; height:24px; margin-top:4px;"></span>
+      <span style="font-size:7.6px; line-height:1.5;">造成温室效应程度<br>受气体总排放量和GWP共同影响</span>
+    </div>
+    <div class="sp-key" style="left:1104px; top:1428px; align-items:flex-start;">
+      <span class="k" style="width:12px; height:12px; margin-top:3px;"></span>
+      <span style="font-size:7.6px; line-height:1.5;">气体GWP贡献<br>（以二氧化碳的GWP值为1计算）</span>
+    </div>
+
+    <!-- 说明 -->
+    <p class="sp-note" style="left:57px; top:1686px; width:568px;">温室气体之所以有温室效应，是由于其本身有吸收红外线（一种热辐射）的能力。温室气体吸收红外线的能力是由其本身分子结构所决定的。温室气体是拥有偶极矩的红外活性分子，所以才拥有吸收红外线、保存红外热能的能力。</p>
+    <p class="sp-note" style="left:656px; top:1686px; width:560px;">为了评价各种温室气体对气候变化影响的相对能力，人们采用了一个被称为“全球增温潜势”（global warming potential，GWP）的参数。主要温室气体的GWP参数如上图所示。</p>
+
+    <!-- 地球与辐射 -->
+    <svg id="earthSvg" viewBox="0 0 1260 296">
+      <defs>
+        <radialGradient id="earthFill" cx="50%" cy="0%" r="100%">
+          <stop offset="0" stop-color="#272d30"/>
+          <stop offset=".45" stop-color="#12171a"/>
+          <stop offset="1" stop-color="#050606"/>
+        </radialGradient>
+        <linearGradient id="atmRim" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#6c98b9" stop-opacity="0"/>
+          <stop offset=".16" stop-color="#9fc0d7" stop-opacity=".45"/>
+          <stop offset=".36" stop-color="#f1f7fb" stop-opacity=".96"/>
+          <stop offset=".5" stop-color="#fff" stop-opacity="1"/>
+          <stop offset=".64" stop-color="#eef6fa" stop-opacity=".96"/>
+          <stop offset=".84" stop-color="#9fc0d7" stop-opacity=".45"/>
+          <stop offset="1" stop-color="#6c98b9" stop-opacity="0"/>
+        </linearGradient>
+        <radialGradient id="earthHalo" cx="50%" cy="50%" r="50%">
+          <stop offset=".9" stop-color="#a9c6da" stop-opacity="0"/>
+          <stop offset=".97" stop-color="#b9d2e2" stop-opacity=".3"/>
+          <stop offset="1" stop-color="#d6e6f1" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="softGlow" x="-20%" y="-80%" width="140%" height="260%">
+          <feGaussianBlur stdDeviation="3.4" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="cloudF" x="-10%" y="-20%" width="120%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.007 0.015" numOctaves="5" seed="12" result="n"/>
+          <feColorMatrix in="n" type="matrix" values="0 0 0 0 .82  0 0 0 0 .87  0 0 0 0 .92  0 0 0 1.1 -.48" result="c"/>
+          <feGaussianBlur in="c" stdDeviation="1.1"/>
+        </filter>
+        <filter id="cloudF2" x="-10%" y="-20%" width="120%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.013 0.026" numOctaves="4" seed="27" result="n"/>
+          <feColorMatrix in="n" type="matrix" values="0 0 0 0 .95  0 0 0 0 .97  0 0 0 0 1  0 0 0 .8 -.36" result="c"/>
+          <feGaussianBlur in="c" stdDeviation="2.4"/>
+        </filter>
+        <clipPath id="earthClip"><circle cx="630" cy="1240" r="1130"/></clipPath>
+        <marker id="arrH" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0 0 L6 3 L0 6" fill="none" stroke="rgba(220,225,230,.6)" stroke-width=".7"/>
+        </marker>
+      </defs>
+      <g id="earthStars"></g>
+      <g clip-path="url(#earthClip)">
+        <circle cx="630" cy="1240" r="1130" fill="url(#earthFill)"/>
+        <rect x="-80" y="90" width="1420" height="300" filter="url(#cloudF)" opacity=".55"/>
+        <rect x="-80" y="120" width="1420" height="230" filter="url(#cloudF2)" opacity=".32"/>
+        <ellipse cx="370" cy="255" rx="280" ry="58" fill="rgba(3,5,7,.55)" filter="url(#softGlow)"/>
+        <ellipse cx="930" cy="238" rx="240" ry="45" fill="rgba(4,6,8,.5)" filter="url(#softGlow)"/>
+        <ellipse cx="690" cy="290" rx="360" ry="36" fill="rgba(220,228,232,.13)"/>
+      </g>
+      <circle cx="630" cy="1240" r="1130" fill="none" stroke="url(#earthHalo)" stroke-width="24" opacity=".55"/>
+      <circle cx="630" cy="1240" r="1130" fill="none" stroke="url(#atmRim)" stroke-width="2.6" filter="url(#softGlow)"/>
+      <circle cx="630" cy="1240" r="1122" fill="none" stroke="rgba(238,246,248,.36)" stroke-width="1.1"/>
+      <path d="M70 28 L150 96 L148 99 L62 38 Z" fill="rgba(220,235,245,.06)"/>
+      <path d="M155 12 L205 91 L202 94 L148 24 Z" fill="rgba(220,235,245,.045)"/>
+      <g stroke="rgba(200,215,225,.36)" stroke-width=".7" fill="none" stroke-dasharray="1.5 4">
+        <path d="M116 58 L196 122"/>
+        <path d="M264 92 L300 140"/>
+      </g>
+      <g class="elab">
+        <text x="78" y="57">太阳辐射</text>
+        <line x1="121" y1="57" x2="182" y2="111" class="earrow" marker-end="url(#arrH)"/>
+        <text x="84" y="150">大气反射</text>
+        <line x1="124" y1="147" x2="166" y2="106" class="earrow" marker-end="url(#arrH)"/>
+        <text x="56" y="181">大气吸收</text>
+        <line x1="104" y1="178" x2="138" y2="166" class="earrow" marker-end="url(#arrH)"/>
+        <text x="150" y="211">地面反射</text>
+        <line x1="196" y1="205" x2="242" y2="169" class="earrow" marker-end="url(#arrH)"/>
+        <text x="263" y="243">地面长波辐射</text>
+        <line x1="322" y1="237" x2="366" y2="207" class="earrow" marker-end="url(#arrH)"/>
+        <text x="474" y="99">云层反射</text>
+        <line x1="500" y1="96" x2="538" y2="129" class="earrow" marker-end="url(#arrH)"/>
+        <text x="858" y="130" style="font-size:7.4px;">温室气体吸收后发射的红外辐射</text>
+        <text x="858" y="141" style="font-size:7.4px;">使地表温度升高</text>
+        <line x1="1046" y1="120" x2="1068" y2="147" class="earrow" marker-end="url(#arrH)"/>
+        <text x="1112" y="72">逸出大气</text>
+        <line x1="1136" y1="78" x2="1114" y2="122" class="earrow" marker-end="url(#arrH)"/>
+        <text x="1158" y="196">大气窗口</text>
+        <line x1="1150" y1="190" x2="1100" y2="154" class="earrow" marker-end="url(#arrH)"/>
+        <text x="1120" y="240">温室气体</text>
+        <line x1="1112" y1="234" x2="1078" y2="201" class="earrow" marker-end="url(#arrH)"/>
+      </g>
+    </svg>
+
+    <div class="stripe"></div>
+    <div class="vignette"></div>
+  </div>
+</div>
+
+<!-- ================= 第三张：衣食住行中的碳数据 ================= -->
+<div id="viewerLife">
+  <div id="stageLife">
+    <h1 class="lf-t1">衣食住行中的碳数据</h1>
+    <div class="lf-sub">THE CARBON FOOTPRINT OF CLOTHING, FOOD, HOUSING AND TRAVEL</div>
+    <div class="logo">
+      <span class="en">Overall from</span>
+      <div class="cn"><b>碳全</b><i>局</i></div>
+    </div>
+
+    <!-- 中部：以碳数据为基础生成的视觉图像 -->
+    <canvas id="lfArt" width="2240" height="2640"></canvas>
+    <div class="lf-rule s"></div>
+    <div class="lf-rule d"></div>
+    <div class="lf-cap2">以碳数据为基础生成的视觉图像</div>
+
+    <!-- 左栏：行 · 食 -->
+    <div class="lf-h" style="left:95px; top:161px;"><i></i><b>行 · 日常活动</b></div>
+    <p class="lf-p l" style="left:87px; top:196px; width:165px;">相较其他必需的生活活动而言，我们的交通方式对碳排放影响更大。</p>
+    <p class="lf-p l" style="left:87px; top:819px; width:165px;">交通距离更近时选择步行或汽车、选择新能源车，这些是我们有可能做出的改变。</p>
+
+    <div class="lf-h" style="left:95px; top:936px;"><i></i><b>食 · 食物种类</b></div>
+    <p class="lf-p l" style="left:100px; top:1092px; width:142px;">牛作为反刍动物，在食用牧草之后，在胃肠道消化过程中会产生大量甲烷。</p>
+
+    <!-- 右栏：住 · 衣 -->
+    <div class="lf-h" style="left:1024px; top:681px;"><i></i><b>住 · 建筑与材料</b></div>
+    <p class="lf-p r" style="left:1027px; top:156px; width:164px;">一座普通建筑的全生命周期（50年左右）产生的碳排放中，大约60％是运行期间的排放，40％是施工和上游过程中的排放。</p>
+    <p class="lf-p r" style="left:1027px; top:718px; width:164px;">平均而言，三分之二的排放是由主体结构和围护结构导致的；它们提供了最大的节能潜力，</p>
+    <p class="lf-p r" style="left:1027px; top:819px; width:164px;">剩下的三分之一主要是由建筑、设备和材料运输导致的；</p>
+
+    <div class="lf-h" style="left:1024px; top:1274px;"><i></i><b>衣 · 服装材料</b></div>
+    <p class="lf-p r" style="left:1027px; top:1316px; width:164px;">服装碳排放主要来自原料到面料的生产过程、使用时的车辆洗涤；</p>
+    <p class="lf-p r" style="left:1027px; top:1402px; width:164px;">采用低碳材料、低污染工艺又减少了材料的碳排放。</p>
+
+    <!-- 中部说明 -->
+    <div class="lf-cap">食品生产排放的温室气体占全球总的26%，下图展示了每公斤食品产生的二氧化碳排放（公斤）数据显示，动物产品通常比植物性产品排放更多。</div>
+
+    <!-- 底部：数据矩阵 -->
+    <canvas id="lfPlume" width="2120" height="940"></canvas>
+    <svg id="lfBand" viewBox="0 0 1060 470"></svg>
+    <svg id="lfLink" viewBox="0 0 1260 2027"></svg>
+
+    <div class="stripe"></div>
+    <div class="vignette"></div>
+  </div>
+</div>
+
+<div id="boardNav" role="tablist" aria-label="切换海报">
+  <button class="bn on" type="button" data-board="dept"><span class="bi">01</span>部门碳排放</button>
+  <button class="bn" type="button" data-board="spiral"><span class="bi">02</span>瓦里关温室气体</button>
+  <button class="bn" type="button" data-board="life"><span class="bi">03</span>衣食住行中的碳数据</button>
+</div>
+<div id="tip"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var $ = function (s) { return document.querySelector(s); };
+  var stage = $("#stage");
+  var tip = $("#tip");
+
+  /* ================= 数据 ================= */
+  var TOTAL = [3480, 3720, 4230, 4920, 5630, 6180, 6600, 6870, 7180, 7680, 8230, 8560, 8810, 8930, 8890, 8940, 9230, 9500, 9680, 9850, 10520];
+
+  var ROWS = [
+    { name: "总计", total: true },
+    { name: "农、林、牧、渔业、水利业", share: [0.0165, 0.0115], coal: [0.52, 0.44] },
+    { name: "煤炭采选业", share: [0.031, 0.024], coal: [0.93, 0.90] },
+    { name: "纺织工业", share: [0.0155, 0.0095], coal: [0.58, 0.50] },
+    { name: "造纸和纸制品", share: [0.0125, 0.0105], coal: [0.52, 0.46] },
+    { name: "化工原料和化工产品", share: [0.082, 0.092], coal: [0.64, 0.60] },
+    { name: "非金属矿产品", share: [0.050, 0.058], coal: [0.82, 0.78] },
+    { name: "黑色金属的冶炼和压制", share: [0.150, 0.128], coal: [0.90, 0.86] },
+    { name: "电力、蒸汽和热水的生产和供应", share: [0.390, 0.428], coal: [0.955, 0.945] },
+    { name: "运输、仓储、邮政和电信服务", share: [0.068, 0.082], coal: [0.16, 0.12] },
+    { name: "石油加工及炼焦业", share: [0.050, 0.058], coal: [0.30, 0.24] },
+    { name: "食品加工与生产", share: [0.0135, 0.0105], coal: [0.46, 0.40] }
+  ];
+
+  var PANELS = [
+    { el: $("#grid1"), bx: 390, by: 450, bw: 870, bh: 365, x0: 435, dx: 127.5, y0: 526, dy: 21.4, start: 2001, gap: 9.5, scale: 1.0, labY: 778 },
+    { el: $("#grid2"), bx: 390, by: 852, bw: 870, bh: 420, x0: 435, dx: 127.5, y0: 916, dy: 27.2, start: 2008, gap: 10, scale: 1.03, labY: 1247 },
+    { el: $("#grid3"), bx: 390, by: 1272, bw: 870, bh: 508, x0: 435, dx: 127.5, y0: 1360, dy: 33.0, start: 2015, gap: 11, scale: 1.12, labY: 1755 }
+  ];
+
+  var state = {
+    panel: null, ix: null, iy: null, series: null,
+    hoverRow: null, hoverYear: null, selectedYear: null,
+    showCoal: true, showOil: true
+  };
+
+  var lerp = function (a, b, p) { return a + (b - a) * p; };
+  var clamp = function (v, a, b) { return Math.max(a, Math.min(b, v)); };
+  var fmt = function (n) { return Math.round(n).toLocaleString("en-US"); };
+
+  function valueFor(row, t, series) {
+    var p = t / 20;
+    if (row.total) {
+      var cs = lerp(0.80, 0.70, p);
+      return series === "coal" ? TOTAL[t] * cs : TOTAL[t] * (1 - cs);
+    }
+    var share = lerp(row.share[0], row.share[1], p);
+    var v = TOTAL[t] * share;
+    var split = lerp(row.coal[0], row.coal[1], p);
+    return v * (series === "coal" ? split : 1 - split);
+  }
+  function radiusFor(v, scale) {
+    return (2.0 + 0.112 * Math.sqrt(Math.max(v, 0))) * scale;
+  }
+  function rowValue(iy, t) {
+    return valueFor(ROWS[iy], t, "coal") + valueFor(ROWS[iy], t, "oil");
+  }
+
+  /* ================= 提示框 ================= */
+  function moveTip(x, y) {
+    var r = tip.getBoundingClientRect();
+    var left = x + 16, top = y + 16;
+    if (left + r.width > window.innerWidth - 10) left = x - r.width - 16;
+    if (top + r.height > window.innerHeight - 10) top = y - r.height - 16;
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  }
+  function showTip(html, x, y) {
+    tip.innerHTML = html;
+    tip.classList.add("show");
+    moveTip(x, y);
+  }
+  function hideTip() { tip.classList.remove("show"); }
+
+  function seriesRow(label, cls, value, dim, unit) {
+    return '<div class="tr' + (dim ? " dim" : "") + '"><span class="sw ' + cls + '"></span><span>' + label +
+      "</span><b>" + fmt(value) + "</b></div>";
+  }
+
+  /* ================= 发光粒子贴图 ================= */
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function makeGlow(seed) {
+    var S = 256, c = document.createElement("canvas");
+    c.width = c.height = S;
+    var x = c.getContext("2d"), rnd = mulberry32(seed);
+    var g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0, "rgba(255,255,255,.76)");
+    g.addColorStop(.06, "rgba(252,252,255,.5)");
+    g.addColorStop(.18, "rgba(242,245,255,.2)");
+    g.addColorStop(.48, "rgba(236,241,255,.065)");
+    g.addColorStop(1, "rgba(236,241,255,0)");
+    x.fillStyle = g; x.fillRect(0, 0, S, S);
+    for (var i = 0; i < 1700; i++) {
+      var a = rnd() * Math.PI * 2, rr = Math.pow(rnd(), .62) * S * .48;
+      var px = S / 2 + Math.cos(a) * rr, py = S / 2 + Math.sin(a) * rr;
+      var sz = .35 + rnd() * 1.3;
+      var al = (1 - rr / (S * .5)) * .55 * rnd();
+      x.fillStyle = "rgba(255,255,255," + al.toFixed(3) + ")";
+      x.beginPath(); x.arc(px, py, sz, 0, 6.2832); x.fill();
+    }
+    return c;
+  }
+  var GLOW = [makeGlow(7), makeGlow(31), makeGlow(97)];
+
+  var CORE = (function () {
+    var S = 128, c = document.createElement("canvas");
+    c.width = c.height = S;
+    var x = c.getContext("2d");
+    var g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0, "rgba(228,228,222,.62)");
+    g.addColorStop(.22, "rgba(235,235,229,.58)");
+    g.addColorStop(.44, "rgba(190,190,184,.42)");
+    g.addColorStop(.58, "rgba(242,242,237,.86)");
+    g.addColorStop(.71, "rgba(255,255,252,1)");
+    g.addColorStop(.84, "rgba(210,210,204,.3)");
+    g.addColorStop(1, "rgba(150,150,145,0)");
+    x.fillStyle = g; x.beginPath(); x.arc(S / 2, S / 2, S / 2, 0, 6.2832); x.fill();
+    return c;
+  })();
+
+  /* ================= 绘制网格 ================= */
+  function renderStatic(panel) {
+    var cv = document.createElement("canvas");
+    cv.width = panel.el.width; cv.height = panel.el.height;
+    var ctx = cv.getContext("2d");
+    ctx.setTransform(2, 0, 0, 2, 0, 0);
+    ctx.clearRect(0, 0, panel.bw, panel.bh);
+
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = .06;
+    ctx.drawImage(GLOW[2], 8, 2, panel.bw - 16, panel.bh - 6);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+
+    var ox = panel.bx, oy = panel.by;
+    for (var ix = 0; ix < 7; ix++) {
+      var t = panel.start + ix - 2001;
+      var cx = panel.x0 + ix * panel.dx - ox;
+      for (var iy = 0; iy < ROWS.length; iy++) {
+        var row = ROWS[iy];
+        var cy = panel.y0 + iy * panel.dy - oy;
+        for (var si = 0; si < 2; si++) {
+          var series = si === 0 ? "coal" : "oil";
+          if (series === "coal" && !state.showCoal) continue;
+          if (series === "oil" && !state.showOil) continue;
+          var v = valueFor(row, t, series);
+          var r = radiusFor(v, panel.scale * (iy === 0 ? 1.12 : 1));
+          var px = cx + (series === "coal" ? -panel.gap : panel.gap);
+          var hs = r * 4.7 + 13;
+          ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = .17 + Math.min(.26, r * .013);
+          ctx.drawImage(GLOW[(ix + iy + si) % 3], px - hs, cy - hs, hs * 2, hs * 2);
+          ctx.globalCompositeOperation = "source-over";
+          ctx.globalAlpha = .97;
+          ctx.drawImage(CORE, px - r * 1.3, cy - r * 1.3, r * 2.6, r * 2.6);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+    panel.staticLayer = cv;
+  }
+
+  function bubbleRadius(panel, iy, t, series) {
+    var v = valueFor(ROWS[iy], t, series);
+    return radiusFor(v, panel.scale * (iy === 0 ? 1.12 : 1));
+  }
+
+  function paint(panel) {
+    var el = panel.el, ctx = el.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, el.width, el.height);
+    if (panel.staticLayer) ctx.drawImage(panel.staticLayer, 0, 0);
+    ctx.setTransform(2, 0, 0, 2, 0, 0);
+
+    var ox = panel.bx, oy = panel.by;
+
+    var activeYear = state.hoverYear !== null ? state.hoverYear : state.selectedYear;
+    if (activeYear !== null && activeYear >= panel.start && activeYear <= panel.start + 6) {
+      var cix = activeYear - panel.start;
+      var hcx = panel.x0 + cix * panel.dx - ox;
+      var htop = panel.y0 - 18 - oy;
+      var hbot = panel.y0 + 11 * panel.dy + 20 - oy;
+      var hg = ctx.createLinearGradient(hcx - panel.dx / 2, 0, hcx + panel.dx / 2, 0);
+      hg.addColorStop(0, "rgba(255,255,255,0)");
+      hg.addColorStop(.5, "rgba(255,255,255,.055)");
+      hg.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = hg;
+      ctx.fillRect(hcx - panel.dx / 2, htop, panel.dx, hbot - htop);
+    }
+
+    if (state.hoverRow !== null) {
+      var hry = panel.y0 + state.hoverRow * panel.dy - oy;
+      ctx.fillStyle = "rgba(255,255,255,.05)";
+      ctx.fillRect(panel.x0 - 28 - ox, hry - panel.dy * .42, 6 * panel.dx + 56, panel.dy * .84);
+    }
+
+    if (state.panel === panel && state.ix !== null && state.iy !== null) {
+      var t = panel.start + state.ix - 2001;
+      var cx = panel.x0 + state.ix * panel.dx - ox;
+      var cy = panel.y0 + state.iy * panel.dy - oy;
+      var px = cx + (state.series === "coal" ? -panel.gap : panel.gap);
+      var r = bubbleRadius(panel, state.iy, t, state.series);
+      ctx.strokeStyle = "rgba(255,255,255,.95)";
+      ctx.lineWidth = 1.1;
+      ctx.shadowColor = "rgba(255,255,255,.95)";
+      ctx.shadowBlur = 11;
+      ctx.beginPath(); ctx.arc(px, cy, r + 4.5, 0, 6.2832); ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  function paintAll() { PANELS.forEach(paint); }
+
+  /* ================= 标签 ================= */
+  function buildLabels() {
+    var rowBox = $("#rowLabels"), yearBox = $("#yearLabels");
+    ROWS.forEach(function (row, i) {
+      var d = document.createElement("div");
+      d.className = "row-lab";
+      d.style.top = (526 + i * 21.4) + "px";
+      d.dataset.row = i;
+      d.textContent = row.name;
+      if (i === 0 || i === 5 || i === 10) {
+        var dash = document.createElement("span");
+        dash.className = "dash";
+        d.appendChild(dash);
+      }
+      rowBox.appendChild(d);
+    });
+
+    PANELS.forEach(function (p, pi) {
+      for (var ix = 0; ix < 7; ix++) {
+        var yr = p.start + ix;
+        var d = document.createElement("div");
+        d.className = "year-lab";
+        d.style.left = (p.x0 + ix * p.dx) + "px";
+        d.style.top = p.labY + "px";
+        d.textContent = yr;
+        d.dataset.year = yr;
+        d.dataset.panel = pi;
+        yearBox.appendChild(d);
+      }
+      if (pi > 0) {
+        [0, 5, 10].forEach(function (r) {
+          var t = document.createElement("div");
+          t.className = "row-tick";
+          t.style.top = (p.y0 + r * p.dy) + "px";
+          stage.appendChild(t);
+        });
+      }
+    });
+
+    document.querySelectorAll(".row-lab").forEach(function (el) {
+      var iy = parseInt(el.dataset.row, 10);
+      el.addEventListener("mouseenter", function (e) {
+        state.hoverRow = iy; state.hoverYear = null;
+        state.panel = null; state.ix = null; state.iy = null; state.series = null;
+        paintAll(); updateHot();
+        var row = ROWS[iy];
+        var a = rowValue(iy, 0), b = rowValue(iy, 20);
+        showTip('<div class="tt">' + row.name + "</div>" +
+          '<div class="tr"><span class="sw"></span><span>2021 年排放量</span><b>' + fmt(b) + "</b></div>" +
+          '<div class="ts">2001 年 ' + fmt(a) + " Mt CO₂ · " +
+          (a > 0 ? "变化 " + ((b / a - 1) * 100).toFixed(0) + "%" : "") + "</div>", e.clientX, e.clientY);
+      });
+      el.addEventListener("mousemove", function (e) { moveTip(e.clientX, e.clientY); });
+      el.addEventListener("mouseleave", function () {
+        state.hoverRow = null;
+        paintAll(); updateHot(); hideTip();
+      });
+    });
+
+    document.querySelectorAll(".year-lab").forEach(function (el) {
+      var yr = parseInt(el.dataset.year, 10);
+      var pi = parseInt(el.dataset.panel, 10);
+      el.addEventListener("mouseenter", function (e) {
+        state.hoverYear = yr; state.hoverRow = null;
+        state.panel = null; state.ix = null; state.iy = null; state.series = null;
+        paintAll(); updateHot();
+        var t = yr - 2001;
+        var coal = ROWS.slice(1).reduce(function (s, r) { return s + valueFor(r, t, "coal"); }, 0);
+        var oil = ROWS.slice(1).reduce(function (s, r) { return s + valueFor(r, t, "oil"); }, 0);
+        showTip('<div class="tt">' + yr + " 年 · 全部主要部门</div>" +
+          '<div class="tr"><span class="sw coal"></span><span>煤炭产品</span><b>' + fmt(coal) + "</b></div>" +
+          '<div class="tr"><span class="sw oil"></span><span>石油产品</span><b>' + fmt(oil) + "</b></div>" +
+          '<div class="ts">合计 ' + fmt(coal + oil) + " Mt CO₂</div>", e.clientX, e.clientY);
+      });
+      el.addEventListener("mousemove", function (e) { moveTip(e.clientX, e.clientY); });
+      el.addEventListener("mouseleave", function () {
+        state.hoverYear = null;
+        paintAll(); updateHot(); hideTip();
+      });
+    });
+  }
+
+  function updateHot() {
+    document.querySelectorAll(".row-lab").forEach(function (el) {
+      el.classList.toggle("hot", state.hoverRow !== null && parseInt(el.dataset.row, 10) === state.hoverRow);
+    });
+    document.querySelectorAll(".year-lab").forEach(function (el) {
+      var activeYear = state.hoverYear !== null ? state.hoverYear : state.selectedYear;
+      el.classList.toggle("hot", activeYear !== null && parseInt(el.dataset.year, 10) === activeYear);
+    });
+    var year = state.hoverYear !== null ? state.hoverYear : state.selectedYear;
+    var beam = $("#yearBeam");
+    if (year === null || state.hoverRow !== null) { beam.classList.remove("active"); return; }
+    var panel = PANELS[Math.floor((year - 2001) / 7)];
+    beam.style.left = (panel.x0 + (year - panel.start) * panel.dx) + "px";
+    beam.style.top = (panel.y0 - 28) + "px";
+    beam.style.height = (panel.dy * 11 + 56) + "px";
+    beam.classList.add("active");
+  }
+
+  function initYearExplorer() {
+    var range = $("#yearRange"), play = $("#yearPlay"), timer = null;
+    function showYear(year) {
+      year = Number(year);
+      range.value = year;
+      $("#yearReadout").textContent = year;
+      $("#totalReadout").textContent = fmt(TOTAL[year - 2001]);
+      state.selectedYear = year;
+      paintAll(); updateHot();
+    }
+    function stop() { clearInterval(timer); timer = null; play.textContent = "▶"; play.setAttribute("aria-label", "播放年份变化"); }
+    range.addEventListener("input", function () { stop(); showYear(range.value); });
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (Number(range.value) === 2021) showYear(2001);
+      play.textContent = "Ⅱ"; play.setAttribute("aria-label", "暂停年份变化");
+      timer = setInterval(function () {
+        if (document.getElementById("viewer").style.display === "none") { stop(); return; }
+        var next = Number(range.value) + 1;
+        if (next > 2021) { stop(); return; }
+        showYear(next);
+      }, 650);
+    });
+    showYear(2001);
+  }
+
+  /* ================= 网格交互 ================= */
+  function toLocal(panel, e) {
+    var rect = panel.el.getBoundingClientRect();
+    return [
+      (e.clientX - rect.left) * (panel.bw / rect.width) + panel.bx,
+      (e.clientY - rect.top) * (panel.bh / rect.height) + panel.by
+    ];
+  }
+
+  PANELS.forEach(function (panel) {
+    var el = panel.el;
+    el.addEventListener("mousemove", function (e) {
+      var xy = toLocal(panel, e);
+      var x = xy[0], y = xy[1];
+      var ix = clamp(Math.round((x - panel.x0) / panel.dx), 0, 6);
+      var iy = clamp(Math.round((y - panel.y0) / panel.dy), 0, 11);
+      var cx = panel.x0 + ix * panel.dx;
+      var cy = panel.y0 + iy * panel.dy;
+      if (Math.abs(x - cx) > panel.dx * .54 || Math.abs(y - cy) > panel.dy * .8) {
+        if (state.panel === panel) {
+          state.panel = null; state.ix = null; state.iy = null; state.series = null;
+          state.hoverYear = null; state.hoverRow = null;
+          paintAll(); updateHot(); hideTip();
+        }
+        return;
+      }
+
+      var year = panel.start + ix;
+      var t = year - 2001;
+      var series = x < cx ? "coal" : "oil";
+      var row = ROWS[iy];
+      var vc = valueFor(row, t, "coal");
+      var vo = valueFor(row, t, "oil");
+      var total = vc + vo;
+
+      state.panel = panel; state.ix = ix; state.iy = iy; state.series = series;
+      state.hoverYear = year; state.hoverRow = iy;
+      paintAll(); updateHot();
+
+      showTip(
+        '<div class="tt">' + year + " · " + row.name + "</div>" +
+        seriesRow("煤炭产品", "coal", vc, series !== "coal") +
+        seriesRow("石油产品", "oil", vo, series !== "oil") +
+        '<div class="ts">Mt CO₂ · ' +
+        (row.total ? "煤与石油产品合计占当年总量的 100%" :
+          "占当年总排放 " + (total / TOTAL[t] * 100).toFixed(1) + "%") +
+        "</div>", e.clientX, e.clientY);
+    });
+
+    el.addEventListener("mouseleave", function () {
+      if (state.panel === panel) {
+        state.panel = null; state.ix = null; state.iy = null; state.series = null;
+        state.hoverYear = null; state.hoverRow = null;
+        paintAll(); updateHot(); hideTip();
+      }
+    });
+  });
+
+  /* ================= 图例开关 ================= */
+  function bindToggles() {
+    $("#lgCoal").addEventListener("click", function () {
+      state.showCoal = !state.showCoal;
+      this.classList.toggle("off", !state.showCoal);
+      PANELS.forEach(renderStatic); paintAll();
+    });
+    $("#lgOil").addEventListener("click", function () {
+      state.showOil = !state.showOil;
+      this.classList.toggle("off", !state.showOil);
+      PANELS.forEach(renderStatic); paintAll();
+    });
+  }
+
+  /* ================= 饼图 ① ② ================= */
+  var NS = "http://www.w3.org/2000/svg";
+
+  function arcPath(a0, a1, r) {
+    var x0 = Math.cos(a0) * r, y0 = Math.sin(a0) * r;
+    var x1 = Math.cos(a1) * r, y1 = Math.sin(a1) * r;
+    var large = (a1 - a0) > Math.PI ? 1 : 0;
+    return "M0 0 L" + x0.toFixed(2) + " " + y0.toFixed(2) +
+      " A" + r + " " + r + " 0 " + large + " 1 " + x1.toFixed(2) + " " + y1.toFixed(2) + " Z";
+  }
+
+  function buildPie(id, data, caption) {
+    var svg = document.getElementById(id);
+    var defs = document.createElementNS(NS, "defs");
+    var grad = document.createElementNS(NS, "radialGradient");
+    grad.setAttribute("id", "shine_" + id);
+    grad.setAttribute("cx", "32%"); grad.setAttribute("cy", "24%"); grad.setAttribute("r", "80%");
+    var st1 = document.createElementNS(NS, "stop");
+    st1.setAttribute("offset", "0"); st1.setAttribute("stop-color", "#fff"); st1.setAttribute("stop-opacity", ".38");
+    var st2 = document.createElementNS(NS, "stop");
+    st2.setAttribute("offset", ".55"); st2.setAttribute("stop-color", "#fff"); st2.setAttribute("stop-opacity", "0");
+    grad.appendChild(st1); grad.appendChild(st2);
+    defs.appendChild(grad);
+    svg.appendChild(defs);
+    var g = document.createElementNS(NS, "g");
+    var a = -Math.PI / 2;
+    data.forEach(function (d) {
+      var a2 = a + d.v / 100 * Math.PI * 2;
+      var p = document.createElementNS(NS, "path");
+      p.setAttribute("d", arcPath(a, a2, 46));
+      p.setAttribute("fill", d.c);
+      p.setAttribute("class", "slice");
+      p.addEventListener("mousemove", function (e) {
+        showTip('<div class="tt">' + caption + "</div>" +
+          '<div class="tr"><span class="sw" style="background:' + d.c + ';box-shadow:none;"></span><span>' +
+          d.n + "</span><b>" + d.v.toFixed(1) + "%</b></div>", e.clientX, e.clientY);
+      });
+      p.addEventListener("mouseleave", hideTip);
+      g.appendChild(p);
+      a = a2;
+    });
+    svg.appendChild(g);
+    var shine = document.createElementNS(NS, "circle");
+    shine.setAttribute("r", "46");
+    shine.setAttribute("fill", "url(#shine_" + id + ")");
+    shine.setAttribute("pointer-events", "none");
+    svg.appendChild(shine);
+  }
+
+  function buildPies() {
+    buildPie("pie1", [
+      { n: "中国", v: 21.5, c: "#f2f1ea" },
+      { n: "美国", v: 20.2, c: "#cfcfc9" },
+      { n: "欧盟", v: 15.0, c: "#8c8c86" },
+      { n: "俄罗斯", v: 5.6, c: "#e2e2dc" },
+      { n: "印度", v: 4.4, c: "#6c6c67" },
+      { n: "日本", v: 4.2, c: "#b4b4ae" },
+      { n: "德国", v: 2.9, c: "#484845" },
+      { n: "加拿大", v: 2.2, c: "#9a9a94" },
+      { n: "英国", v: 2.2, c: "#2f2f2d" },
+      { n: "韩国", v: 1.7, c: "#7c7c76" },
+      { n: "其他", v: 20.1, c: "#55554f" }
+    ], "2006 年 · 全球前十排放国占比");
+
+    buildPie("pie2", [
+      { n: "中国", v: 31, c: "#f2f1ea" },
+      { n: "美国", v: 37, c: "#c7c7c1" },
+      { n: "欧盟", v: 32, c: "#74746e" }
+    ], "2021 年 · 历史累积排放占比");
+  }
+
+  /* ================= 折线图 ③ ================= */
+  var PC = [3.8, 4.0, 4.4, 4.8, 5.2, 5.6, 5.9, 6.1, 6.2, 6.3, 6.4, 6.5, 6.48, 6.45, 6.5, 6.55, 6.6, 6.7, 6.8, 6.9, 7.0];
+
+  function buildLine() {
+    var svg = document.getElementById("lineSvg");
+    var pts = [];
+    for (var t = 0; t < 21; t++) {
+      var y = 30 + t * 11;
+      var x = 90 + (PC[t] - 3.8) / 3.2 * 200;
+      pts.push([x, y]);
+    }
+
+    pts.forEach(function (p) {
+      var ln = document.createElementNS(NS, "line");
+      ln.setAttribute("x1", 18); ln.setAttribute("x2", 322);
+      ln.setAttribute("y1", p[1]); ln.setAttribute("y2", p[1]);
+      ln.setAttribute("class", "gridln");
+      svg.appendChild(ln);
+    });
+
+    var pl = document.createElementNS(NS, "polyline");
+    pl.setAttribute("points", pts.map(function (p) { return p[0].toFixed(1) + "," + p[1]; }).join(" "));
+    pl.setAttribute("class", "lpath");
+    svg.appendChild(pl);
+
+    function addText(x, y, str, cls, rotate) {
+      var tx = document.createElementNS(NS, "text");
+      tx.setAttribute("x", x); tx.setAttribute("y", y);
+      tx.setAttribute("class", cls);
+      if (rotate) tx.setAttribute("transform", "rotate(-90 " + x + " " + y + ")");
+      tx.textContent = str;
+      svg.appendChild(tx);
+    }
+    addText(23, 38, "2001", "yr", true);
+    addText(23, 258, "2021", "yr", true);
+    addText(56, 34, "3.8", "val");
+    addText(56, 155, "6.5", "val");
+    addText(56, 254, "7.0", "val");
+
+    [30, 250].forEach(function (y) {
+      var ln = document.createElementNS(NS, "line");
+      ln.setAttribute("x1", 9); ln.setAttribute("x2", 24);
+      ln.setAttribute("y1", y); ln.setAttribute("y2", y);
+      ln.setAttribute("stroke", "#eee"); ln.setAttribute("stroke-width", ".9");
+      svg.appendChild(ln);
+    });
+
+    pts.forEach(function (p, t) {
+      var c = document.createElementNS(NS, "circle");
+      c.setAttribute("cx", p[0].toFixed(1)); c.setAttribute("cy", p[1]);
+      c.setAttribute("r", "3.1");
+      c.setAttribute("class", "pt");
+      c.addEventListener("mousemove", function (e) {
+        showTip('<div class="tt">' + (2001 + t) + " 年</div>" +
+          '<div class="big">人均碳排放 ' + PC[t].toFixed(1) + " t CO₂</div>" +
+          '<div class="ts">2001 – 2021 年中国人均碳排放量</div>', e.clientX, e.clientY);
+      });
+      c.addEventListener("mouseleave", hideTip);
+      svg.appendChild(c);
+    });
+  }
+
+  /* ================= 城乡发展 ④ ================= */
+  function genSeries(a, b, seed) {
+    var rnd = mulberry32(seed), arr = [];
+    for (var i = 0; i < 21; i++) {
+      var p = i / 20;
+      arr.push(lerp(a, b, Math.pow(p, 1.1)) * (0.95 + rnd() * 0.1));
+    }
+    return arr;
+  }
+
+  var STRANDS = [
+    { cat: "农村发展", fuel: "煤炭产品", v: genSeries(780, 520, 3) },
+    { cat: "农村发展", fuel: "石油产品", v: genSeries(110, 260, 8) },
+    { cat: "城镇发展", fuel: "煤炭产品", v: genSeries(1150, 3350, 15) },
+    { cat: "城镇发展", fuel: "石油产品", v: genSeries(230, 2500, 22) }
+  ];
+
+  function buildStrands() {
+    var svg = document.getElementById("strandSvg");
+
+    STRANDS.forEach(function (st, si) {
+      var x = 48 + si * 34;
+      st.v.forEach(function (v, t) {
+        var y = 26 + t * 20.4;
+        var r = 1.7 + 0.155 * Math.sqrt(v);
+        var c = document.createElementNS(NS, "circle");
+        c.setAttribute("cx", x); c.setAttribute("cy", y.toFixed(1));
+        c.setAttribute("r", r.toFixed(2));
+        c.setAttribute("class", "sp");
+        c.setAttribute("filter", "url(#glowDot2)");
+        c.addEventListener("mousemove", function (e) {
+          showTip('<div class="tt">' + (2001 + t) + " 年 · " + st.cat + "</div>" +
+            '<div class="tr"><span class="sw"></span><span>' + st.fuel + "</span><b>" + fmt(v) + "</b></div>" +
+            '<div class="ts">城乡发展碳排放量（示意）</div>', e.clientX, e.clientY);
+        });
+        c.addEventListener("mouseleave", hideTip);
+        svg.appendChild(c);
+      });
+    });
+
+    [["M48 494 v9 H82 v-9"], ["M116 494 v9 H150 v-9"]].forEach(function (d) {
+      var p = document.createElementNS(NS, "path");
+      p.setAttribute("d", d[0]);
+      p.setAttribute("class", "bracket");
+      svg.appendChild(p);
+    });
+
+    var labels = [
+      { x: 110, txt: "煤炭产品" }, { x: 144, txt: "石油产品" },
+      { x: 178, txt: "煤炭产品" }, { x: 212, txt: "石油产品" }
+    ];
+    labels.forEach(function (l) {
+      var d = document.createElement("div");
+      d.className = "s-lab";
+      d.style.left = l.x + "px";
+      d.style.top = "1709px";
+      d.textContent = l.txt;
+      stage.appendChild(d);
+    });
+
+    var groups = [
+      { x: 127, txt: "农村发展" }, { x: 195, txt: "城镇发展" }
+    ];
+    groups.forEach(function (g) {
+      var d = document.createElement("div");
+      d.className = "s-group";
+      d.style.left = g.x + "px";
+      d.style.top = "1774px";
+      d.textContent = g.txt;
+      stage.appendChild(d);
+    });
+
+    [1300, 1704].forEach(function (top, i) {
+      var d = document.createElement("div");
+      d.className = "s-year";
+      d.style.left = "80px";
+      d.style.top = top + "px";
+      d.textContent = i === 0 ? "2001" : "2021";
+      stage.appendChild(d);
+    });
+  }
+
+  /* ================= 图例球体示例 ================= */
+  function drawLegendCanvas() {
+    var cv = document.getElementById("lgCanvas");
+    var ctx = cv.getContext("2d");
+    ctx.setTransform(2, 0, 0, 2, 0, 0);
+    ctx.clearRect(0, 0, 200, 232);
+
+    function orb(x, y, r, a) {
+      var hs = r * 4.6 + 10;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = .55 * a;
+      ctx.drawImage(GLOW[0], x - hs, y - hs, hs * 2, hs * 2);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.drawImage(CORE, x - r * 1.3, y - r * 1.3, r * 2.6, r * 2.6);
+    }
+    function line(x1, y1, x2, y2) {
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+
+    orb(92, 20, 4.5, 1);
+    orb(92, 51, 15, 1.15);
+
+    ctx.strokeStyle = "rgba(225,225,225,.55)";
+    ctx.lineWidth = .6;
+    line(98, 17, 132, 12);
+    line(108, 56, 132, 60);
+
+    /* 煤炭产品：颗粒云 */
+    var cx = 84, cy = 106;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = .6;
+    ctx.drawImage(GLOW[1], cx - 46, cy - 46, 92, 92);
+    ctx.globalAlpha = .32;
+    ctx.drawImage(GLOW[2], cx - 34, cy - 34, 68, 68);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(CORE, 96 - 13, 108 - 13, 26, 26);
+
+    /* 石油产品：小亮球 */
+    orb(114, 112, 7, 1);
+
+    ctx.strokeStyle = "rgba(225,225,225,.5)";
+    line(104, 94, 132, 78);
+    line(126, 118, 141, 122);
+  }
+
+  /* ================= 初始化 ================= */
+  function fit() {
+    var s = Math.min(1, Math.max(.8, window.innerWidth / 1260));
+    function fitPoster(poster, viewer, height) {
+      var needsPan = 1260 * s > window.innerWidth + 1;
+      poster.style.transformOrigin = "top left";
+      poster.style.transform = "scale(" + s + ")";
+      poster.style.marginRight = (1260 * (s - 1)) + "px";
+      viewer.style.height = (height * s) + "px";
+      viewer.style.overflowX = needsPan ? "auto" : "hidden";
+      viewer.style.overflowY = "hidden";
+      viewer.style.justifyContent = needsPan ? "flex-start" : "center";
+    }
+    fitPoster(stage, document.getElementById("viewer"), 2025);
+    var st2 = document.getElementById("stageSpiral");
+    var v2 = document.getElementById("viewerSpiral");
+    if (st2 && v2) {
+      fitPoster(st2, v2, 2044);
+    }
+    var st3 = document.getElementById("stageLife");
+    var v3 = document.getElementById("viewerLife");
+    if (st3 && v3) {
+      fitPoster(st3, v3, 2027);
+    }
+  }
+
+  buildLabels();
+  buildPies();
+  buildLine();
+  buildStrands();
+  drawLegendCanvas();
+  PANELS.forEach(renderStatic);
+  paintAll();
+  bindToggles();
+  initYearExplorer();
+
+  window.addEventListener("resize", fit);
+  fit();
+
+})();
+
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  var NS = "http://www.w3.org/2000/svg";
+  var $ = function (s) { return document.querySelector(s); };
+  var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+  var tip = $("#tip");
+  var spiralReady = false;
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function lerp(a, b, p) { return a + (b - a) * p; }
+  function fmt(n, d) { return Number(n).toFixed(d == null ? 1 : d); }
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function moveTip(x, y) {
+    var r = tip.getBoundingClientRect();
+    var left = x + 16, top = y + 16;
+    if (left + r.width > window.innerWidth - 10) left = x - r.width - 16;
+    if (top + r.height > window.innerHeight - 10) top = y - r.height - 16;
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  }
+  function showTip(html, x, y) {
+    tip.innerHTML = html;
+    tip.classList.add("show");
+    moveTip(x, y);
+  }
+  function hideTip() { tip.classList.remove("show"); }
+
+  function svgEl(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    if (attrs) {
+      for (var k in attrs) {
+        if (Object.prototype.hasOwnProperty.call(attrs, k)) e.setAttribute(k, attrs[k]);
+      }
+    }
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function svgText(parent, x, y, str, attrs) {
+    var a = attrs || {};
+    a.x = x; a.y = y;
+    var t = svgEl("text", a, parent);
+    t.textContent = str;
+    return t;
+  }
+  function arcD(cx, cy, r, a0, a1) {
+    var x0 = cx + Math.cos(a0) * r, y0 = cy + Math.sin(a0) * r;
+    var x1 = cx + Math.cos(a1) * r, y1 = cy + Math.sin(a1) * r;
+    var large = (a1 - a0) > Math.PI ? 1 : 0;
+    return "M" + x0.toFixed(2) + " " + y0.toFixed(2) +
+      " A" + r + " " + r + " 0 " + large + " 1 " + x1.toFixed(2) + " " + y1.toFixed(2);
+  }
+
+  /* ================= 画板切换 ================= */
+  var navBtns = $$("#boardNav .bn");
+  var BOARD_IDS = { dept: "#viewer", spiral: "#viewerSpiral", life: "#viewerLife" };
+  var BOARD_ORDER = ["dept", "spiral", "life"];
+  var curBoard = "dept";
+  function setBoard(name) {
+    if (!BOARD_IDS[name]) name = "dept";
+    BOARD_ORDER.forEach(function (k) {
+      $(BOARD_IDS[k]).style.display = (k === name) ? "flex" : "none";
+    });
+    var activeStage = $(name === "dept" ? "#stage" : name === "spiral" ? "#stageSpiral" : "#stageLife");
+    activeStage.classList.remove("motion-active");
+    void activeStage.offsetWidth;
+    activeStage.classList.add("motion-active");
+    navBtns.forEach(function (b) { b.classList.toggle("on", b.dataset.board === name); });
+    hideTip();
+    if (name === "spiral" && !spiralReady) initSpiral();
+    if (name === "life" && !lfReady) initLife();
+    curBoard = name;
+    window.scrollTo(0, 0);
+    try { history.replaceState(null, "", "#" + name); } catch (e) {}
+  }
+  navBtns.forEach(function (b) {
+    b.addEventListener("click", function () { setBoard(b.dataset.board); });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (!e.altKey) return;
+    var i = BOARD_ORDER.indexOf(curBoard);
+    if (e.key === "ArrowLeft") setBoard(BOARD_ORDER[Math.max(0, i - 1)]);
+    if (e.key === "ArrowRight") setBoard(BOARD_ORDER[Math.min(BOARD_ORDER.length - 1, i + 1)]);
+  });
+
+  /* ================= 数据 ================= */
+  function spValue(id, yi, m) {
+    var y = yi + m / 12;
+    if (id === 1) {
+      return 1802 + 4.28 * y + 9.0 * Math.cos((m - 7) / 12 * 2 * Math.PI) + 1.2 * Math.sin(y * 6.3);
+    }
+    if (id === 2) {
+      return 370.9 + 2.03 * y + 2.8 * Math.cos((m - 4.2) / 12 * 2 * Math.PI) + 0.22 * Math.sin(y * 8.1);
+    }
+    if (id === 4) {
+      return 1.15 + 0.72 * Math.abs(Math.sin(y * 1.47 + 0.35)) + 0.22 * Math.sin(y * 5.2 + m * 0.2) + 0.18 * Math.sin(y * 2.3);
+    }
+    if (id === 5) {
+      return 2.0 + 5.2 * Math.sin(y * 0.72 + 0.4) + 2.1 * Math.sin(y * 1.9 + 0.9);
+    }
+    return 0;
+  }
+  function spNorm(id, v) {
+    if (id === 1) return clamp((v - 1775) / 140, 0, 1);
+    if (id === 2) return clamp((v - 363) / 55, 0, 1);
+    if (id === 4) return clamp(v / 2.4, 0, 1);
+    if (id === 5) return clamp((v + 8) / 20, 0, 1);
+    return 0;
+  }
+  var SP_INFO = {
+    1: { name: "大气CH4浓度数值", unit: "ppb", color: "#eaf3ff", fmt: function (v) { return fmt(v, 1) + " ppb"; } },
+    2: { name: "大气CO2浓度数值", unit: "ppm", color: "#fff3e2", fmt: function (v) { return fmt(v, 1) + " ppm"; } },
+    4: { name: "CO2增长率", unit: "ppm/年", color: "#e8f6e6", fmt: function (v) { return fmt(v, 2) + " ppm/年"; } },
+    5: { name: "CH4增长率", unit: "ppb/年", color: "#f4e9ff", fmt: function (v) { return fmt(v, 2) + " ppb/年"; } }
+  };
+
+  /* ================= 右上迷你图 ================= */
+  function buildMiniCharts() {
+    var area = $("#spArea");
+    var defs = svgEl("defs", {}, area);
+    var ag = svgEl("linearGradient", { id: "miniAreaG", x1: "0", y1: "0", x2: "0", y2: "1" }, defs);
+    [["0", "#f2f0e7", ".7"], [".55", "#cdd0c8", ".28"], ["1", "#8f938d", ".04"]].forEach(function (s) {
+      svgEl("stop", { offset: s[0], "stop-color": s[1], "stop-opacity": s[2] }, ag);
+    });
+
+    var rnd = mulberry32(41), pts = [];
+    for (var i = 0; i <= 47; i++) {
+      var x = 5 + i * 3;
+      var y = 29 - (4.2 + 5.2 * Math.sin(i * .52) + 3.1 * Math.sin(i * 1.63 + 1.1) + rnd() * 2.6);
+      pts.push([x, Math.max(4, y)]);
+    }
+    var d = "M" + pts[0][0] + ",51 ";
+    pts.forEach(function (p) { d += "L" + p[0].toFixed(1) + "," + p[1].toFixed(1) + " "; });
+    d += "L146,51 Z";
+    svgEl("path", { d: d, fill: "url(#miniAreaG)", opacity: ".82" }, area);
+
+    var d2 = "M5,49 ";
+    for (var j = 0; j <= 47; j++) {
+      var yy = 40 - (2.5 + 3.0 * Math.sin(j * .33 + .6) + rnd() * 2.1);
+      d2 += "L" + (5 + j * 3) + "," + yy.toFixed(1) + " ";
+    }
+    d2 += "L146,49 Z";
+    svgEl("path", { d: d2, fill: "rgba(185,190,185,.16)" }, area);
+
+    var topLine = "M" + pts.map(function (p) { return p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" L");
+    svgEl("path", { d: topLine, fill: "none", stroke: "rgba(240,240,235,.55)", "stroke-width": ".65" }, area);
+
+    [["54", 50, 2.2], ["84", 50, 2.0], ["114", 50, 3.1]].forEach(function (p) {
+      svgEl("circle", { cx: p[0], cy: p[1], r: p[2], fill: "#fff", opacity: ".92" }, area);
+      svgEl("circle", { cx: p[0], cy: p[1], r: p[2] + 2.4, fill: "rgba(255,255,255,.13)" }, area);
+    });
+    svgEl("path", { d: "M5 50 H114", stroke: "rgba(230,230,230,.3)", "stroke-width": ".55", "stroke-dasharray": "1 4" }, area);
+    svgEl("path", { d: "M124 17 L152 9", stroke: "rgba(220,220,220,.5)", "stroke-width": ".55" }, area);
+    svgEl("path", { d: "M124 32 L152 29", stroke: "rgba(220,220,220,.4)", "stroke-width": ".55" }, area);
+
+    /* 环形周期图 */
+    var dial = $("#spDial");
+    svgEl("circle", { cx: 60, cy: 60, r: 49, fill: "none", stroke: "rgba(235,235,235,.55)", "stroke-width": ".65" }, dial);
+    for (var a = 0; a < 24; a++) {
+      var ang = a * Math.PI / 12 - Math.PI / 2;
+      var r0 = 20, r1 = 48;
+      var ln = svgEl("line", {
+        x1: (60 + Math.cos(ang) * r0).toFixed(2), y1: (60 + Math.sin(ang) * r0).toFixed(2),
+        x2: (60 + Math.cos(ang) * r1).toFixed(2), y2: (60 + Math.sin(ang) * r1).toFixed(2),
+        stroke: "rgba(220,220,220," + (a % 2 ? ".12" : ".22") + ")", "stroke-width": ".45"
+      }, dial);
+    }
+    var segs = [
+      [-2.15, -1.1, "rgba(160,160,160,.55)"],
+      [-1.02, -.06, "rgba(205,205,205,.75)"],
+      [.02, .62, "rgba(240,240,240,.92)"],
+      [.7, 1.55, "rgba(118,118,118,.55)"],
+      [1.63, 2.45, "rgba(82,82,82,.42)"],
+      [2.54, 3.32, "rgba(190,190,190,.6)"],
+      [3.4, 4.2, "rgba(110,110,110,.4)"]
+    ];
+    segs.forEach(function (s) {
+      svgEl("path", { d: arcD(60, 60, 43, s[0], s[1]), fill: "none", stroke: s[2], "stroke-width": "7.2" }, dial);
+    });
+    for (var k = 0; k < 8; k++) {
+      var aa0 = -Math.PI / 2 + k * Math.PI / 4 + .03;
+      var aa1 = aa0 + Math.PI / 4 - .08;
+      svgEl("path", {
+        d: arcD(60, 60, 30, aa0, aa1), fill: "none",
+        stroke: k % 2 ? "rgba(215,215,215,.5)" : "rgba(85,85,85,.4)", "stroke-width": "5.4"
+      }, dial);
+    }
+    svgEl("circle", { cx: 60, cy: 60, r: 2.1, fill: "#f2f2f2" }, dial);
+    svgEl("path", { d: "M97 30 L188 24", stroke: "rgba(220,220,220,.46)", "stroke-width": ".55" }, dial);
+    svgEl("path", { d: "M103 67 L188 62", stroke: "rgba(220,220,220,.42)", "stroke-width": ".55" }, dial);
+
+    /* 半圆地区图 */
+    var semi = $("#spSemi");
+    [[48, "rgba(235,235,232,.88)", 3.0], [37, "rgba(175,175,172,.75)", 2.8], [26, "rgba(122,122,119,.6)", 2.6]].forEach(function (sc, i) {
+      svgEl("path", {
+        d: arcD(60, 60, sc[0], Math.PI * 1.04, Math.PI * 1.96),
+        fill: "none", stroke: sc[1], "stroke-width": sc[2], "stroke-linecap": "round"
+      }, semi);
+      svgEl("path", {
+        d: "M" + (60 + Math.cos(Math.PI * 1.96) * sc[0]).toFixed(1) + "," +
+          (60 + Math.sin(Math.PI * 1.96) * sc[0]).toFixed(1) + " L124 " + (15 + i * 17),
+        fill: "none", stroke: "rgba(215,215,215,.38)", "stroke-width": ".5"
+      }, semi);
+    });
+    svgEl("path", { d: "M60 60 v7", stroke: "rgba(220,220,220,.5)", "stroke-width": ".6" }, semi);
+  }
+
+  /* ================= 主螺旋 ================= */
+  function buildSpiral() {
+    var wrap = $("#spiralWrap");
+    var base = $("#spiralBase");
+    var hov = $("#spiralHover");
+    /* 画布内部保持 1000×1000 坐标，外层按 CSS 缩放到独立区域。
+       指针坐标按实际显示尺寸换算，避免与右侧图表相交。 */
+    var W = 1000, H = 1000, CX = 500, CY = 500, RMAX = 392, K = 1.105;
+    var ctx = base.getContext("2d");
+    var hctx = hov.getContext("2d");
+    function setT(c) { c.setTransform(2 * K, 0, 0, 2 * K, 2 * CX * (1 - K), 2 * CY * (1 - K)); }
+    setT(ctx);
+    setT(hctx);
+    ctx.clearRect(0, 0, W, H);
+    hctx.clearRect(0, 0, W, H);
+
+    /* 原图螺旋落在一块近乎全黑的场地上：该区域 0–15 的像素占 51%，螺旋外围取样就是纯正的黑。
+       画布本身透明，台面的 #0b0b0b 会透上来把每条「暗缝」抬到 20–35（我们 16–31 堆了 22%，
+       原图只有 2%）。所以先铺一层中心近黑、向画布边缘淡出的实地——淡出是为了不出现硬边。
+       半径收到 460（设计坐标，×K 后约 508 画布像素）：螺旋最外沿在 434×1.105≈480，
+       所以暗场刚好包住螺旋、又不至于溢出到画布外把相邻的图表压暗 */
+    var ground = ctx.createRadialGradient(CX, CY, 40, CX, CY, 460);
+    ground.addColorStop(0, "rgba(0,0,0,1)");
+    ground.addColorStop(.58, "rgba(0,0,0,.96)");
+    ground.addColorStop(.84, "rgba(0,0,0,.55)");
+    ground.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = ground;
+    ctx.fillRect(0, 0, W, H);
+
+    var glowSprite = (function () {
+      var c = document.createElement("canvas");
+      c.width = c.height = 64;
+      var g = c.getContext("2d");
+      var gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gr.addColorStop(0, "rgba(255,255,255,.95)");
+      gr.addColorStop(.18, "rgba(250,250,255,.45)");
+      gr.addColorStop(.5, "rgba(240,245,255,.12)");
+      gr.addColorStop(1, "rgba(240,245,255,0)");
+      g.fillStyle = gr;
+      g.fillRect(0, 0, 64, 64);
+      return c;
+    })();
+
+    function drawGlow(c, x, y, size, alpha) {
+      c.globalAlpha = alpha;
+      c.drawImage(glowSprite, x - size / 2, y - size / 2, size, size);
+      c.globalAlpha = 1;
+    }
+
+    /* 背景光晕 */
+    var bg = ctx.createRadialGradient(CX, CY, 30, CX, CY, 520);
+    bg.addColorStop(0, "rgba(255,250,236,.010)");
+    bg.addColorStop(.42, "rgba(150,142,118,.005)");
+    bg.addColorStop(.76, "rgba(70,68,60,.002)");
+    bg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 年份同心环 */
+    for (var yi = 0; yi <= 20; yi++) {
+      var rr = 64 + (yi / 20) * (394 - 64);
+      ctx.beginPath();
+      ctx.arc(CX, CY, rr, 0, Math.PI * 2);
+      ctx.strokeStyle = yi % 4 === 0 ? "rgba(235,235,238,.155)" : "rgba(235,235,238,.055)";
+      ctx.lineWidth = .6;
+      ctx.setLineDash(yi % 4 === 0 ? [2, 5] : [1, 7]);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    /* 辐射线 */
+    for (var si = 0; si < 36; si++) {
+      var sa = -Math.PI / 2 + si * Math.PI / 18;
+      ctx.beginPath();
+      ctx.moveTo(CX + Math.cos(sa) * 52, CY + Math.sin(sa) * 52);
+      ctx.lineTo(CX + Math.cos(sa) * (RMAX + 14), CY + Math.sin(sa) * (RMAX + 14));
+      ctx.strokeStyle = si % 3 === 0 ? "rgba(230,230,230,.10)" : "rgba(230,230,230,.045)";
+      ctx.lineWidth = .55;
+      ctx.setLineDash([1.5, 5.5]);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    /* 外圈与刻度 */
+    ctx.beginPath(); ctx.arc(CX, CY, RMAX + 20, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(235,235,235,.34)"; ctx.lineWidth = .8; ctx.stroke();
+    ctx.beginPath(); ctx.arc(CX, CY, RMAX + 27, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(235,235,235,.1)"; ctx.lineWidth = .5; ctx.stroke();
+    for (var ti = 0; ti < 72; ti++) {
+      var ta = ti * Math.PI / 36;
+      var tr0 = RMAX + 15, tr1 = RMAX + 21 + (ti % 6 === 0 ? 7 : 0);
+      ctx.beginPath();
+      ctx.moveTo(CX + Math.cos(ta) * tr0, CY + Math.sin(ta) * tr0);
+      ctx.lineTo(CX + Math.cos(ta) * tr1, CY + Math.sin(ta) * tr1);
+      ctx.strokeStyle = ti % 6 === 0 ? "rgba(235,235,235,.5)" : "rgba(235,235,235,.18)";
+      ctx.lineWidth = ti % 6 === 0 ? .9 : .55;
+      ctx.stroke();
+    }
+
+    /* 月份编号 */
+    ctx.font = "9px 'Microsoft YaHei',sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (var mi = 0; mi < 12; mi++) {
+      var ma = -Math.PI / 2 + mi * Math.PI / 6;
+      ctx.fillStyle = "rgba(225,225,225,.72)";
+      ctx.fillText(String(mi + 1), CX + Math.cos(ma) * (RMAX + 42), CY + Math.sin(ma) * (RMAX + 42));
+    }
+
+    /* 数据系列：每个系列拆成多条细丝，逼近原图「多细丝 + 加色辉光」质感 */
+    var SER = [
+      { id: 4, off: 3.30, r0: 62,  r1: 246, width: 16, wig: 7,  step: 4, n: 3,  hue: "gold" },
+      { id: 5, off: 4.66, r0: 58,  r1: 214, width: 14, wig: 6,  step: 4, n: 3,  hue: "olive" },
+      { id: 1, off: 2.06, r0: 102, r1: 382, width: 37, wig: 14, step: 3, n: 5, hue: "amber" },
+      { id: 2, off: 0.38, r0: 64,  r1: 394, width: 41, wig: 15, step: 3, n: 6, hue: "moss" }
+    ];
+    var TURN = 4.15;
+
+    /* 每个系列一组色相：芯部近中性的暖奶油，边缘才带一点红/橙/黄绿/橄榄的色相差异。
+       原图整体几乎是"暖白灰"（mean RGB 78,78,77 基本中性、饱和度只有 7.7），彩度只出现在细丝边缘，
+       所以这里整体压灰、只靠色相错位制造变化，不靠加色堆亮 */
+    var HUES = {
+      amber: ["248,240,220", "244,228,192", "252,246,230", "240,220,178", "248,214,190", "242,226,190",
+              "250,242,224", "238,216,172", "222,236,168", "240,222,182", "252,246,232", "236,212,164",
+              "246,236,210", "242,226,190", "250,240,216", "232,238,182", "244,232,202", "240,224,186"],
+      moss:  ["216,224,190", "200,214,166", "226,232,204", "186,206,158", "168,196,142", "146,184,132",
+              "219,226,194", "124,172,120", "206,216,172", "176,200,150", "230,236,210", "110,164,118",
+              "212,222,186", "192,208,160", "222,230,198", "104,160,126", "198,212,168", "156,190,138"],
+      gold:  ["250,240,216", "244,226,186", "252,246,230", "238,216,166", "250,212,182", "246,234,206",
+              "240,222,180", "252,244,224", "242,228,192", "236,214,170", "248,238,212", "232,208,158"],
+      olive: ["216,222,190", "196,208,160", "228,234,206", "172,196,146", "140,180,130", "204,214,172",
+              "222,228,196", "118,166,124", "188,204,156", "164,192,140", "226,232,204", "134,176,128"]
+    };
+
+    /* 上面那组色相只负责「丝与丝之间的微妙色差」，本身的彩度是为对比而写高的。
+       原图整体是中性暖白灰（mean RGB 78,78,77 几乎三通道相等、平均饱和度只有 7.7、蓝通道只低 1 个点），
+       直接铺开会太艳——实测 sat 16.6 / s>.25 13.5%（原图 7.7 / 8.0%），蓝通道还低了 10 个点。
+       所以统一按亮度向中性灰靠拢，保留色相错位、去掉色度。
+       另外先把每一档的亮度抬到同一个目标值 T：原图的亮丝是一条很窄的亮台（192–207 占 17.9%），
+       丝与丝的差别只在色相、不在明暗。我们原来的色板里深绿/橄榄那几档亮度只有 ~140，
+       叠上去落在 128–160 的死区——正是直方图上 112–191 多出十几个点、而 192–207 少了十个点的原因。
+       用「向白插值」而不是「按比例放大」来抬亮度，是为了不把高通道顶到 255 而破坏色相 */
+    (function () {
+      var K = .66, T = 240;
+      /* 逐档把 T 往下错开（240/233/226），而不是全场都用同一个 240。
+         实测盘内 16 档亮度直方图：原图 176–191 有 6.5%、224–255 只有 3.9%，
+         我们却分别是 3.0% 和 9.6%——总量差不多，但我们的亮部分布被「压扁」在两个极端上。
+         因为所有丝都被抬到同一个 T，乘上同一个 alpha 后全部落在 197，单丝全挤进 192–207，
+         而丝与丝交叠处又全部冲到 240+。让 T 逐档向下错开 7，单丝就摊到 197/191/185，
+         把 176–191 补起来。
+         注意只能往「下」错：先前试过 ±11 的对称抖动，结果亮台的重量反而被整体推到 208–223
+         （该档 6.0→8.2，原图只有 6.1）——「向白插值」在接近 255 时不是线性的，
+         往上加的那一半被压缩后仍然抬高整体亮度，均值并不守恒。只往下错开就没有这个副作用 */
+      for (var kk in HUES) {
+        HUES[kk] = HUES[kk].map(function (t, i) {
+          var tt = T - (i % 3) * 7;
+          var v = t.split(",").map(Number);
+          var l = .299 * v[0] + .587 * v[1] + .114 * v[2];
+          var w = Math.max(0, Math.min(1, (tt - l) / Math.max(255 - l, 1)));
+          v = v.map(function (c) { return c + (255 - c) * w; });
+          l = .299 * v[0] + .587 * v[1] + .114 * v[2];
+          return v.map(function (c) { return Math.round(c + (l - c) * K); }).join(",");
+        });
+      }
+    })();
+
+    /* 共享对角渐变：只叠一层极淡的暖色调，不承担彩度。
+       注意：它只能在「每条臂」上叠一次——之前写在逐丝循环里被叠了 50~60 遍，
+       这正是整块画面被抬成一片均匀茶色、暗部消失的直接原因 */
+    /* 臂底暖调：原图 51% 的像素落在近乎全黑（0–15）的底色上，所以这一层只能极淡。
+       之前 .038–.045 的 cream 铺在近黑底上会把整条臂抬到亮度 ~20，正是我们
+       「16–47 灰暗区占 25%、纯黑只剩 21%」的直接原因 */
+    var bandGrad = ctx.createLinearGradient(0, 0, W, H);
+    bandGrad.addColorStop(0, "rgba(250,236,186,.006)");
+    bandGrad.addColorStop(.25, "rgba(238,216,158,.004)");
+    bandGrad.addColorStop(.5, "rgba(252,242,204,.006)");
+    bandGrad.addColorStop(.75, "rgba(228,212,150,.004)");
+    bandGrad.addColorStop(1, "rgba(244,230,178,.005)");
+
+    var hoverPts = [];
+    var allBands = [];
+
+    SER.forEach(function (s) {
+      /* 中心线：每年每月一个点，同时供数据点与悬停命中使用 */
+      var pts = [];
+      for (var y = 0; y <= 20; y++) {
+        for (var m = 0; m < 12; m++) {
+          var pr = y + m / 12;
+          var ang = s.off + pr * Math.PI * 2 / TURN;
+          var norm = spNorm(s.id, spValue(s.id, y, m));
+          var baseR = lerp(s.r0, s.r1, pr / 20);
+          var w = s.width / 2 + (norm - .5) * s.wig;
+          var dotR = s.id <= 2 ? 1.8 + 2.9 * norm : 1.2 + 1.5 * norm;
+          pts.push({
+            a: ang, pr: pr, base: baseR, w: w, norm: norm, dotR: dotR,
+            mx: CX + Math.cos(ang) * baseR, my: CY + Math.sin(ang) * baseR,
+            y: y, m: m, v: spValue(s.id, y, m)
+          });
+        }
+      }
+
+      /* 拆丝：沿带宽铺 n 条细丝，各自低频平滑蜿蜒（避免梳齿感） */
+      var strands = [];
+      for (var k = 0; k < s.n; k++) {
+        var rnd = mulberry32(500 + s.id * 31 + k * 7);
+        var frac = s.n === 1 ? 0 : (k / (s.n - 1) - .5) * 2;   /* -1 .. 1 */
+        /* 细丝半宽：丝厚 ≈1.85·sw。上一轮把丝压到 1.3px 以下后，每条丝几乎整条都落在抗锯齿的
+           半覆盖区，于是 mid（40<lum≤110）从 11.4% 涨到 18%（原图只有 9%）——细到亚像素只会
+           得到一片糊，不会得到更多暗缝。这里反过来把丝加粗到 ~1.9px（显示像素），让丝芯是实的，
+           丝距 ~8px 仍远大于丝厚，暗缝照样留得住 */
+        /* 实测（螺旋盘内的 16 档亮度直方图）：原图 45% 的像素落在 0–15 的近黑底上，16–144 每档只有
+           ~2%；我们却把 10.8% 堆在 16–31 这一档。逐像素抽样证明这些像素有 88% 紧贴着亮丝——
+           它们不是「地面」，而是细丝的抗锯齿毛边。丝越细、条数越多，单位亮面积摊到的毛边就越多。
+           所以把丝减到 3/3/5/6 条、同时把每条加到 ~1.8px：亮面积基本不变，毛边大幅减少 */
+        var sw = s.width * (s.id <= 2 ? .038 : .056);
+        var jit = (rnd() - .5) * s.width * .09;
+        var ph = rnd() * 6.283, fq = .085 + rnd() * .11, am = s.width * (.05 + rnd() * .05);
+        var sp = [];
+        for (var i = 0; i < pts.length; i++) {
+          var p = pts[i];
+          var wave = Math.sin(i * fq + ph) * am;
+          var micro = Math.sin(i * .85 + ph * 2) * s.width * .022;
+          var dr = p.base + frac * Math.max(0, p.w - sw) + jit + wave + micro;
+          var da = p.a + frac * .004;
+          sp.push({
+            a: da, r: dr, w: sw,
+            ox: CX + Math.cos(da) * (dr + sw), oy: CY + Math.sin(da) * (dr + sw),
+            ix: CX + Math.cos(da) * (dr - sw * .85), iy: CY + Math.sin(da) * (dr - sw * .85)
+          });
+        }
+        strands.push({ pts: sp, rgb: HUES[s.hue][k % HUES[s.hue].length], sw: sw });
+      }
+      allBands.push({ cfg: s, pts: pts, strands: strands });
+    });
+
+    /* 先铺所有细丝（低透明度 + 加色，靠重叠自然叠出亮芯） */
+    allBands.forEach(function (b, bi) {
+      var s = b.cfg;
+
+      /* 带宽底色：整条臂连续着色，避免呈现空心轮廓 */
+      var eo = b.strands[b.strands.length - 1].pts;
+      var ei = b.strands[0].pts;
+      var bp = new Path2D();
+      bp.moveTo(eo[0].ox, eo[0].oy);
+      for (var q = 1; q < eo.length; q++) bp.lineTo(eo[q].ox, eo[q].oy);
+      for (var q2 = ei.length - 1; q2 >= 0; q2--) bp.lineTo(ei[q2].ix, ei[q2].iy);
+      bp.closePath();
+      ctx.save();
+      ctx.fillStyle = bandGrad;                 /* 整条臂只叠一次对角暖调 */
+      ctx.fill(bp);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = "rgba(" + HUES[s.hue][4] + ",.003)";
+      ctx.fill(bp);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.restore();
+
+      b.strands.forEach(function (st, xi) {
+        var sp = st.pts;
+        var path = new Path2D();
+        path.moveTo(sp[0].ox, sp[0].oy);
+        for (var i = 1; i < sp.length; i++) path.lineTo(sp[i].ox, sp[i].oy);
+        for (var j = sp.length - 1; j >= 0; j--) path.lineTo(sp[j].ix, sp[j].iy);
+        path.closePath();
+
+        ctx.save();
+        /* 原图的结构是「近黑底 + 稀疏亮丝（亮台压在 192–207，占 13.8%）+ 几乎不过曝（240+ 只有 1.4%）」。
+           lighter 叠加做不到这个形状：单丝 α=.5 时丝芯只有 ~120 落进中调，而丝与丝交叉处会相加到 255
+           过曝。改成 source-over + 高不透明度后，单丝落点直接就是 ~200 的亮台，交叉处也封顶在同一个
+           值不会炸白；丝缘的抗锯齿自然形成一条从黑到亮的窄过渡，而不是一大片中调 */
+        var al = s.id <= 2 ? .82 : .84;
+        ctx.fillStyle = "rgba(" + st.rgb + "," + al.toFixed(3) + ")";
+        ctx.fill(path);
+        ctx.strokeStyle = "rgba(" + st.rgb + ",.30)";
+        ctx.lineWidth = st.sw * .26;
+        ctx.stroke(path);
+        /* 再补一层极淡的加色辉光保持"玻璃丝"的通透感——它只作用在丝自身路径内，不会抬升地面 */
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = "rgba(" + st.rgb + ",.02)";
+        ctx.fill(path);
+        ctx.globalCompositeOperation = "source-over";
+        ctx.restore();
+
+        /* 丝上颗粒 */
+        var rnd = mulberry32(700 + s.id * 9 + xi * 37);
+        ctx.globalCompositeOperation = "lighter";
+        for (var k2 = 0; k2 < sp.length; k2 += 5) {
+          var p2 = sp[k2];
+          ctx.fillStyle = "rgba(" + st.rgb + "," + (.005 + rnd() * .012).toFixed(3) + ")";
+          ctx.beginPath();
+          ctx.arc(CX + Math.cos(p2.a) * p2.r, CY + Math.sin(p2.a) * p2.r, .3 + rnd() * .8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalCompositeOperation = "source-over";
+      });
+
+      /* 系列外缘与内缘细线 */
+      var outer = b.strands[b.strands.length - 1].pts;
+      var inner = b.strands[0].pts;
+      ctx.beginPath();
+      ctx.moveTo(outer[0].ox, outer[0].oy);
+      for (var n = 1; n < outer.length; n++) ctx.lineTo(outer[n].ox, outer[n].oy);
+      ctx.strokeStyle = s.id <= 2 ? "rgba(240,240,242,.20)" : "rgba(240,240,242,.11)";
+      ctx.lineWidth = .7;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(inner[0].ix, inner[0].iy);
+      for (var n2 = 1; n2 < inner.length; n2++) ctx.lineTo(inner[n2].ix, inner[n2].iy);
+      ctx.strokeStyle = "rgba(240,240,242,.09)";
+      ctx.lineWidth = .55;
+      ctx.stroke();
+    });
+
+    /* 点亮 */
+    allBands.forEach(function (b) {
+      var s = b.cfg, pts = b.pts, info = SP_INFO[s.id];
+      ctx.globalCompositeOperation = "lighter";
+      pts.forEach(function (p, i) {
+        if (i % s.step !== 0 && i !== pts.length - 1) return;
+        drawGlow(ctx, p.mx, p.my, p.dotR * 2.6 + 3.5, s.id <= 2 ? .026 : .018);
+      });
+      ctx.globalCompositeOperation = "source-over";
+      pts.forEach(function (p, i) {
+        if (i % s.step !== 0 && i !== pts.length - 1) return;
+        ctx.beginPath();
+        ctx.arc(p.mx, p.my, p.dotR, 0, Math.PI * 2);
+        ctx.fillStyle = info.color;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(p.mx - p.dotR * .25, p.my - p.dotR * .28, Math.max(.55, p.dotR * .34), 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,.95)";
+        ctx.fill();
+        hoverPts.push({
+          x: p.mx, y: p.my, hr: Math.max(7, p.dotR + 3),
+          year: 2001 + p.y, month: p.m + 1, id: s.id, v: p.v, name: info.name
+        });
+      });
+    });
+
+    /* 年份标签（一条径向标注） */
+    var yAngle = 2.72;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    for (var yl = 0; yl <= 20; yl++) {
+      var yr = 64 + (yl / 20) * (394 - 64);
+      var yx = CX + Math.cos(yAngle) * yr;
+      var yy = CY + Math.sin(yAngle) * yr;
+      var txt = yl === 0 ? "2001" : (yl === 20 ? "2021" : ("0" + (2001 + yl)).slice(-2));
+      ctx.beginPath();
+      ctx.moveTo(yx - 3, yy);
+      ctx.lineTo(yx + 3, yy);
+      ctx.strokeStyle = "rgba(235,235,235,.5)";
+      ctx.lineWidth = .6;
+      ctx.stroke();
+      ctx.font = "7px 'Microsoft YaHei',sans-serif";
+      ctx.fillStyle = "rgba(225,225,225,.72)";
+      ctx.shadowColor = "#000";
+      ctx.shadowBlur = 4;
+      ctx.fillText(txt, yx + 5, yy);
+      ctx.shadowBlur = 0;
+    }
+
+    function ringLabels(angle, values, mapR, unit) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "7px 'Segoe UI',sans-serif";
+      values.forEach(function (v) {
+        var r = mapR(v);
+        var x = CX + Math.cos(angle) * r;
+        var y = CY + Math.sin(angle) * r;
+        ctx.fillStyle = "rgba(220,220,220,.58)";
+        ctx.shadowColor = "#000"; ctx.shadowBlur = 4;
+        ctx.fillText(v, x, y);
+        ctx.shadowBlur = 0;
+      });
+    }
+    ringLabels(1.86, [370, 380, 390, 400, 410], function (v) { return 64 + (v - 370) / 45 * 330; });
+    ringLabels(.48, [1800, 1850, 1900], function (v) { return 105 + (v - 1800) / 100 * 275; });
+    ringLabels(4.34, ["0", "1", "2", "3", "4"], function (v) { return 64 + Number(v) / 4 * 190; });
+
+    /* 中心：暖白而非纯白硬核 */
+    var rays = 42;
+    for (var ri = 0; ri < rays; ri++) {
+      var ra = ri / rays * Math.PI * 2;
+      var rr0 = 7 + (ri % 3) * 3;
+      var rr1 = 39 + (ri % 5) * 3;
+      ctx.beginPath();
+      ctx.moveTo(CX + Math.cos(ra) * rr0, CY + Math.sin(ra) * rr0);
+      ctx.lineTo(CX + Math.cos(ra) * rr1, CY + Math.sin(ra) * rr1);
+      ctx.strokeStyle = "rgba(255,246,214," + (.06 + (ri % 4) * .03) + ")";
+      ctx.lineWidth = .55;
+      ctx.stroke();
+    }
+    var hub = ctx.createRadialGradient(CX, CY, 0, CX, CY, 74);
+    hub.addColorStop(0, "rgba(255,250,230,.95)");
+    hub.addColorStop(.06, "rgba(255,246,214,.60)");
+    hub.addColorStop(.22, "rgba(250,238,200,.19)");
+    hub.addColorStop(.52, "rgba(236,226,186,.045)");
+    hub.addColorStop(1, "rgba(230,220,180,0)");
+    ctx.fillStyle = hub;
+    ctx.beginPath(); ctx.arc(CX, CY, 74, 0, Math.PI * 2); ctx.fill();
+
+    /* 系列徽标 1 / 2 */
+    function seriesBadge(sId, pr, num) {
+      var s = SER.filter(function (d) { return d.id === sId; })[0];
+      var a = s.off + pr * Math.PI * 2 / TURN;
+      var r = lerp(s.r0, s.r1, pr / 20);
+      var x = CX + Math.cos(a) * r;
+      var y = CY + Math.sin(a) * r;
+      ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(5,5,5,.85)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(240,240,240,.9)";
+      ctx.lineWidth = .8;
+      ctx.stroke();
+      ctx.fillStyle = "#f2f2f2";
+      ctx.font = "8px 'Microsoft YaHei',sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(num, x, y + .4);
+    }
+    seriesBadge(1, 17.4, "1");
+    seriesBadge(2, 15.6, "2");
+
+    /* 悬停 */
+    function drawHoverPoint(p) {
+      setT(hctx);
+      hctx.clearRect(0, 0, W, H);
+      hctx.save();
+      hctx.strokeStyle = "rgba(255,255,255,.95)";
+      hctx.lineWidth = 1;
+      hctx.shadowColor = "rgba(255,255,255,.9)";
+      hctx.shadowBlur = 10;
+      hctx.beginPath();
+      hctx.arc(p.x, p.y, p.hr + 3, 0, Math.PI * 2);
+      hctx.stroke();
+      hctx.setLineDash([2, 5]);
+      hctx.globalAlpha = .5;
+      hctx.beginPath();
+      hctx.moveTo(CX, CY);
+      hctx.lineTo(p.x, p.y);
+      hctx.stroke();
+      hctx.restore();
+    }
+    function clearHoverPoint() {
+      setT(hctx);
+      hctx.clearRect(0, 0, W, H);
+    }
+    var lastHover = null;
+    wrap.addEventListener("mousemove", function (e) {
+      var rect = wrap.getBoundingClientRect();
+      var mx = (e.clientX - rect.left) * (W / rect.width);
+      var my = (e.clientY - rect.top) * (H / rect.height);
+      /* 鼠标位置由「画布像素」换算到「设计坐标」——绘制时整幅图被 setT 绕 (CX,CY) 放大过 K 倍，
+         而 hoverPts 里存的是设计坐标，所以这里要做同一次逆变换，否则命中点会整体偏到中心外 */
+      mx = CX + (mx - CX) / K;
+      my = CY + (my - CY) / K;
+      var best = null, bd = 1e9;
+      for (var i = 0; i < hoverPts.length; i++) {
+        var p = hoverPts[i];
+        var dx = p.x - mx, dy = p.y - my;
+        var d2 = dx * dx + dy * dy;
+        var lim = p.hr + 5;
+        if (d2 < lim * lim && d2 < bd) { bd = d2; best = p; }
+      }
+      if (best) {
+        drawHoverPoint(best);
+        var extra = best.id <= 2 ? "逐月平均浓度" : "年际变化率";
+        showTip(
+          '<div class="tt">' + best.year + " 年 " + best.month + " 月 · " + best.name + "</div>" +
+          '<div class="big">' + SP_INFO[best.id].fmt(best.v) + "</div>" +
+          '<div class="ts">' + extra + " · 瓦里关全球大气本底站</div>",
+          e.clientX, e.clientY
+        );
+        lastHover = best;
+      } else if (lastHover) {
+        lastHover = null;
+        clearHoverPoint();
+        hideTip();
+      }
+    });
+    wrap.addEventListener("mouseleave", function () {
+      lastHover = null;
+      clearHoverPoint();
+      hideTip();
+    });
+  }
+
+  /* ================= 增长率山脊图 ================= */
+  function buildRidge() {
+    var svg = $("#ridgeSvg");
+    var topG = $("#ridgeTop");
+    var botG = $("#ridgeBot");
+    var defs = svg.querySelector("defs");
+    var clipT = svgEl("clipPath", { id: "ridgeClipT" }, defs);
+    svgEl("rect", { x: 0, y: 0, width: 352, height: 134 }, clipT);
+
+    var N = 180, topV = [], botV = [];
+    for (var i = 0; i < N; i++) {
+      var t = i / (N - 1) * 20;
+      var ya = Math.floor(t), yb = Math.min(20, ya + 1), f = t - ya;
+      var tv = lerp(spValue(4, ya, 6), spValue(4, yb, 6), f);
+      tv += .26 * Math.sin(t * 21.3 + .6) + .13 * Math.sin(t * 47.7);
+      topV.push(clamp(tv, .08, 2.18));
+
+      var bv = lerp(spValue(5, ya, 6), spValue(5, yb, 6), f);
+      var peaks = [.9, 3.15, 5.0, 6.8, 8.85, 11.1, 13.45, 15.9, 18.4];
+      peaks.forEach(function (p) { bv += 6.6 * Math.exp(-Math.pow((t - p) / .24, 2)); });
+      bv -= 5.2 * Math.sin(t * 1.12 + .5);
+      botV.push(clamp(bv, -9.5, 12));
+    }
+
+    var x0 = 30, x1 = 320, baseT = 112, topT = 48, baseB = 175, y10 = 145, ym10 = 200;
+    function xAt(i) { return x0 + (x1 - x0) * i / (N - 1); }
+    function yTop(v) { return baseT - clamp(v, 0, 2) / 2 * (baseT - topT); }
+    function yBot(v) { return baseB - v * 3.0; }
+
+    function area(vals, base, mapper) {
+      var d = "M" + x0 + "," + base + " ";
+      for (var i = 0; i < vals.length; i++) d += "L" + xAt(i).toFixed(1) + "," + mapper(vals[i]).toFixed(1) + " ";
+      d += "L" + x1 + "," + base + " Z";
+      return d;
+    }
+    function line(vals, mapper) {
+      var d = "M";
+      for (var i = 0; i < vals.length; i++) d += (i ? "L" : "") + xAt(i).toFixed(1) + "," + mapper(vals[i]).toFixed(1) + " ";
+      return d;
+    }
+
+    svgEl("path", { d: area(topV, baseT, yTop), fill: "url(#rgA)", opacity: ".56" }, topG);
+    svgEl("path", { d: area(topV.map(function (v, i) { return clamp(v * .82 + .1 * Math.sin(i * .3), 0, 2); }), baseT, yTop), fill: "url(#rgFill)", opacity: ".75" }, topG);
+    svgEl("path", { d: line(topV, yTop), fill: "none", stroke: "rgba(247,247,243,.75)", "stroke-width": ".8" }, topG);
+    svgEl("path", { d: line(topV.map(function (v, i) { return clamp(v + .18 * Math.sin(i * .6), 0, 2); }), yTop), fill: "none", stroke: "rgba(255,255,255,.28)", "stroke-width": ".5" }, topG);
+    svgEl("line", { x1: x0, y1: topT, x2: x1, y2: topT, stroke: "rgba(230,230,230,.45)", "stroke-width": ".55", "stroke-dasharray": "2 5" }, topG);
+    svgEl("line", { x1: x0, y1: baseT, x2: x1, y2: baseT, stroke: "rgba(230,230,230,.7)", "stroke-width": ".7" }, topG);
+    svgText(topG, 20, 111, "0", { class: "rl", "text-anchor": "end" });
+    svgText(topG, 20, 52, "2", { class: "rl", "text-anchor": "end" });
+    svgText(topG, 30, 126, "2001", { class: "rl" });
+    svgText(topG, 320, 126, "2021", { class: "rl", "text-anchor": "end" });
+
+    var pos = [], neg = [];
+    botV.forEach(function (v) { pos.push(Math.max(0, v)); neg.push(Math.min(0, v)); });
+    svgEl("path", { d: area(pos, baseB, yBot), fill: "url(#rgB)", opacity: ".48" }, botG);
+    svgEl("path", { d: area(neg, baseB, yBot), fill: "rgba(165,158,180,.28)" }, botG);
+    svgEl("path", { d: line(botV, yBot), fill: "none", stroke: "rgba(246,246,242,.72)", "stroke-width": ".8" }, botG);
+    svgEl("line", { x1: x0, y1: y10, x2: x1, y2: y10, stroke: "rgba(230,230,230,.38)", "stroke-width": ".5", "stroke-dasharray": "2 5" }, botG);
+    svgEl("line", { x1: x0, y1: baseB, x2: x1, y2: baseB, stroke: "rgba(230,230,230,.6)", "stroke-width": ".6" }, botG);
+    svgEl("line", { x1: x0, y1: ym10, x2: x1, y2: ym10, stroke: "rgba(230,230,230,.38)", "stroke-width": ".5", "stroke-dasharray": "2 5" }, botG);
+    svgText(botG, 20, 148, "10", { class: "rl", "text-anchor": "end" });
+    svgText(botG, 20, 178, "0", { class: "rl", "text-anchor": "end" });
+    svgText(botG, 20, 203, "-10", { class: "rl", "text-anchor": "end" });
+    svgText(botG, 30, 216, "2001", { class: "rl" });
+    svgText(botG, 320, 216, "2021", { class: "rl", "text-anchor": "end" });
+
+    var guide = svgEl("line", { x1: 0, y1: 42, x2: 0, y2: 218, stroke: "rgba(255,255,255,.38)", "stroke-width": ".6", opacity: "0" }, svg);
+    svg.addEventListener("mousemove", function (e) {
+      var rect = svg.getBoundingClientRect();
+      var lx = (e.clientX - rect.left) * (352 / rect.width);
+      if (lx < x0 - 4 || lx > x1 + 4) { guide.setAttribute("opacity", "0"); hideTip(); return; }
+      var frac = clamp((lx - x0) / (x1 - x0), 0, 1);
+      var year = 2001 + frac * 20;
+      var yi = clamp(Math.floor(year - 2001), 0, 20);
+      var cg = spValue(4, yi, 6), mh = spValue(5, yi, 6);
+      guide.setAttribute("x1", lx.toFixed(1));
+      guide.setAttribute("x2", lx.toFixed(1));
+      guide.setAttribute("opacity", "1");
+      showTip(
+        '<div class="tt">' + Math.round(year) + " 年 · 温室气体增长率</div>" +
+        '<div class="tr"><span class="sw"></span><span>CO₂增长率</span><b>' + fmt(cg, 2) + "</b></div>" +
+        '<div class="tr"><span class="sw" style="background:#cdbfe0;box-shadow:none;"></span><span>CH₄增长率</span><b>' + fmt(mh, 2) + " ppb/年</b></div>" +
+        '<div class="ts">左图单位 ppm/年 · 右图单位 ppb/年</div>',
+        e.clientX, e.clientY
+      );
+    });
+    svg.addEventListener("mouseleave", function () {
+      guide.setAttribute("opacity", "0");
+      hideTip();
+    });
+  }
+
+  /* ================= 七种温室气体分子 ================= */
+  function buildMolecules() {
+    var root = $("#molSvg");
+    var defs = svgEl("defs", {}, root);
+
+    var atomG = svgEl("radialGradient", { id: "atomG", cx: "33%", cy: "25%", r: "76%" }, defs);
+    [["0", "#ffffff", "1"], [".2", "#f3f3ef", "1"], [".48", "#cfcfca", ".98"],
+     [".76", "#797974", ".98"], ["1", "#242422", "1"]].forEach(function (s) {
+      svgEl("stop", { offset: s[0], "stop-color": s[1], "stop-opacity": s[2] }, atomG);
+    });
+    var haloG = svgEl("radialGradient", { id: "haloG", cx: "50%", cy: "50%", r: "50%" }, defs);
+    [["0", "#ffffff", ".18"], [".5", "#e8e8e2", ".07"], ["1", "#ffffff", "0"]].forEach(function (s) {
+      svgEl("stop", { offset: s[0], "stop-color": s[1], "stop-opacity": s[2] }, haloG);
+    });
+
+    var links = [
+      "M340 70 C430 96 520 146 620 186",
+      "M320 210 C420 230 520 250 624 280",
+      "M250 300 C360 314 480 326 620 340",
+      "M420 150 C500 170 560 200 624 230"
+    ];
+    links.forEach(function (d) {
+      svgEl("path", { d: d, fill: "none", stroke: "rgba(225,225,220,.32)", "stroke-width": ".55", "stroke-dasharray": "1.2 4.6" }, root);
+    });
+
+    var MOLS = [
+      {
+        name: "二氧化碳", formula: "CO₂", gwp: "1", x: 14, y: 16,
+        atoms: [[42, 61, 26], [88, 61, 17], [136, 61, 26]],
+        bonds: [[42, 61, 88, 61, 2], [88, 61, 136, 61, 2]],
+        texts: [[52, 132, "O=C=O", 10.5]]
+      },
+      {
+        name: "甲烷", formula: "CH₄", gwp: "62", x: 198, y: 6,
+        atoms: [[62, 68, 24], [62, 19, 15], [22, 68, 15], [102, 68, 15], [62, 117, 15]],
+        bonds: [[62, 68, 62, 19, 1], [62, 68, 22, 68, 1], [62, 68, 102, 68, 1], [62, 68, 62, 117, 1]],
+        texts: [[158, 38, "H", 10], [140, 64, "H—C—H", 10], [158, 91, "H", 10]]
+      },
+      {
+        name: "氧化亚氮", formula: "N₂O", gwp: "310", x: 398, y: 76,
+        atoms: [[32, 40, 22], [82, 40, 16], [126, 40, 24]],
+        bonds: [[32, 40, 82, 40, 2], [82, 40, 126, 40, 2]],
+        texts: [[148, 44, "N≡N=O", 10]]
+      },
+      {
+        name: "氢氟碳化物", formula: "HFCs", gwp: "9100", x: 94, y: 148,
+        atoms: [[58, 58, 22], [113, 64, 22], [17, 26, 14], [58, 14, 14],
+                [150, 32, 14], [147, 96, 14], [80, 111, 14], [31, 93, 14], [113, 20, 12]],
+        bonds: [[58, 58, 113, 64, 1], [58, 58, 17, 26, 1], [58, 58, 58, 14, 1],
+                [113, 64, 150, 32, 1], [113, 64, 147, 96, 1], [113, 64, 80, 111, 1],
+                [58, 58, 31, 93, 1], [113, 64, 113, 20, 1]],
+        texts: [[0, 130, "F   F", 9.5], [0, 143, "H—C—C—F", 9.5], [0, 156, "H   F", 9.5]]
+      },
+      {
+        name: "全氟化碳", formula: "PFCs", gwp: "3900", x: 258, y: 196,
+        atoms: [[10, 62, 15], [50, 51, 15], [90, 62, 15], [130, 51, 15], [170, 62, 15], [210, 51, 15],
+                [10, 31, 10], [10, 92, 10], [50, 23, 10], [50, 80, 10], [90, 31, 10], [90, 92, 10],
+                [130, 23, 10], [130, 80, 10], [170, 31, 10], [170, 92, 10], [210, 23, 10], [210, 80, 10]],
+        bonds: [[10, 62, 50, 51, 1], [50, 51, 90, 62, 1], [90, 62, 130, 51, 1],
+                [130, 51, 170, 62, 1], [170, 62, 210, 51, 1],
+                [10, 62, 10, 31, 1], [10, 62, 10, 92, 1],
+                [50, 51, 50, 23, 1], [50, 51, 50, 80, 1],
+                [90, 62, 90, 31, 1], [90, 62, 90, 92, 1],
+                [130, 51, 130, 23, 1], [130, 51, 130, 80, 1],
+                [170, 62, 170, 31, 1], [170, 62, 170, 92, 1],
+                [210, 51, 210, 23, 1], [210, 51, 210, 80, 1]],
+        texts: [[6, 122, "F₃C—(CF₂)₄—CF₃", 9.5]]
+      },
+      {
+        name: "六氟化硫", formula: "SF₆", gwp: "15100", x: 436, y: 180,
+        atoms: [[55, 55, 20], [55, 13, 13], [55, 97, 13], [13, 55, 13],
+                [97, 55, 13], [25, 25, 12], [85, 25, 12], [25, 85, 12], [85, 85, 12]],
+        bonds: [[55, 55, 55, 13, 1], [55, 55, 55, 97, 1], [55, 55, 13, 55, 1],
+                [55, 55, 97, 55, 1], [55, 55, 25, 25, 1], [55, 55, 85, 25, 1],
+                [55, 55, 25, 85, 1], [55, 55, 85, 85, 1]],
+        texts: [[4, 124, "F—S—F", 9.5]]
+      },
+      {
+        name: "三氟化氮", formula: "NF₃", gwp: "10800", x: 280, y: 270,
+        atoms: [[45, 43, 19], [16, 16, 14], [75, 16, 14], [45, 83, 14]],
+        bonds: [[45, 43, 16, 16, 1], [45, 43, 75, 16, 1], [45, 43, 45, 83, 1]],
+        texts: [[4, 106, "NF₃", 9.5]]
+      }
+    ];
+
+    MOLS.forEach(function (mol) {
+      var g = svgEl("g", { "class": "mol", transform: "translate(" + mol.x + "," + mol.y + ")" }, root);
+      svgEl("ellipse", { cx: 70, cy: 65, rx: 82, ry: 70, fill: "url(#haloG)" }, g);
+
+      mol.bonds.forEach(function (b) {
+        if (b[0] === b[2] && b[1] === b[3]) return;
+        var ang = Math.atan2(b[3] - b[1], b[2] - b[0]);
+        var nx = Math.cos(ang + Math.PI / 2), ny = Math.sin(ang + Math.PI / 2);
+        var off = b[4] === 2 ? 1.5 : 0;
+        var lines = b[4] === 2 ? [-1, 1] : [0];
+        lines.forEach(function (side) {
+          svgEl("line", {
+            x1: (b[0] + nx * off * side).toFixed(1), y1: (b[1] + ny * off * side).toFixed(1),
+            x2: (b[2] + nx * off * side).toFixed(1), y2: (b[3] + ny * off * side).toFixed(1),
+            stroke: "rgba(225,225,220,.5)", "stroke-width": b[4] === 2 ? ".9" : "1.2"
+          }, g);
+        });
+      });
+
+      mol.atoms.forEach(function (a) {
+        svgEl("circle", { cx: a[0], cy: a[1], r: a[2] + 3, fill: "rgba(255,255,255,.06)" }, g);
+        svgEl("circle", { cx: a[0], cy: a[1], r: a[2], fill: "url(#atomG)", stroke: "rgba(255,255,255,.26)", "stroke-width": ".6" }, g);
+        svgEl("ellipse", {
+          cx: a[0] - a[2] * .28, cy: a[1] - a[2] * .34,
+          rx: a[2] * .36, ry: a[2] * .25, fill: "rgba(255,255,255,.46)"
+        }, g);
+      });
+
+      mol.texts.forEach(function (t) {
+        var tx = svgEl("text", {
+          x: t[0], y: t[1], fill: "rgba(232,232,228,.88)",
+          "font-size": t[3], "font-family": "'Microsoft YaHei',sans-serif",
+          "letter-spacing": ".4"
+        }, g);
+        tx.textContent = t[2];
+      });
+
+      g.addEventListener("mouseenter", function (e) {
+        showTip(
+          '<div class="tt">' + mol.name + " · " + mol.formula + "</div>" +
+          '<div class="tr"><span class="sw"></span><span>GWP（CO₂ = 1）</span><b>' + mol.gwp + "</b></div>" +
+          '<div class="ts">《联合国气候变化框架公约》管控的七种温室气体之一</div>',
+          e.clientX, e.clientY
+        );
+      });
+      g.addEventListener("mousemove", function (e) { moveTip(e.clientX, e.clientY); });
+      g.addEventListener("mouseleave", hideTip);
+    });
+
+    var noise = svgEl("filter", { id: "molNoise", x: "0", y: "0", width: "100%", height: "100%" }, defs);
+    svgEl("feTurbulence", { type: "fractalNoise", baseFrequency: ".9", numOctaves: "2", stitchTiles: "stitch" }, noise);
+    svgEl("feColorMatrix", { type: "saturate", values: "0" }, noise);
+    var nr = svgEl("rect", { x: 0, y: 0, width: 624, height: 380, filter: "url(#molNoise)", opacity: ".045", "pointer-events": "none" }, root);
+    nr.setAttribute("style", "mix-blend-mode:screen;");
+  }
+
+  /* ================= GWP 气泡 ================= */
+  function buildOrbs() {
+    var layer = $("#orbLayer");
+    var ORBS = [
+      { n: "CO₂", full: "二氧化碳", gwp: "1", x: 762, y: 1455, r: 89, fs: 26, desc: "GWP 的参考气体，在大气中寿命很长。" },
+      { n: "CH₄", full: "甲烷", gwp: "62", x: 905, y: 1413, r: 57, fs: 20, desc: "主要来自能源、农业和废弃物处理。" },
+      { n: "N₂O", full: "氧化亚氮", gwp: "310", x: 1004, y: 1502, r: 59, fs: 20, desc: "主要来自农业活动和工业过程。" },
+      { n: "HFCs", full: "氢氟碳化物", gwp: "9100", x: 883, y: 1566, r: 49, fs: 17, desc: "常作为消耗臭氧层物质的替代品。" },
+      { n: "PFCs", full: "全氟化碳", gwp: "3900", x: 984, y: 1608, r: 37, fs: 14, desc: "主要来自铝冶炼和半导体制造。" },
+      { n: "SF₆", full: "六氟化硫", gwp: "15100", x: 1060, y: 1594, r: 30, fs: 13, desc: "常用于电力设备的绝缘。" },
+      { n: "NF₃", full: "三氟化氮", gwp: "10800", x: 878, y: 1650, r: 31, fs: 13, desc: "用于电子行业清洗与蚀刻。" }
+    ];
+    ORBS.forEach(function (o) {
+      var d = document.createElement("div");
+      d.className = "gwp-orb";
+      d.style.left = (o.x - o.r) + "px";
+      d.style.top = (o.y - o.r) + "px";
+      d.style.width = (o.r * 2) + "px";
+      d.style.height = (o.r * 2) + "px";
+      d.style.fontSize = o.fs + "px";
+      d.textContent = o.n;
+      d.addEventListener("mouseenter", function (e) {
+        showTip(
+          '<div class="tt">' + o.full + " · " + o.n + "</div>" +
+          '<div class="tr"><span class="sw"></span><span>GWP（以CO₂ = 1计）</span><b>' + o.gwp + "</b></div>" +
+          '<div class="ts">' + o.desc + "<br>气泡大小：总排放量与GWP共同影响</div>",
+          e.clientX, e.clientY
+        );
+      });
+      d.addEventListener("mousemove", function (e) { moveTip(e.clientX, e.clientY); });
+      d.addEventListener("mouseleave", hideTip);
+      layer.appendChild(d);
+
+      var v = document.createElement("div");
+      v.className = "gwp-v";
+      v.style.left = (o.x - 34) + "px";
+      v.style.top = (o.y + o.r + 4) + "px";
+      v.style.width = "68px";
+      v.textContent = o.gwp;
+      layer.appendChild(v);
+    });
+  }
+
+  /* ================= 其他交互 ================= */
+  function bindLegendHover() {
+    var map = {
+      "1": "CH₄ 浓度：从约 1790 ppb 增长至接近 1900 ppb，具有明显的季节波动。",
+      "2": "CO₂ 浓度：从约 370 ppm 增长至 415 ppm 左右，整体持续上升。",
+      "3": "我国温室气体排放来源：CO₂ 占 82.6%，其余为 CH₄、N₂O 和其他气体。",
+      "4": "CO₂ 年增长率：多数年份在 1–2 ppm/年之间波动。",
+      "5": "CH₄ 年增长率：年际波动较大，部分年份接近 10 ppb/年。"
+    };
+    $$(".sp-legrow").forEach(function (row) {
+      row.addEventListener("mouseenter", function (e) {
+        var k = row.dataset.s;
+        showTip('<div class="tt">' + row.textContent.replace(/^\d+/, "").trim() + "</div>" +
+          '<div class="ts">' + map[k] + "</div>", e.clientX, e.clientY);
+      });
+      row.addEventListener("mousemove", function (e) { moveTip(e.clientX, e.clientY); });
+      row.addEventListener("mouseleave", hideTip);
+    });
+  }
+
+  function bindCo2() {
+    var orb = $("#spCo2");
+    orb.addEventListener("mousemove", function (e) {
+      showTip(
+        '<div class="tt">我国温室气体排放来源</div>' +
+        '<div class="tr"><span class="sw"></span><span>CO₂</span><b>82.6%</b></div>' +
+        '<div class="tr"><span class="sw" style="background:#b8c8d8;box-shadow:none;"></span><span>CH₄</span><b>10.4%</b></div>' +
+        '<div class="tr"><span class="sw" style="background:#9aa8b8;box-shadow:none;"></span><span>N₂O</span><b>4.4%</b></div>' +
+        '<div class="tr"><span class="sw" style="background:#78808a;box-shadow:none;"></span><span>其他气体</span><b>2.6%</b></div>',
+        e.clientX, e.clientY
+      );
+    });
+    orb.addEventListener("mouseleave", hideTip);
+  }
+
+  function bindEarthLabels() {
+    var map = {
+      "太阳辐射": "太阳以短波辐射的形式向地球输送能量。",
+      "大气反射": "大气中的云层、气溶胶和部分地表将太阳辐射反射回太空。",
+      "大气吸收": "大气中的气体吸收一部分太阳短波辐射，使大气增温。",
+      "地面反射": "地球表面反射部分到达地表的太阳辐射。",
+      "地面长波辐射": "地表吸收太阳辐射后，以红外长波辐射的形式向外释放能量。",
+      "云层反射": "云层对太阳辐射有较强的反射作用，是地球能量平衡的重要环节。",
+      "温室气体吸收后发射的红外辐射": "温室气体吸收地表长波辐射后向各个方向重新发射，其中一部分返回地表，使地表温度升高。",
+      "使地表温度升高": "温室效应使地球表面维持适宜生命生存的温度。",
+      "逸出大气": "部分红外辐射穿过大气窗口直接逸出大气层。",
+      "大气窗口": "某些波段的辐射被大气吸收较少，可以直接穿过大气进入太空。",
+      "温室气体": "CO₂、CH₄、N₂O 等温室气体能够吸收并重新发射红外辐射。"
+    };
+    $$("#earthSvg text").forEach(function (t) {
+      t.addEventListener("mouseenter", function (e) {
+        var key = t.textContent.trim();
+        if (!map[key]) return;
+        showTip('<div class="tt">' + key + "</div><div class=\"ts\">" + map[key] + "</div>", e.clientX, e.clientY);
+      });
+      t.addEventListener("mousemove", function (e) { moveTip(e.clientX, e.clientY); });
+      t.addEventListener("mouseleave", hideTip);
+    });
+  }
+
+  function buildEarthStars() {
+    var g = $("#earthStars");
+    var rnd = mulberry32(77);
+    for (var i = 0; i < 64; i++) {
+      svgEl("circle", {
+        cx: (rnd() * 1260).toFixed(1),
+        cy: (rnd() * 96).toFixed(1),
+        r: (.35 + rnd() * 1.15).toFixed(2),
+        fill: "#fff",
+        opacity: (.07 + rnd() * .44).toFixed(2)
+      }, g);
+    }
+    var halo = svgEl("ellipse", { cx: 600, cy: 92, rx: 260, ry: 20, fill: "rgba(220,235,245,.028)" }, g);
+    halo.setAttribute("filter", "url(#softGlow)");
+  }
+
+  /* ================= 第三张：衣食住行中的碳数据 ================= */
+  var lfReady = false;
+
+  /* 底部数据矩阵：三组 × 九列 */
+  var LF_NUM = [
+    [48, 110, 219, 237, 345, 635, 3600, 12090, 18009],
+    [1.7, 4.7, 29, 40, 99, 16.2, 18.1, 18.7, 23.6],
+    [0.17, 0.18, 0.27, 0.6, 1, 1.3, 2, 3.3, 45]
+  ];
+  var LF_COLX = [55, 155, 260, 361, 465, 568, 675, 777, 881];
+  var LF_NUMY = [150, 309, 438];
+  /* 烟羽：顶端 y 与末端亮点 y（canvas 坐标），三行共用同一套高度 */
+  var LF_SPAN = [8, 183, 332];
+  var LF_TIP = [130, 301, 430];
+  /* 每列 [淡烟包络宽, 浓烟核心宽, 浓度系数]，逐列按参考图实测：
+     包络宽只随数值小幅变化，变的主要是核心宽（浓度），
+     而这个浓度系数就是“亮度按数值分档”——把参考图该列的亮度总量解出来的。
+     测宽时刻意避开末端亮点那一小段，否则最淡的几列会把亮点量成核心。 */
+  var LF_SHAPE = [
+    [[72, 28, .370], [68, 40, .419], [78, 42, .534], [76, 43, .564], [76, 52, .624],
+     [74, 58, .706], [80, 71, .691], [79, 79, .905], [93, 84, .910]],
+    [[85, 75, .470], [85, 64, .611], [77, 70, .843], [75, 72, .861], [85, 78, .871],
+     [72, 46, .484], [76, 42, .522], [76, 42, .555], [91, 53, .539]],
+    [[60, 0, .141], [75, 0, .189], [70, 13, .368], [67, 19, .412], [83, 39, .394],
+     [79, 45, .503], [78, 59, .644], [81, 64, .703], [90, 83, .883]]
+  ];
+
+  /* 中部图像：亮斑核 [x, y, 半径, 强度]，位置按参考图的亮部重心标定 */
+  var LF_HOT = [
+    [500, 60, 67, .95], [500, 105, 64, .95], [500, 145, 58, .93],
+    [460, 25, 64, .90], [460, 65, 58, .90], [460, 105, 55, .75],
+    [540, 68, 49, .69], [540, 130, 44, .53], [540, 185, 46, .53],
+    [660, 20, 58, .78], [620, 20, 52, .73], [620, 65, 55, .73],
+    [740, 183, 67, .78], [740, 224, 55, .63], [980, 264, 58, .63],
+    [900, 264, 67, .93], [820, 590, 61, .75], [860, 712, 55, .70],
+    [620, 386, 58, .75], [620, 427, 61, .88], [660, 427, 52, .63],
+    [620, 468, 61, .83], [660, 468, 55, .80], [620, 508, 61, .85],
+    [620, 549, 58, .75],
+    [580, 793, 58, .75], [580, 834, 58, .75], [660, 915, 55, .63],
+    [660, 956, 64, .90], [620, 1037, 61, .83], [620, 1078, 61, .88],
+    [700, 1100, 49, .58],
+    [250, 700, 58, .78], [300, 630, 58, .75], [300, 671, 58, .75],
+    [300, 712, 58, .75], [340, 671, 58, .75], [340, 712, 58, .75],
+    [350, 760, 61, .83], [400, 700, 58, .80],
+    [1030, 915, 61, .78], [1000, 956, 58, .75],
+    [540, 183, 49, .63], [200, 350, 52, .53], [420, 300, 55, .53]
+  ];
+  /* 大面积柔光：把画面中层的灰度托起来 */
+  var LF_WASH = [
+    [250, 300, 300, .016], [620, 250, 300, .014], [980, 420, 300, .015],
+    [180, 700, 300, .012], [520, 600, 320, .013], [860, 560, 300, .013],
+    [420, 900, 320, .011], [820, 950, 300, .013], [1060, 760, 300, .012],
+    [640, 1180, 340, .008], [200, 1080, 300, .004], [960, 1180, 300, .008]
+  ];
+
+  function buildLifeBand() {
+    var svg = $("#lfBand");
+    if (!svg) return;
+    var gU = svgEl("g", { opacity: ".82", "shape-rendering": "crispEdges" }, svg);
+
+    /* 虚线分隔与边框 */
+    function dotted(d, o) {
+      svgEl("path", { d: d, fill: "none", stroke: "rgba(255,255,255," + o + ")", "stroke-width": .8, "stroke-dasharray": "1.6 6.4" }, gU);
+    }
+    dotted("M2 16 V454", ".30");
+    dotted("M1056 6 V460", ".26");
+    dotted("M0 140 H1056", ".24");
+    dotted("M0 305 H1056", ".22");
+    dotted("M550 184 H1058", ".20");
+
+    /* 数值 */
+    LF_NUM.forEach(function (row, gi) {
+      row.forEach(function (v, ci) {
+        var t = svgEl("text", { x: LF_COLX[ci], y: LF_NUMY[gi], "text-anchor": "middle", "class": "lf-num" }, svg);
+        t.textContent = String(v);
+      });
+    });
+    [["1m3/nkg", 1000, 148], ["1kg/nkg", 980, 308]].forEach(function (u) {
+      var t = svgEl("text", { x: u[1], y: u[2], "text-anchor": "middle", "class": "lf-unit" }, svg);
+      t.textContent = u[0];
+    });
+  }
+
+  /* 连线：参考图的画法不是“一条总线分九路”，而是——
+     每一列先有一条竖虚线，从上方内容底部紧挨着贯到矩阵底部（穿过标题和数值）；
+     再在各自的高度向右引出一条横导轨，右端错开成一排向上的短竖杆（扇状阶梯）；
+     左侧另有一排密集的竖虚线栏杆，把“衣食住行”整体接下去。 */
+  function buildLifeLinks() {
+    var svg = $("#lfLink");
+    if (!svg) return;
+    var CX = LF_COLX.map(function (c) { return 150 + c; });   /* 205 … 1031 */
+
+    function line(d, o, dash) {
+      svgEl("path", {
+        d: d, fill: "none", stroke: "rgba(255,255,255," + o + ")",
+        "stroke-width": 1, "stroke-dasharray": dash || "4 5"
+      }, svg);
+    }
+    function box(x, y, w, h, o) {
+      svgEl("rect", {
+        x: x, y: y, width: w, height: h, fill: "none",
+        stroke: "rgba(255,255,255," + o + ")", "stroke-width": 1, "stroke-dasharray": "4 5"
+      }, svg);
+    }
+
+    /* 每列：导轨高度 / 导轨右端（按参考图逐条实测） */
+    var RY = [1442, 1453, 1465, 1476, 1496, 1511, 1526, 1537, 1552];
+    var RX = [950, 983, 1028, 947, 1061, 1105, 1105, 1138, 1154];
+    /* +0.5 让 1px 的虚线正好压在像素行/列上，否则会被抗锯齿摊成两条半亮的线 */
+    var H2 = .5;
+    for (var i = 0; i < 9; i++) {
+      /* 第 4 列的横线在参考图里只存在于右半段（x776–947），不是从列头拉出来的 */
+      if (i === 3) {
+        line("M776.5 1476.5 H947.5", ".34");
+      } else {
+        line("M" + (CX[i] + H2) + " " + (RY[i] + H2) + " H" + (RX[i] + H2), ".52");
+      }
+      /* 右端竖杆向上接长，参考图里它们一直升到“衣”的文字区下方 */
+      line("M" + (RX[i] + H2) + " 1290 V" + (RY[i] + H2), ".45");
+    }
+
+    /* ── 图标 → 数值：这是连线的主干 ──
+       每个食物图标引一条线，落到它对应的那一列的三个数值上。
+       对应关系按内容推定（每列的三行数是同一件东西的三个指标）：
+         玉米 → 48 / 1.7 / 0.17        蛋类 → 110 / 4.7 / 0.18
+         咖啡 → 219 / 29 / 0.27        羊肉 → 237 / 40 / 0.6
+         牛肉 → 345 / 99 / 1
+       第二行是每公斤碳排，1.7 < 4.7 < 29 < 40 < 99 正好对应
+       玉米 < 蛋 < 咖啡 < 羊 < 牛，所以 5 个食物列是连续的 0–4 列；
+       右边 5–8 列是“衣”那一类卡片，由原有的导轨去接。
+       走法：图标右上缘 → 向上一小段 → 左页边通道 → 横向总线 → 该列 → 垂直落到三个数值。
+       线从图标顶上走，是因为“食”的说明文字就贴在图标下面，
+       从下面引线会横穿那一段字；参考图也是从顶上接进圆圈的。
+       通道 x 取参考图左页边那几条栏杆的实际位置（39/51/60/68/77）；
+       总线高度直接取该列导轨的高度（RY），于是通道汇进去的那一刻
+       正好接上参考图本来就有的那条横导轨，不再另起一排横线；
+       通道按“越靠左的越靠下”排，每条总线都从别的通道下端点下面经过，零交叉。 */
+    var COLX = [205, 305, 410, 511, 615, 718, 825, 927, 1031];
+    var NUMY = [1680, 1839, 1968];
+    function dot(x, y, r, o) {
+      svgEl("circle", { cx: x, cy: y, r: r, fill: "rgba(255,255,255," + o + ")" }, svg);
+    }
+    /* [图标x, 图标y, 出口x, 上折y, 通道x, 总线y(=RY[列]), 目标列] */
+    var FLOW = [
+      [131, 1030, 154, 972, 39, RY[4], 4],    /* 牛肉 → 345 / 99 / 1 */
+      [202, 1030, 225, 988, 51, RY[3], 3],    /* 羊肉 → 237 / 40 / 0.6 */
+      [131, 1248, 154, 1190, 60, RY[2], 2],   /* 咖啡 → 219 / 29 / 0.27 */
+      [202, 1248, 225, 1202, 68, RY[1], 1],   /* 蛋类 → 110 / 4.7 / 0.18 */
+      [131, 1351, 154, 1310, 77, RY[0], 0]    /* 玉米 → 48 / 1.7 / 0.17 */
+    ];
+    FLOW.forEach(function (f) {
+      var iy = f[1], ox = f[2], oy = f[3], lx = f[4], by = f[5];
+      var tx = COLX[f[6]];
+      /* 锚点落在图标圆的右上缘（圆心 +r·cos45°），线从这里往上接 */
+      dot(ox, iy - 23, 2.4, .72);
+      /* 走线压到和参考图栏杆同一档亮度（约 .35），别抢插画的视线 */
+      line("M" + (ox + H2) + " " + (iy - 23 + H2) + " V" + (oy + H2), ".36", "none");
+      line("M" + (lx + H2) + " " + (oy + H2) + " H" + (ox + H2), ".36", "none");
+      line("M" + (lx + H2) + " " + (oy + H2) + " V" + (by + H2), ".36", "none");
+      /* 总线这一段和参考图原有的横导轨共线，接头在同一点上 */
+      line("M" + (lx + H2) + " " + (by + H2) + " H" + (tx + H2), ".34", "none");
+      /* 列内的竖导：细点线，穿过三行数值；压在数字上会糊，所以只走空隙 */
+      line("M" + (tx + H2) + " " + (by + H2) + " V1990.5", ".30", "2 6");
+      /* 落点：数值正下方、压在竖导上的一个小实心点，读作“这条线停在这个数上” */
+      NUMY.forEach(function (ny) { dot(tx, ny + 12, 1.7, .58); });
+    });
+
+    /* 行间分隔：参考图是三组错开的短段（左端依次退到栏杆上），不是三条通长横线 */
+    [[1705, 89, 616], [1713.5, 79, 511], [1713.5, 827, 1159],
+     [1721, 71, 410], [1721, 719, 1159]].forEach(function (r) {
+      line("M" + r[1] + " " + (r[0] + .5) + " H" + r[2], ".40", "5 5");
+    });
+    /* 每行左端的 “n=” */
+    [1680, 1839, 1968].forEach(function (y) {
+      var t = svgEl("text", { x: 130, y: y + 4, "text-anchor": "middle", "class": "lf-n" }, svg);
+      t.textContent = "n=";
+    });
+
+    /* 左页边竖干：从“行·日常活动”下来接上栏杆（参考图 x39 一条虚线贯穿全页） */
+    line("M39.5 302 V1180", ".34");
+    box(60, 288, 128, 482, ".30");                 /* 四张缩略卡的外框 */
+
+    /* 右侧：住/衣 两条竖干落到导轨上方 */
+    [1176, 1184, 1190, 1197].forEach(function (x) { line("M" + (x + .5) + " 1290 V1552", ".40", "5 4"); });
+    line("M1192 690 H1206", ".34");
+    line("M1206 690 V1290", ".38");
+    /* “衣”文字区下方的短横线（参考图 y1408 处 x1078–1149） */
+    line("M1078 1408.5 H1149", ".40");
+
+    /* 字幕块：“以碳数据为基础生成的视觉图像”横在连线的必经之路上。
+       用一块和页面底色相同的黑底把穿过字幕的竖线盖掉，线在字幕上下继续，
+       读起来仍是同一条；黑底与页面背景同为 #000，看不出来。 */
+    svgEl("rect", { x: 56, y: 1466, width: 424, height: 62, fill: "#000" }, svg);
+  }
+
+  /* 底部烟羽：顶端向下淌成一片灰烟，末端在同一条基线上收成一个亮点 */
+  function buildLifePlumes() {
+    var cv = $("#lfPlume");
+    if (!cv || !cv.getContext) return;
+    var ctx = cv.getContext("2d");
+    ctx.setTransform(2, 0, 0, 2, 0, 0);
+    var rnd = mulberry32(20261106);
+    ctx.clearRect(0, 0, 1060, 470);
+
+    /* 纵向包络：上四成是宽大的一团烟（顶部不尖、略向两侧鼓），
+       中间一道平滑的收口，下六成是一根粗细基本不变的细尾，末了收到数值点上。
+       参考图就是这个扇形：帽宽、颈细但不断，尾巴不收到零。
+       再叠一点低频起伏，帽子边缘才不是一个光滑的圆。 */
+    var lfSeed = 0;
+    function envF(t) {
+      if (t < 0) t = 0;
+      if (t > 1) t = 1;
+      var base;
+      if (t < .12) base = .70 + .30 * Math.sin((t / .12) * 1.5708);
+      else if (t < .40) base = 1 - .04 * ((t - .12) / .28);
+      else if (t < .58) {
+        var s = (t - .40) / .18;
+        base = .96 - .64 * s * s * (3 - 2 * s);          /* .96 → .32 */
+      } else {
+        var s2 = (t - .58) / .42;
+        base = .32 * (1 - .24 * s2 * s2 * (3 - 2 * s2)); /* .32 → .24 */
+      }
+      if (t < .60) base *= 1 + .075 * Math.sin(t * 17.3 + lfSeed) + .05 * Math.sin(t * 33.1 + lfSeed * 2.1);
+      return base;
+    }
+    /* 帽向右鼓、尾收到数值点上，整体略歪着站 */
+    function leanX(t, ew) {
+      return ew * .12 * Math.pow(1 - t, 1.6) + ew * .02 * Math.sin(t * 3.1);
+    }
+    /* 取一个纵向位置：密度跟着当地包络宽度走，细尾处才不会堆出亮梗 */
+    function pickT() {
+      var k, t;
+      for (k = 0; k < 30; k++) {
+        t = rnd();
+        if (rnd() < envF(t)) return t;
+      }
+      return rnd() * .35;
+    }
+
+    function plume(cx, top, tip, ew, cw, k) {
+      var span = tip - top;
+      lfSeed = cx * .37 + top * .11;   /* 每列的起伏相位不同，九根烟才不是一个模子 */
+      /* 核心宽 0 的列在参考图里就是几乎透明的淡烟，只留一条极细的芯 */
+      var cwv = Math.max(cw, 3);
+      var fill = Math.min(1, cwv / Math.max(ew, 1));   /* 浓度：核心占包络的比例 */
+      /* 核心占比 0=只剩淡烟 1=浓烟。参考图里数值最小的几列并不是“什么都没有”，
+         而是一片更宽更淡的烟；所以淡烟的包络不能被核心宽度压没。 */
+      var cf = Math.min(1, cwv / 70);
+      var inten = .40 + .60 * Math.pow(cf, .70);
+      var i, t, hw, u, x, y, a, rr, g, ba;
+
+      ctx.globalCompositeOperation = "lighter";
+
+      /* 1. 底衬：沿轴线排一串压扁的柔光团，叠出上宽下窄的轮廓。
+            核心越弱，光团的边缘越"平"——参考图里最淡的两列是铺开的雾，不是一根亮线。 */
+      var flat = .34 + .52 * Math.pow(1 - cf, 3);
+      var nb = 11;
+      for (i = 0; i < nb; i++) {
+        t = .03 + .97 * (i / (nb - 1));
+        hw = Math.max(1.6, ew * .5 * envF(t));
+        y = top + t * span;
+        x = cx + leanX(t, ew);
+        rr = hw * 1.02;
+        ba = (.042 + .064 * envF(t)) * inten * k;
+        g = ctx.createRadialGradient(x, y, 0, x, y, rr);
+        g.addColorStop(0, "rgba(206,213,226," + ba.toFixed(3) + ")");
+        g.addColorStop(.45, "rgba(196,203,218," + (ba * .78).toFixed(3) + ")");
+        g.addColorStop(.75, "rgba(182,190,206," + (ba * flat).toFixed(3) + ")");
+        g.addColorStop(1, "rgba(168,178,198,0)");
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(1, .60);
+        ctx.translate(-x, -y);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, rr, 0, 6.2832);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      /* 1b. 蘑菇帽：几团大柔光叠出圆顶，参考图顶部是鼓出来的一团烟，不是平口 */
+      for (i = 0; i < 4; i++) {
+        var ct = .07 + .10 * i;
+        var chw = Math.max(2.4, ew * .5 * envF(ct)) * 1.08;
+        var cxx = cx + leanX(ct, ew), cyy = top + ct * span;
+        var cg = ctx.createRadialGradient(cxx, cyy - chw * .18, 0, cxx, cyy, chw * 1.16);
+        cg.addColorStop(0, "rgba(212,220,232," + (.034 * inten * k).toFixed(3) + ")");
+        cg.addColorStop(.55, "rgba(194,203,218," + (.017 * inten * k).toFixed(3) + ")");
+        cg.addColorStop(1, "rgba(170,180,200,0)");
+        ctx.fillStyle = cg;
+        ctx.beginPath();
+        ctx.arc(cxx, cyy, chw * 1.16, 0, 6.2832);
+        ctx.fill();
+      }
+
+      /* 1c. 帽边的小烟团：参考图的帽沿是花椰菜状的碎团，不是一片匀光。
+             团块沿着上半圈的弧线排、偶尔探出轮廓外，轮廓才有毛边 */
+      var capCx = cx + leanX(.18, ew), capCy = top + .18 * span;
+      var capRx = ew * .50, capRy = span * .135;
+      for (i = 0; i < 34; i++) {
+        var ang2 = Math.PI * (1 + rnd());        /* 上半圈：从左沿到右沿 */
+        var rad2 = .70 + rnd() * .44;
+        var lx2 = capCx + Math.cos(ang2) * capRx * rad2;
+        var ly2 = capCy + Math.sin(ang2) * capRy * rad2;
+        var lr2 = 2.6 + rnd() * rnd() * 7.5;
+        var la2 = (.013 + rnd() * .022) * inten * k;
+        var lg = ctx.createRadialGradient(lx2, ly2, 0, lx2, ly2, lr2);
+        lg.addColorStop(0, "rgba(226,232,244," + la2.toFixed(3) + ")");
+        lg.addColorStop(.62, "rgba(204,212,228," + (la2 * .55).toFixed(3) + ")");
+        lg.addColorStop(1, "rgba(186,196,214,0)");
+        ctx.fillStyle = lg;
+        ctx.beginPath();
+        ctx.arc(lx2, ly2, lr2, 0, 6.2832);
+        ctx.fill();
+      }
+
+      /* 2. 淡烟颗粒：把轮廓嚼碎，边缘散出去（细颗粒、多覆叠，避免一颗颗亮点）。
+            t 均匀取样，细尾才不会被头部挤没。 */
+      var nEnv = Math.round(1000 + ew * 60);
+      for (i = 0; i < nEnv; i++) {
+        t = rnd();
+        hw = ew * .5 * envF(t);
+        u = rnd() * 2 - 1;
+        y = top + t * span;
+        x = cx + leanX(t, ew) + u * hw;
+        a = (.010 + rnd() * .030) * (1 - Math.abs(u) * .34) * inten * k;
+        /* 顶边淡入，不然帽顶是一条刀切的平线 */
+        a *= .45 + .55 * Math.min(1, t / .07);
+        ctx.fillStyle = "rgba(158,164,178," + a.toFixed(3) + ")";
+        ctx.beginPath();
+        ctx.arc(x, y, .45 + rnd() * rnd() * 1.2, 0, 6.2832);
+        ctx.fill();
+      }
+
+      /* 2b. 丝缕：从颈口放射到帽沿的一束细线。参考图的烟是卷出来的条纹，
+             不是一团均匀的雾；这几条线把帽从“光团”变成“烟” */
+      ctx.lineWidth = 1;
+      for (i = 0; i < 22; i++) {
+        var nn = .28 + rnd() * .14;
+        var nx0 = cx + leanX(nn, ew), ny0 = top + nn * span;
+        var aa2 = Math.PI * (1 + (i + rnd() * .7) / 22);
+        var ex2 = capCx + Math.cos(aa2) * capRx * (.90 + rnd() * .14);
+        var ey2 = capCy + Math.sin(aa2) * capRy * (.90 + rnd() * .14);
+        var mx2 = (nx0 + ex2) / 2 + (rnd() - .5) * 9;
+        var my2 = (ny0 + ey2) / 2 + (rnd() - .5) * 7;
+        ctx.strokeStyle = "rgba(196,203,216," + ((.035 + rnd() * .065) * inten * k).toFixed(3) + ")";
+        ctx.beginPath();
+        ctx.moveTo(nx0, ny0);
+        ctx.quadraticCurveTo(mx2, my2, ex2, ey2);
+        ctx.stroke();
+      }
+
+      /* 3. 浓烟核心：宽度随数值，涡旋明暗叠在芯上。
+            参考图的烟身峰值只到 190 上下（只有末端亮点是纯白），
+            所以这里用"粒子更多、每颗更淡"来避免堆出一片死白。 */
+      var nCore = Math.round(500 + cwv * 200);
+      for (i = 0; i < nCore; i++) {
+        t = pickT();
+        hw = Math.max(.8, cwv * .56 * envF(t));
+        u = rnd() * 2 - 1;
+        y = top + t * span;
+        x = cx + leanX(t, ew) * .55 + u * hw;
+        a = (.014 + rnd() * .055) * (1 - Math.abs(u) * .30) * (.35 + .65 * fill) * k;
+        /* 尾段收窄后粒子会挤成一根白针，按包络宽度把亮度压下去，尾才是一缕烟 */
+        a *= .20 + .80 * envF(t);
+        a *= .70 + .30 * Math.sin(t * 16.3 + u * 3.4 + cx * .07);
+        if (a < 0) a = 0;
+        ctx.fillStyle = "rgba(198,205,218," + a.toFixed(3) + ")";
+        ctx.beginPath();
+        ctx.arc(x, y, .4 + rnd() * rnd() * 1.1, 0, 6.2832);
+        ctx.fill();
+      }
+
+      /* 3b. 帽心：参考图的蘑菇帽亮在边、暗在卷心，里面还夹着几个透光的洞。
+             整块压黑会变成“空心蛋”，所以用几处碎暗斑 + 帽底一条背光暗带 */
+      ctx.globalCompositeOperation = "source-over";
+      for (i = 0; i < 6; i++) {
+        var hx = capCx + (rnd() * 2 - 1) * capRx * .40;
+        var hy = capCy + (rnd() * 2 - 1) * capRy * .34 + capRy * .20;
+        var hr = 3 + rnd() * 7;
+        var hg = ctx.createRadialGradient(hx, hy, 0, hx, hy, hr);
+        hg.addColorStop(0, "rgba(2,3,5," + (.26 + rnd() * .22).toFixed(2) + ")");
+        hg.addColorStop(.6, "rgba(2,3,5,.16)");
+        hg.addColorStop(1, "rgba(2,3,5,0)");
+        ctx.fillStyle = hg;
+        ctx.beginPath();
+        ctx.arc(hx, hy, hr, 0, 6.2832);
+        ctx.fill();
+      }
+      /* 帽底的一条暗带：烟从颈口翻出来，帽底必定背光 */
+      var ug = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      ug.addColorStop(0, "rgba(2,3,5,.34)");
+      ug.addColorStop(1, "rgba(2,3,5,0)");
+      ctx.save();
+      ctx.translate(cx + leanX(.30, ew), top + .32 * span);
+      ctx.scale(ew * .30, span * .070);
+      ctx.fillStyle = ug;
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, 6.2832);
+      ctx.fill();
+      ctx.restore();
+      ctx.globalCompositeOperation = "lighter";
+
+      /* 4. 粉末细茎：鼓部以下撒到底端，向右下的卷尾多一点。
+            核心越弱，茎越散越淡——参考图里最淡的两列是一条铺开的薄雾而不是一根亮线。 */
+      for (y = top + span * .52; y < tip - 1; y += 1.1) {
+        t = (y - top) / span;
+        hw = Math.max(2.4, ew * (.10 + .06 * (1 - cf)) * envF(t));
+        x = cx + leanX(t, ew) + (rnd() * 2 - 1) * hw;
+        a = (.003 + rnd() * .012) * (.60 + .40 * cf) * k;
+        ctx.fillStyle = "rgba(162,168,182," + a.toFixed(3) + ")";
+        ctx.fillRect(x, y, .6 + rnd() * .6, .6 + rnd() * .6);
+      }
+
+      /* 5. 末端亮点：参考图是一个接近纯白的实心硬芯 + 一圈软晕，落在同一条基线上 */
+      y = tip - 1;
+      g = ctx.createRadialGradient(cx, y, 0, cx, y, 7.5);
+      g.addColorStop(0, "rgba(214,224,240,.44)");
+      g.addColorStop(.50, "rgba(196,208,228,.17)");
+      g.addColorStop(1, "rgba(170,182,204,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, y, 7.5, 0, 6.2832);
+      ctx.fill();
+
+      g = ctx.createRadialGradient(cx, y - .3, 0, cx, y, 3.4);
+      g.addColorStop(0, "rgba(255,255,255,1)");
+      g.addColorStop(.30, "rgba(255,255,255,1)");
+      g.addColorStop(.64, "rgba(243,248,255,.82)");
+      g.addColorStop(1, "rgba(214,226,246,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, y, 3.4, 0, 6.2832);
+      ctx.fill();
+
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    for (var gi = 0; gi < 3; gi++) {
+      for (var ci = 0; ci < 9; ci++) {
+        var sh = LF_SHAPE[gi][ci];
+        plume(LF_COLX[ci], LF_SPAN[gi], LF_TIP[gi], sh[0], sh[1], sh[2]);
+      }
+    }
+  }
+
+  /* 中部：以碳数据为基础生成的视觉图像 */
+  function buildLifeArt() {
+    var cv = $("#lfArt");
+    if (!cv || !cv.getContext) return;
+    var ctx = cv.getContext("2d");
+    /* 画布上沿抬高了 100px 好让顶部的大云完整；内容整体下移 100px 抵消 */
+    ctx.setTransform(2, 0, 0, 2, 0, 200);
+    var rnd = mulberry32(90717);
+    /* 薄膜干涉色：参考图的气泡偏粉、薄荷、淡蓝、奶油黄 */
+    var BOKEH_TINT = ["250,220,236", "214,240,220", "214,224,250", "252,240,208", "234,216,246"];
+
+    function blob(x, y, rx, ry, a) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(rx, ry);
+      var g = ctx.createRadialGradient(0, -0.12, 0.02, 0, 0, 1);
+      g.addColorStop(0, "rgba(255,255,255," + a.toFixed(3) + ")");
+      g.addColorStop(0.42, "rgba(255,255,255," + (a * 0.94).toFixed(3) + ")");
+      g.addColorStop(0.72, "rgba(255,255,255," + (a * 0.42).toFixed(3) + ")");
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, 6.2832);
+      ctx.fill();
+      ctx.restore();
+    }
+    function bar(x, y0, y1, w, a) {
+      var g = ctx.createLinearGradient(0, y0, 0, y1);
+      g.addColorStop(0, "rgba(255,255,255," + a.toFixed(3) + ")");
+      g.addColorStop(0.55, "rgba(255,255,255," + (a * 0.42).toFixed(3) + ")");
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(x - w / 2, y0, w, y1 - y0);
+    }
+    function streak(x0, y0, x1, y1, w, a) {
+      var g = ctx.createLinearGradient(x0, y0, x1, y1);
+      g.addColorStop(0, "rgba(255,255,255,0)");
+      g.addColorStop(0.38, "rgba(255,255,255," + a.toFixed(3) + ")");
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.strokeStyle = g;
+      ctx.lineWidth = w;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
+    function hatch(p, step, a, lw) {
+      var xs = [p[0][0], p[1][0], p[2][0]], ys = [p[0][1], p[1][1], p[2][1]];
+      var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+      var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(p[0][0], p[0][1]);
+      ctx.lineTo(p[1][0], p[1][1]);
+      ctx.lineTo(p[2][0], p[2][1]);
+      ctx.closePath();
+      ctx.clip();
+      ctx.strokeStyle = "rgba(255,255,255," + a.toFixed(3) + ")";
+      ctx.lineWidth = lw;
+      for (var x = x0 - (y1 - y0); x < x1; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, y1 + 4);
+        ctx.lineTo(x + (y1 - y0) + 8, y0 - 4);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    function dots(x0, y0, x1, y1, step, r, a) {
+      ctx.fillStyle = "rgba(255,255,255," + a.toFixed(3) + ")";
+      for (var y = y0; y < y1; y += step) {
+        for (var x = x0; x < x1; x += step) {
+          ctx.beginPath();
+          ctx.arc(x + (rnd() - .5) * 1.5, y + (rnd() - .5) * 1.5, r, 0, 6.2832);
+          ctx.fill();
+        }
+      }
+    }
+    function panel(x, y, w, h, a) {
+      ctx.fillStyle = "rgba(255,255,255," + (a * 0.05).toFixed(3) + ")";
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = "rgba(255,255,255," + (a * 0.62).toFixed(3) + ")";
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(x, y, w, h);
+    }
+    /* 框格内部的密集纹理：横条 + 斜纹，密度按参考图标定 */
+    function panelFill(x, y, w, h, seed) {
+      var r = mulberry32(seed);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x + 2, y + 2, w - 4, h - 4);
+      ctx.clip();
+      ctx.strokeStyle = "rgba(255,255,255,.60)";
+      ctx.lineWidth = 1.4;
+      var rows = Math.floor((h - 10) / 9);
+      for (var i = 0; i < rows; i++) {
+        var yy = y + 7 + i * 9;
+        var ww = (0.34 + r() * 0.62) * (w - 16);
+        ctx.beginPath();
+        ctx.moveTo(x + 8, yy);
+        ctx.lineTo(x + 8 + ww, yy);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = "rgba(255,255,255,.20)";
+      ctx.lineWidth = 1.0;
+      for (var xx = x - h; xx < x + w; xx += 5.5) {
+        ctx.beginPath();
+        ctx.moveTo(xx, y + h);
+        ctx.lineTo(xx + h, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    ctx.clearRect(0, 0, 1120, 1220);
+
+    /* 纯黑底 */
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, 1120, 1220);
+
+    /* ===== 等距地面：±45° 菱形网格，间距 27 ===== */
+    var FLOOR = [[160, 560], [560, 240], [1000, 620], [520, 1180]];
+    function floorPath() {
+      ctx.beginPath();
+      ctx.moveTo(FLOOR[0][0], FLOOR[0][1]);
+      for (var i = 1; i < FLOOR.length; i++) ctx.lineTo(FLOOR[i][0], FLOOR[i][1]);
+      ctx.closePath();
+    }
+
+    ctx.save();
+    floorPath();
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,.46)";
+    ctx.lineWidth = 1.5;
+    var GS = 27;
+    for (var gc = -1400; gc <= 1400; gc += GS) {
+      ctx.beginPath(); ctx.moveTo(0, gc); ctx.lineTo(1120, 1120 + gc); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, gc); ctx.lineTo(1120, gc - 1120); ctx.stroke();
+    }
+    ctx.restore();
+
+    /* ===== 左侧剖面房间 ===== */
+    function polyPath(pts) {
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (var k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+      ctx.closePath();
+    }
+
+    /* 房间地台 */
+    var PLATE = [[213, 375], [327, 261], [458, 392], [344, 506]];
+    polyPath(PLATE);
+    ctx.fillStyle = "rgba(0,0,0,.22)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.9)";
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+
+    /* 台面石纹 */
+    ctx.save();
+    polyPath(PLATE);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,.22)";
+    ctx.lineWidth = 1.4;
+    [[250, 395, 410, 425], [290, 465, 445, 435], [240, 495, 340, 445], [225, 420, 320, 350], [330, 370, 400, 430], [260, 430, 330, 480]].forEach(function (ln) {
+      ctx.beginPath();
+      ctx.moveTo(ln[0], ln[1]);
+      ctx.lineTo(ln[2], ln[3]);
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    /* 地台前立面（厚度 + 细密斜纹） */
+    ctx.save();
+    polyPath([[213, 375], [344, 506], [458, 392], [458, 405], [344, 519], [213, 388]]);
+    ctx.clip();
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.fillRect(180, 360, 320, 200);
+    ctx.strokeStyle = "rgba(0,0,0,.6)";
+    ctx.lineWidth = 1.2;
+    for (var ph = 300; ph < 700; ph += 7) {
+      ctx.beginPath();
+      ctx.moveTo(160, ph);
+      ctx.lineTo(520, ph + 140);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    /* 大理石背板（浴缸后方，竖直平面） */
+    var BACK = [[228, 347], [302, 273], [302, 213], [228, 287]];
+    polyPath(BACK);
+    ctx.fillStyle = "rgba(255,255,255,.2)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.95)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.save();
+    polyPath(BACK);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,.55)";
+    ctx.lineWidth = 1.3;
+    [[212, 335, 316, 231], [222, 345, 326, 241], [234, 350, 332, 252]].forEach(function (ln) {
+      ctx.beginPath();
+      ctx.moveTo(ln[0], ln[1]);
+      ctx.lineTo(ln[2], ln[3]);
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    /* 玻璃淋浴间：高玻璃亭，罩住浴缸 */
+    ctx.fillStyle = "rgba(255,255,255,.04)";
+    polyPath([[212, 182], [300, 135], [360, 160], [272, 210]]);
+    ctx.fill();
+    /* 白色石台（淋浴间内） */
+    polyPath([[235, 200], [300, 168], [322, 190], [257, 224]]);
+    ctx.fillStyle = "rgba(255,255,255,.8)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.95)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    /* 竖框 */
+    var GF = [[212, 182, 395, 3.2], [237, 205, 365, 1.6], [270, 200, 395, 1.6],
+              [300, 135, 395, 2.4], [330, 145, 375, 1.6], [355, 150, 400, 2]];
+    GF.forEach(function (g) {
+      ctx.lineWidth = g[3];
+      ctx.beginPath(); ctx.moveTo(g[0], g[1]); ctx.lineTo(g[0], g[2]); ctx.stroke();
+    });
+    /* 顶沿 */
+    ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(212, 182); ctx.lineTo(300, 135); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(300, 135); ctx.lineTo(475, 10); ctx.stroke();
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(270, 200); ctx.lineTo(355, 150); ctx.stroke();
+    /* 横档 */
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(212, 250); ctx.lineTo(355, 210); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(212, 300); ctx.lineTo(355, 255); ctx.stroke();
+    /* 门把手 */
+    ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(264, 197); ctx.lineTo(264, 245); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(323, 195); ctx.lineTo(323, 243); ctx.stroke();
+    /* 玻璃反光 */
+    ctx.strokeStyle = "rgba(255,255,255,.2)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(216, 200); ctx.lineTo(255, 250); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(305, 150); ctx.lineTo(305, 340); ctx.stroke();
+
+    /* 浴缸 */
+    var TUB = [[252, 362], [299, 315], [346, 362], [299, 409]];
+    polyPath(TUB);
+    ctx.fillStyle = "rgba(8,8,8,.96)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,1)";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    polyPath([[264, 362], [299, 327], [334, 362], [299, 397]]);
+    ctx.strokeStyle = "rgba(255,255,255,.7)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.save();
+    polyPath([[264, 362], [299, 327], [334, 362], [299, 397]]);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,.28)";
+    ctx.lineWidth = 2;
+    [[277, 373, 317, 335], [287, 388, 327, 351]].forEach(function (ln) {
+      ctx.beginPath();
+      ctx.moveTo(ln[0], ln[1]);
+      ctx.lineTo(ln[2], ln[3]);
+      ctx.stroke();
+    });
+    ctx.restore();
+    ctx.strokeStyle = "rgba(255,255,255,.95)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(291, 354, 8, 0, 6.2832); ctx.stroke();
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(291, 354, 3.5, 0, 6.2832); ctx.stroke();
+
+    /* 落地灯：深色锥形灯罩 */
+    ctx.beginPath();
+    ctx.moveTo(394, 320); ctx.lineTo(428, 320);
+    ctx.lineTo(423, 375); ctx.lineTo(399, 375);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(14,14,14,.96)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,1)";
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(411, 320, 17, 6, 0, 0, 6.2832);
+    ctx.fillStyle = "rgba(78,78,78,.85)"; ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,1)"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(411, 375, 12, 5, 0, 0, 6.2832);
+    ctx.fillStyle = "rgba(205,205,205,.6)"; ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,1)"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(411, 378); ctx.lineTo(411, 441); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(411, 441, 25, 10, 0, 0, 6.2832);
+    ctx.fillStyle = "rgba(12,12,12,.9)"; ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,1)"; ctx.lineWidth = 2.2; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(411, 439, 18, 6, 0, 0, 6.2832);
+    ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,.6)"; ctx.stroke();
+
+    /* 楼梯：粗斜纹 */
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(404, 450); ctx.lineTo(555, 450);
+    ctx.lineTo(555, 620); ctx.lineTo(404, 620);
+    ctx.closePath(); ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,.95)";
+    ctx.lineWidth = 8;
+    for (var st = 320; st < 800; st += 22) {
+      ctx.beginPath();
+      ctx.moveTo(st, 640);
+      ctx.lineTo(st + 260, 380);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    /* 前景深色家电块 */
+    function darkBox(x, y, w, d, h) {
+      var ax = 1.6, ay = -0.8, bx = 1.6, by = 0.8;
+      var P = [[x, y],
+               [x + w * ax, y + w * ay],
+               [x + w * ax + d * bx, y + w * ay + d * by],
+               [x + d * bx, y + d * by]];
+      function dwall(i, j) {
+        polyPath([[P[i][0], P[i][1]], [P[j][0], P[j][1]],
+                  [P[j][0], P[j][1] - h], [P[i][0], P[i][1] - h]]);
+        ctx.fillStyle = "rgba(12,12,12,.97)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,.95)";
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+      }
+      dwall(0, 3);
+      dwall(3, 2);
+      polyPath([[P[0][0], P[0][1] - h], [P[1][0], P[1][1] - h],
+                [P[2][0], P[2][1] - h], [P[3][0], P[3][1] - h]]);
+      ctx.fillStyle = "rgba(28,28,28,.97)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,.95)";
+      ctx.stroke();
+      /* 窗条 */
+      var wyn = h * 0.34;
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.lineWidth = 1.4;
+      polyPath([[P[0][0] + 7, P[0][1] - wyn], [P[3][0] - 5, P[3][1] - wyn],
+                [P[3][0] - 5, P[3][1] - wyn - 12], [P[0][0] + 7, P[0][1] - wyn - 12]]);
+      ctx.stroke();
+    }
+    darkBox(380, 230, 35, 20, 79);
+    darkBox(458, 255, 20, 12, 62);
+    darkBox(316, 212, 28, 17, 60);
+
+    /* ===== 中央塔群 ===== */
+
+    /* 左侧大理石竖柱 */
+    polyPath([[438, 0], [468, 6], [468, 392], [438, 386]]);
+    ctx.fillStyle = "rgba(230,230,230,.92)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.85)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.save();
+    polyPath([[438, 0], [468, 6], [468, 392], [438, 386]]);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(30,30,30,.35)";
+    ctx.lineWidth = 2;
+    [[442, 20, 462, 90], [440, 120, 466, 200], [444, 250, 460, 330], [442, 340, 464, 380]].forEach(function (ln) {
+      ctx.beginPath();
+      ctx.moveTo(ln[0], ln[1]);
+      ctx.lineTo(ln[2], ln[3]);
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    /* 1. 左侧白色大理石巨碑 */
+    ctx.fillStyle = "rgba(240,240,240,.96)";
+    polyPath([[445, 10], [520, 40], [520, 330], [445, 300]]);
+    ctx.fill();
+    polyPath([[445, 10], [480, 0], [555, 30], [520, 40]]);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.9)";
+    ctx.lineWidth = 1.6;
+    polyPath([[445, 10], [520, 40], [520, 330], [445, 300]]);
+    ctx.stroke();
+    polyPath([[445, 10], [480, 0], [555, 30], [520, 40]]);
+    ctx.stroke();
+    /* 巨碑侧面与落地边 */
+    polyPath([[520, 40], [548, 30], [548, 320], [520, 330]]);
+    ctx.fillStyle = "rgba(120,120,120,.55)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.8)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,.95)";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(445, 300); ctx.lineTo(520, 330); ctx.lineTo(548, 320); ctx.stroke();
+    ctx.save();
+    polyPath([[445, 10], [520, 40], [520, 330], [445, 300]]);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(20,20,20,.26)";
+    ctx.lineWidth = 1.6;
+    [[450, 40, 510, 90], [445, 120, 520, 180], [450, 220, 515, 260], [448, 280, 505, 320],
+     [452, 70, 500, 130], [446, 175, 512, 215], [455, 245, 512, 292]].forEach(function (ln) {
+      ctx.beginPath();
+      ctx.moveTo(ln[0], ln[1]);
+      ctx.lineTo(ln[2], ln[3]);
+      ctx.stroke();
+    });
+    ctx.strokeStyle = "rgba(255,255,255,.75)";
+    ctx.lineWidth = 1.2;
+    [[448, 55, 505, 105], [446, 160, 514, 200], [452, 300, 508, 336]].forEach(function (ln) {
+      ctx.beginPath();
+      ctx.moveTo(ln[0], ln[1]);
+      ctx.lineTo(ln[2], ln[3]);
+      ctx.stroke();
+    });
+    ctx.restore();
+    /* 巨碑花岗岩颗粒：密集明暗斑点，压住平滑的灰面 */
+    ctx.save();
+    polyPath([[445, 10], [520, 40], [520, 330], [445, 300]]);
+    ctx.clip();
+    for (var gsp = 0; gsp < 5200; gsp++) {
+      var gx = 440 + rnd() * 92, gy = 6 + rnd() * 332;
+      var gdark = rnd() < 0.44;
+      ctx.fillStyle = gdark
+        ? "rgba(64,64,68," + (0.12 + rnd() * 0.32).toFixed(3) + ")"
+        : "rgba(255,255,255," + (0.14 + rnd() * 0.46).toFixed(3) + ")";
+      var gsz = rnd() < 0.13 ? 2 : 1;
+      ctx.fillRect(gx, gy, gsz, gsz);
+    }
+    ctx.restore();
+    ctx.fillStyle = "#0a0a0a";
+    polyPath([[470, 115], [505, 100], [520, 125], [485, 145]]);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.85)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+
+    /* 2. 中央密肋塔 */
+    var RIB = [[548, 95], [648, 68], [648, 400], [548, 428]];
+    polyPath(RIB);
+    ctx.fillStyle = "rgba(16,16,16,.9)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.9)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.save();
+    polyPath(RIB);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,.75)";
+    ctx.lineWidth = 2;
+    for (var rr = 0; rr < 26; rr++) {
+      for (var cc = 0; cc < 14; cc++) {
+        var rx = 551 + cc * 8 + (rr % 2) * 4;
+        var ry = 96 + rr * 13;
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(rx, ry + 18);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    /* 密肋塔侧面 / 顶面 / 落地边 */
+    polyPath([[648, 68], [676, 58], [676, 390], [648, 400]]);
+    ctx.fillStyle = "rgba(90,90,90,.6)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.85)";
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    polyPath([[548, 95], [648, 68], [676, 58], [576, 85]]);
+    ctx.fillStyle = "rgba(200,200,200,.5)";
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,1)";
+    ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(548, 428); ctx.lineTo(648, 400); ctx.lineTo(676, 390); ctx.stroke();
+
+    /* 3. 斜向大梁 */
+    ctx.fillStyle = "rgba(240,240,240,.95)";
+    polyPath([[644, 74], [684, 96], [556, 306], [516, 284]]);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,1)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.fillStyle = "#0a0a0a";
+    polyPath([[644, 74], [684, 96], [616, 186], [576, 164]]);
+    ctx.fill();
+
+    /* 4. 交叉排线塔 */
+    var HH = [[655, 92], [722, 74], [722, 330], [655, 348]];
+    polyPath(HH);
+    ctx.fillStyle = "rgba(225,225,225,.72)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.95)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.save();
+    polyPath(HH);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(28,28,28,.55)";
+    ctx.lineWidth = 1;
+    for (var vy = 78; vy < 350; vy += 5.5) {
+      ctx.beginPath();
+      ctx.moveTo(645, vy);
+      ctx.lineTo(760, vy);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(28,28,28,.3)";
+    for (var vx3 = 647; vx3 < 760; vx3 += 7) {
+      ctx.beginPath();
+      ctx.moveTo(vx3, 78);
+      ctx.lineTo(vx3, 350);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    /* 排线塔侧面 / 顶面 / 落地边 */
+    polyPath([[722, 74], [750, 64], [750, 320], [722, 330]]);
+    ctx.fillStyle = "rgba(80,80,80,.6)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.85)";
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    polyPath([[655, 92], [722, 74], [750, 64], [683, 82]]);
+    ctx.fillStyle = "rgba(210,210,210,.45)";
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,1)";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(655, 348); ctx.lineTo(722, 330); ctx.lineTo(750, 320); ctx.stroke();
+
+    /* 5. 右侧退台暗塔 */
+    var STEP = [[730, 175], [855, 152], [890, 215], [815, 425], [745, 438]];
+    polyPath(STEP);
+    ctx.fillStyle = "rgba(10,10,10,.85)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.95)";
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.save();
+    polyPath(STEP);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,.45)";
+    ctx.lineWidth = 1.1;
+    for (var fl = 0; fl < 19; fl++) {
+      ctx.beginPath();
+      ctx.moveTo(720, 196 + fl * 13);
+      ctx.lineTo(900, 184 + fl * 13);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(255,255,255,.28)";
+    ctx.lineWidth = 1;
+    for (var sm = 0; sm < 26; sm++) {
+      ctx.beginPath();
+      ctx.moveTo(726 + sm * 7, 190);
+      ctx.lineTo(726 + sm * 7, 438);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(255,255,255,.7)";
+    ctx.lineWidth = 1;
+    for (var pp = 0; pp < 14; pp++) {
+      ctx.beginPath();
+      ctx.moveTo(790 + pp * 6, 380);
+      ctx.lineTo(810 + pp * 6, 300);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    /* 退台塔顶面与侧面 */
+    polyPath([[730, 175], [855, 152], [879, 144], [754, 167]]);
+    ctx.fillStyle = "rgba(150,150,150,.5)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.85)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    polyPath([[855, 152], [879, 144], [914, 207], [890, 215]]);
+    ctx.fillStyle = "rgba(70,70,70,.7)";
+    ctx.fill();
+    ctx.stroke();
+
+    /* 右下线稿楼群 */
+    function wireBox(x, y, w, d, h) {
+      var ax = 1.6, ay = -0.8, bx = 1.6, by = 0.8;
+      var P = [
+        [x, y],
+        [x + w * ax, y + w * ay],
+        [x + w * ax + d * bx, y + w * ay + d * by],
+        [x + d * bx, y + d * by]
+      ];
+      ctx.beginPath();
+      ctx.moveTo(P[0][0], P[0][1]);
+      for (var i = 1; i < 4; i++) ctx.lineTo(P[i][0], P[i][1]);
+      ctx.closePath();
+      ctx.stroke();
+      for (var j = 0; j < 4; j++) {
+        ctx.beginPath();
+        ctx.moveTo(P[j][0], P[j][1]);
+        ctx.lineTo(P[j][0], P[j][1] - h);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(P[0][0], P[0][1] - h);
+      for (var i2 = 1; i2 < 4; i2++) ctx.lineTo(P[i2][0], P[i2][1] - h);
+      ctx.closePath();
+      ctx.stroke();
+      for (var fy = 10; fy < h; fy += 11) {
+        ctx.beginPath();
+        ctx.moveTo(P[0][0], P[0][1] - fy);
+        ctx.lineTo(P[1][0], P[1][1] - fy);
+        ctx.lineTo(P[2][0], P[2][1] - fy);
+        ctx.lineTo(P[3][0], P[3][1] - fy);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+    ctx.strokeStyle = "rgba(255,255,255,.5)";
+    ctx.lineWidth = 1;
+    wireBox(772, 470, 26, 10, 120);
+    wireBox(806, 520, 20, 8, 92);
+    wireBox(842, 556, 15, 6, 68);
+    wireBox(706, 452, 17, 7, 76);
+
+    /* 实心等距楼体：补满中右建筑群 */
+    function solidBox(x, y, w, d, h, tone) {
+      var sax = 1.6, say = -0.8, sbx = 1.6, sby = 0.8;
+      var P = [[x, y],
+               [x + w * sax, y + w * say],
+               [x + w * sax + d * sbx, y + w * say + d * sby],
+               [x + d * sbx, y + d * sby]];
+      function wall(i, j, shade) {
+        polyPath([[P[i][0], P[i][1]], [P[j][0], P[j][1]],
+                  [P[j][0], P[j][1] - h], [P[i][0], P[i][1] - h]]);
+        ctx.fillStyle = "rgba(122,124,128," + shade + ")";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,.7)";
+        ctx.lineWidth = 1.1;
+        ctx.stroke();
+      }
+      wall(0, 3, tone);
+      wall(3, 2, tone * 0.85);
+      polyPath([[P[0][0], P[0][1] - h], [P[1][0], P[1][1] - h],
+                [P[2][0], P[2][1] - h], [P[3][0], P[3][1] - h]]);
+      ctx.fillStyle = "rgba(96,98,102," + (tone * 0.95) + ")";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,.7)";
+      ctx.stroke();
+      /* 窗带 */
+      ctx.strokeStyle = "rgba(206,208,212,.30)";
+      ctx.lineWidth = 1;
+      for (var yy = 20; yy < h - 8; yy += 26) {
+        ctx.beginPath();
+        ctx.moveTo(P[0][0], P[0][1] - yy); ctx.lineTo(P[3][0], P[3][1] - yy);
+        ctx.moveTo(P[3][0], P[3][1] - yy); ctx.lineTo(P[2][0], P[2][1] - yy);
+        ctx.stroke();
+      }
+    }
+    solidBox(900, 380, 50, 6, 135, 0.5);
+    solidBox(954, 350, 44, 6, 110, 0.46);
+    solidBox(996, 330, 34, 5, 95, 0.42);
+
+    /* 右上：一排斜插的建筑板材（参考图是一叠薄板像手风琴一样展开），
+       每块板有一条亮边；板材底部用虚线扇接到下方“住”的文字块。 */
+    (function trSlabs() {
+      var k, nb = 7;
+      for (k = nb - 1; k >= 0; k--) {
+        var bx = 800 + 26 * k, by = 385 - 20 * k;
+        var bw = 30, dx = 104, dy = -270;
+        var q = [[bx, by], [bx + bw, by], [bx + bw + dx, by + dy], [bx + dx, by + dy]];
+        var bright = (k === 3);
+        polyPath(q);
+        var g = ctx.createLinearGradient(bx, by, bx + dx, by + dy);
+        if (bright) {
+          g.addColorStop(0, "rgba(206,206,202,.52)");
+          g.addColorStop(.55, "rgba(146,146,146,.40)");
+          g.addColorStop(1, "rgba(84,84,88,.28)");
+        } else {
+          g.addColorStop(0, "rgba(30,30,34,.66)");
+          g.addColorStop(.5, "rgba(62,62,68,.30)");
+          g.addColorStop(1, "rgba(16,16,20,.70)");
+        }
+        ctx.fillStyle = g;
+        ctx.fill();
+        /* 板面颗粒 */
+        ctx.save();
+        polyPath(q); ctx.clip();
+        for (var sp = 0; sp < 90; sp++) {
+          var sxp = bx + rnd() * (bw + dx), syp = by + rnd() * dy;
+          ctx.fillStyle = "rgba(255,255,255," + (.02 + rnd() * .06).toFixed(3) + ")";
+          ctx.fillRect(sxp, syp, .8 + rnd() * .8, .8 + rnd() * .8);
+        }
+        ctx.restore();
+        /* 板边：右侧一条亮线，左侧一条暗线 */
+        ctx.beginPath();
+        ctx.moveTo(bx + bw + dx, by + dy); ctx.lineTo(bx + bw, by);
+        ctx.strokeStyle = "rgba(255,255,255,.34)"; ctx.lineWidth = 1.2; ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(bx + dx, by + dy); ctx.lineTo(bx, by);
+        ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 1; ctx.stroke();
+        /* 顶端的短切面，给板一点厚度 */
+        ctx.beginPath();
+        ctx.moveTo(bx + dx, by + dy); ctx.lineTo(bx + dx - 12, by + dy - 14);
+        ctx.lineTo(bx + bw + dx - 12, by + dy - 14); ctx.lineTo(bx + bw + dx, by + dy);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(150,150,154,.20)"; ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,.34)"; ctx.lineWidth = 1; ctx.stroke();
+      }
+      /* 板材底部连到“住”文字块的虚线扇 */
+      ctx.strokeStyle = "rgba(255,255,255,.30)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
+      for (k = 0; k < nb; k++) {
+        var ex = 800 + 26 * k + 15, ey = 385 - 20 * k + 6;
+        ctx.beginPath();
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(838, 424);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    })();
+
+    solidBox(602, 676, 40, 26, 234, 0.92);
+    solidBox(679, 663, 11, 8, 230, 0.8);
+    solidBox(728, 629, 24, 15, 109, 0.9);
+    solidBox(742, 804, 37, 24, 133, 0.86);
+
+    /* 斜纹材质带 */
+    function hatchBand(q, step, alpha) {
+      var minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9, i;
+      for (i = 0; i < q.length; i++) {
+        if (q[i][0] < minx) minx = q[i][0];
+        if (q[i][0] > maxx) maxx = q[i][0];
+        if (q[i][1] < miny) miny = q[i][1];
+        if (q[i][1] > maxy) maxy = q[i][1];
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(minx, miny, maxx - minx, maxy - miny);
+      ctx.clip();
+      ctx.strokeStyle = "rgba(255,255,255," + alpha + ")";
+      ctx.lineWidth = 1.1;
+      for (var hb = -400; hb < 1200; hb += step) {
+        ctx.beginPath();
+        ctx.moveTo(hb, 380);
+        ctx.lineTo(hb + 760, 1200);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    hatchBand([[648, 610], [692, 588], [692, 1058], [648, 1080]], 6, 0.28);
+    hatchBand([[820, 840], [900, 810], [900, 1060], [820, 1090]], 5, 0.3);
+
+    /* 右下：材质样品展示盒 */
+    function swatch(q, kind) {
+      ctx.save();
+      polyPath(q);
+      ctx.clip();
+      ctx.fillStyle = "rgba(232,232,232,.9)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(30,30,30,.55)";
+      ctx.lineWidth = 1;
+      var i;
+      if (kind === 0) {
+        for (i = -620; i < 1400; i += 6) {
+          ctx.beginPath(); ctx.moveTo(i, 700); ctx.lineTo(i + 300, 1000); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(i, 1000); ctx.lineTo(i + 300, 700); ctx.stroke();
+        }
+      } else if (kind === 1) {
+        for (i = 760; i < 960; i += 7) {
+          ctx.beginPath();
+          for (var wx = 880; wx < 1120; wx += 4) {
+            var wy2 = i + 5 * Math.sin((wx + i) * 0.06);
+            if (wx === 880) ctx.moveTo(wx, wy2); else ctx.lineTo(wx, wy2);
+          }
+          ctx.stroke();
+        }
+      } else {
+        for (i = 0; i < 320; i++) {
+          ctx.fillStyle = "rgba(40,40,40," + (0.3 + (i % 4) * 0.15).toFixed(2) + ")";
+          ctx.fillRect(880 + rnd() * 240, 760 + rnd() * 200, 1.6, 1.6);
+        }
+      }
+      ctx.restore();
+      polyPath(q);
+      ctx.strokeStyle = "rgba(255,255,255,.9)";
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+    var T0 = [912, 832], T1 = [1000, 792], T2 = [1080, 842], T3 = [992, 882];
+    function bandQ(t0, t1) {
+      return [
+        [T0[0] + (T1[0] - T0[0]) * t0, T0[1] + (T1[1] - T0[1]) * t0],
+        [T0[0] + (T1[0] - T0[0]) * t1, T0[1] + (T1[1] - T0[1]) * t1],
+        [T3[0] + (T2[0] - T3[0]) * t1, T3[1] + (T2[1] - T3[1]) * t1],
+        [T3[0] + (T2[0] - T3[0]) * t0, T3[1] + (T2[1] - T3[1]) * t0]
+      ];
+    }
+    swatch(bandQ(0, 1 / 3), 0);
+    swatch(bandQ(1 / 3, 2 / 3), 1);
+    swatch(bandQ(2 / 3, 1), 2);
+    var BH = 58;
+    polyPath([[T0[0], T0[1]], [T3[0], T3[1]], [T3[0], T3[1] + BH], [T0[0], T0[1] + BH]]);
+    ctx.fillStyle = "rgba(18,18,18,.95)"; ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 1.4; ctx.stroke();
+    polyPath([[T3[0], T3[1]], [T2[0], T2[1]], [T2[0], T2[1] + BH], [T3[0], T3[1] + BH]]);
+    ctx.fillStyle = "rgba(30,30,30,.95)"; ctx.fill();
+    ctx.stroke();
+
+    /* 上方噪点板材 */
+    var SLAB = [[843, 704], [902, 662], [950, 700], [891, 742]];
+    polyPath(SLAB);
+    ctx.fillStyle = "rgba(20,20,20,.92)";
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    for (var s2 = 0; s2 < 420; s2++) {
+      ctx.fillStyle = "rgba(255,255,255," + (0.2 + (s2 % 6) * 0.1).toFixed(2) + ")";
+      ctx.fillRect(840 + rnd() * 120, 655 + rnd() * 95, 1.5, 1.5);
+    }
+    ctx.restore();
+    polyPath(SLAB);
+    ctx.strokeStyle = "rgba(255,255,255,.9)";
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    /* 塔间实体小块 */
+    ctx.fillStyle = "rgba(238,238,238,.9)";
+    [[590, 432, 614, 426, 630, 438, 606, 444],
+     [662, 352, 684, 346, 698, 356, 676, 362],
+     [600, 300, 618, 296, 630, 305, 612, 309]].forEach(function (q) {
+      polyPath([[q[0], q[1]], [q[2], q[3]], [q[4], q[5]], [q[6], q[7]]]);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,.7)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+
+    /* 虚线引线 */
+    ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = "rgba(255,255,255,.45)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(720, 380); ctx.lineTo(862, 472); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(560, 118); ctx.lineTo(664, 246); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(690, 300); ctx.lineTo(806, 372); ctx.stroke();
+    ctx.setLineDash([]);
+
+    /* 6. 中央与上缘柔焦光球（虹彩薄膜感） */
+    bokeh(622, -8, 88, 0.72, 0.8, "242,238,252");
+    bokeh(566, 40, 30, 0.5, 2.3, "246,240,236");
+    bokeh(372, 132, 19, 0.6, 1.4, "246,238,230");
+    bokeh(394, 156, 11, 0.55, 3.1, "238,242,236");
+    bokeh(352, 158, 9, 0.5, 4.8, "248,238,242");
+    bokeh(722, 306, 20, 0.6, 3.2, "240,238,252");
+    bokeh(742, 330, 12, 0.55, 5.4, "242,236,244");
+    [[690, 358, 15], [706, 380, 11], [700, 412, 9], [676, 344, 8]].forEach(function (o) {
+      bokeh(o[0], o[1], o[2], 0.6, o[0] * 0.013, "240,238,250");
+    });
+
+    /* ===== 下层平台与餐桌 ===== */
+    var LOW = [[224, 800], [420, 604], [640, 824], [444, 1020]];
+    polyPath(LOW);
+    ctx.fillStyle = "rgba(8,8,8,.92)";
+    ctx.fill();
+    ctx.save();
+    polyPath(LOW);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,.32)";
+    ctx.lineWidth = 0.8;
+    for (var lg = -1400; lg <= 1400; lg += 14) {
+      ctx.beginPath(); ctx.moveTo(160, lg); ctx.lineTo(720, lg + 560); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(160, lg); ctx.lineTo(720, lg - 560); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.strokeStyle = "rgba(255,255,255,.95)";
+    ctx.lineWidth = 2.6;
+    polyPath(LOW);
+    ctx.stroke();
+
+    /* 台面噪点石纹 */
+    ctx.save();
+    polyPath(LOW);
+    ctx.clip();
+    for (var sp = 0; sp < 5200; sp++) {
+      var sx = 200 + rnd() * 460;
+      var sy = 590 + rnd() * 440;
+      ctx.fillStyle = "rgba(255,255,255," + (0.18 + (sp % 7) * 0.07).toFixed(3) + ")";
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    ctx.restore();
+
+    /* 26% 圆饼 */
+    ctx.fillStyle = "rgba(120,120,120,.85)";
+    ctx.beginPath(); ctx.arc(227, 966, 26, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = "rgba(205,205,205,.95)";
+    ctx.beginPath();
+    ctx.moveTo(227, 966);
+    ctx.arc(227, 966, 26, -Math.PI / 2, -Math.PI / 2 + 1.634);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.8)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(227, 966, 26, 0, 6.2832); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.85)";
+    ctx.font = "11px sans-serif";
+    ctx.fillText("26%", 258, 960);
+
+    /* 餐桌（等距矩形，加粗） */
+    var TOP = [[415, 754], [500, 700], [560, 738], [475, 792]];
+    ctx.strokeStyle = "rgba(255,255,255,.96)";
+    ctx.lineWidth = 3.4;
+    [[418, 757], [472, 789], [497, 703], [557, 741]].forEach(function (p) {
+      ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0], p[1] + 68); ctx.stroke();
+    });
+    polyPath(TOP);
+    ctx.fillStyle = "rgba(16,16,16,.96)";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    /* 桌沿厚度 */
+    ctx.beginPath(); ctx.moveTo(415, 754); ctx.lineTo(475, 792); ctx.lineTo(560, 738); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(475, 792); ctx.lineTo(475, 803); ctx.lineTo(415, 765); ctx.lineTo(415, 754);
+    ctx.stroke();
+    /* 餐盘 */
+    ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.ellipse(493, 748, 30, 18, 0, 0, 6.2832); ctx.stroke();
+    ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.ellipse(493, 748, 20, 12, 0, 0, 6.2832); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(493, 748, 9, 5.5, 0, 0, 6.2832); ctx.stroke();
+    /* 餐具：勺子 */
+    ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.ellipse(444, 730, 8, 5, -0.55, 0, 6.2832); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(450, 735); ctx.lineTo(468, 750); ctx.stroke();
+    /* 笔 */
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(522, 716); ctx.lineTo(539, 729); ctx.stroke();
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(522, 716); ctx.lineTo(518, 713); ctx.stroke();
+    /* 小盒 */
+    polyPath([[533, 705], [545, 699], [553, 705], [541, 711]]);
+    ctx.fillStyle = "rgba(18,18,18,.96)"; ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 1.2; ctx.stroke();
+    /* 盘中食物：螺旋 */
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    for (var fa = 0; fa < 14; fa += 0.15) {
+      var fr = 1.2 + fa * 0.95;
+      var fx = 493 + Math.cos(fa) * fr, fy = 748 + Math.sin(fa) * fr * 0.6;
+      if (fa === 0) ctx.moveTo(fx, fy); else ctx.lineTo(fx, fy);
+    }
+    ctx.stroke();
+
+    /* 椅子 */
+    function lfChair(cx, cy, s) {
+      ctx.lineWidth = 2.6;
+      ctx.strokeStyle = "rgba(255,255,255,.94)";
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 9 * s);
+      ctx.lineTo(cx + 15 * s, cy);
+      ctx.lineTo(cx, cy + 9 * s);
+      ctx.lineTo(cx - 15 * s, cy);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - 15 * s, cy);
+      ctx.lineTo(cx - 15 * s, cy - 24 * s);
+      ctx.lineTo(cx - 2 * s, cy - 32 * s);
+      ctx.lineTo(cx - 2 * s, cy - 10 * s);
+      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx - 15 * s, cy); ctx.lineTo(cx - 15 * s, cy + 16 * s); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + 15 * s, cy); ctx.lineTo(cx + 15 * s, cy + 16 * s); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy + 9 * s); ctx.lineTo(cx, cy + 20 * s); ctx.stroke();
+    }
+    lfChair(386, 762, 1);
+    lfChair(598, 760, 1);
+    lfChair(502, 812, 1);
+    lfChair(452, 686, 0.9);
+
+    /* 小白球 */
+    ctx.fillStyle = "rgba(255,255,255,.92)";
+    ctx.beginPath(); ctx.arc(451, 660, 10, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = "rgba(90,90,90,.35)";
+    ctx.beginPath(); ctx.arc(454, 664, 10, 3.3, 5.6); ctx.fill();
+
+    /* 细长光柱 */
+    var sl = ctx.createLinearGradient(0, 838, 0, 982);
+    sl.addColorStop(0, "rgba(255,255,255,0)");
+    sl.addColorStop(0.45, "rgba(255,255,255,.52)");
+    sl.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = sl;
+    ctx.beginPath();
+    ctx.moveTo(548, 842); ctx.lineTo(556, 834); ctx.lineTo(548, 978); ctx.lineTo(540, 986);
+    ctx.closePath(); ctx.fill();
+
+    /* 下层柔焦光球：多瓣毛边云团 + 内部颗粒 */
+    function bokehPath(cx, cy, r, ph, s) {
+      var lobes = [
+        [0, 0, 0.62], [0.5, 0.16, 0.44], [-0.48, 0.24, 0.46],
+        [0.28, -0.52, 0.42], [-0.3, -0.5, 0.4], [0.6, -0.28, 0.3], [-0.62, -0.14, 0.32]
+      ];
+      ctx.beginPath();
+      for (var i = 0; i < lobes.length; i++) {
+        var L = lobes[i];
+        var la = (L[2] + 0.1 * Math.sin(i * 2.7 + ph)) * r * s;
+        var lx = cx + L[0] * r * s, ly = cy + L[1] * r * s * 0.9;
+        ctx.moveTo(lx + la, ly);
+        ctx.arc(lx, ly, la, 0, 6.2832);
+      }
+    }
+    /* 薄膜干涉色已提到函数开头，避免调用早于赋值 */
+    function bokeh(cx, cy, r, a, ph, t) {
+      t = t || "240,238,250";
+      var c1 = BOKEH_TINT[Math.floor((ph * 7) % 5)];
+      var c2 = BOKEH_TINT[Math.floor((ph * 7 + 2) % 5)];
+      /* 外发光 */
+      bokehPath(cx, cy, r, ph, 1.3);
+      var hg = ctx.createRadialGradient(cx, cy, r * 0.35, cx, cy, r * 1.34);
+      hg.addColorStop(0, "rgba(" + c1 + "," + (a * 0.62).toFixed(3) + ")");
+      hg.addColorStop(0.62, "rgba(" + c2 + "," + (a * 0.34).toFixed(3) + ")");
+      hg.addColorStop(1, "rgba(" + t + ",0)");
+      ctx.fillStyle = hg;
+      ctx.fill();
+      /* 主体：白芯 + 彩色边缘 */
+      bokehPath(cx, cy, r, ph, 1);
+      var bg = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.24, r * 0.04, cx, cy, r * 1.03);
+      bg.addColorStop(0, "rgba(255,255,255," + a + ")");
+      bg.addColorStop(0.26, "rgba(255,252,246," + (a * 0.92).toFixed(3) + ")");
+      bg.addColorStop(0.58, "rgba(" + c1 + "," + (a * 0.82).toFixed(3) + ")");
+      bg.addColorStop(0.82, "rgba(" + c2 + "," + (a * 0.42).toFixed(3) + ")");
+      bg.addColorStop(1, "rgba(" + t + ",0)");
+      ctx.fillStyle = bg;
+      ctx.fill();
+      /* 彩色偏光斑块 */
+      ctx.save();
+      bokehPath(cx, cy, r * 0.94, ph + 0.7, 1);
+      ctx.clip();
+      [[-0.34, -0.18, 0.55, c1], [0.3, 0.24, 0.5, c2], [0.12, -0.4, 0.42, c1]].forEach(function (q) {
+        var gx = cx + q[0] * r, gy = cy + q[1] * r, gr = q[2] * r;
+        var gg = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
+        gg.addColorStop(0, "rgba(" + q[3] + "," + (a * 0.38).toFixed(3) + ")");
+        gg.addColorStop(1, "rgba(" + q[3] + ",0)");
+        ctx.fillStyle = gg;
+        ctx.beginPath(); ctx.arc(gx, gy, gr, 0, 6.2832); ctx.fill();
+      });
+      ctx.restore();
+      /* 细颗粒：参考图是细密的胶片颗粒，不是撒上去的亮粉 */
+      ctx.save();
+      bokehPath(cx, cy, r, ph, 1);
+      ctx.clip();
+      for (var k = 0; k < 1500; k++) {
+        var bx = cx - r + rnd() * 2 * r;
+        var by = cy - r + rnd() * 2 * r;
+        if (k % 5 === 0) {
+          ctx.fillStyle = "rgba(96,98,110," + (0.02 + rnd() * 0.05).toFixed(3) + ")";
+        } else {
+          ctx.fillStyle = "rgba(255,255,255," + (0.02 + rnd() * 0.10).toFixed(3) + ")";
+        }
+        var bs = 0.7 + rnd() * 0.6;
+        ctx.fillRect(bx, by, bs, bs);
+      }
+      ctx.restore();
+    }
+    bokeh(314, 692, 84, 0.7, 0.4, "238,236,252");
+    bokeh(452, 676, 26, 0.6, 2.1, "246,238,242");
+    bokeh(566, 790, 34, 0.62, 1.2, "236,244,240");
+    bokeh(742, 920, 46, 0.66, 3.0, "240,238,252");
+    bokeh(462, 900, 24, 0.55, 4.4, "246,240,236");
+    bokeh(578, 946, 16, 0.6, 5.1, "242,238,248");
+    bokeh(668, 941, 28, 0.68, 0.9, "240,242,236");
+    bokeh(627, 1085, 30, 0.66, 2.6, "246,238,242");
+    bokeh(792, 902, 24, 0.6, 4.2, "236,242,238");
+
+    /* 大饼图 */
+    ctx.fillStyle = "rgba(128,128,128,.9)";
+    ctx.beginPath(); ctx.arc(808, 1101, 29, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = "rgba(232,232,232,.95)";
+    ctx.beginPath();
+    ctx.moveTo(808, 1101);
+    ctx.arc(808, 1101, 29, -Math.PI / 2, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.85)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(808, 1101, 29, 0, 6.2832); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(808, 1101); ctx.lineTo(808, 1072); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(808, 1101); ctx.lineTo(837, 1101); ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(824, 1078); ctx.lineTo(852, 1050); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(837, 1101); ctx.lineTo(866, 1101); ctx.stroke();
+    [[520, 700, 14], [640, 930, 16]].forEach(function (o) {
+      var gr2 = ctx.createRadialGradient(o[0], o[1], 0, o[0], o[1], o[2]);
+      gr2.addColorStop(0, "rgba(240,236,248,.55)");
+      gr2.addColorStop(1, "rgba(205,215,232,0)");
+      ctx.fillStyle = gr2;
+      ctx.beginPath(); ctx.arc(o[0], o[1], o[2], 0, 6.2832); ctx.fill();
+    });
+
+    /* ===== 左栏：行·日常活动 缩略卡（参考为照片，这里线稿重绘） ===== */
+    function cardFrame(x, y, w, h) {
+      var cg = ctx.createLinearGradient(0, y, 0, y + h);
+      cg.addColorStop(0, "rgba(255,255,255,.16)");
+      cg.addColorStop(0.5, "rgba(255,255,255,.055)");
+      cg.addColorStop(1, "rgba(255,255,255,.10)");
+      ctx.fillStyle = cg;
+      ctx.fillRect(x, y, w, h);
+      var cb = ctx.createRadialGradient(x + w * .52, y + h * .42, 2, x + w * .52, y + h * .42, w * .62);
+      cb.addColorStop(0, "rgba(255,255,255,.15)");
+      cb.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = cb;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = "rgba(255,255,255,.42)";
+      ctx.lineWidth = .8;
+      ctx.strokeRect(x + .5, y + .5, w - 1, h - 1);
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.lineWidth = 1.5;
+    }
+    function tinyLabel(x, y, str) {
+      ctx.fillStyle = "rgba(255,255,255,.58)";
+      ctx.font = "7px 'Microsoft YaHei',sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(str, x, y);
+    }
+    function thumbLamp(x, y, w, h) {
+      var cx = x + w * .5;
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.lineWidth = 1.3;
+      ctx.beginPath(); ctx.moveTo(cx, y + 4); ctx.lineTo(cx, y + 22); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - 16, y + 44); ctx.lineTo(cx + 16, y + 44);
+      ctx.lineTo(cx + 6, y + 22); ctx.lineTo(cx - 6, y + 22);
+      ctx.closePath(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, y + 51, 4, 0, 6.2832); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 16, y + h - 16); ctx.lineTo(x + w - 16, y + h - 16); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 30, y + h - 16); ctx.lineTo(x + 30, y + h - 5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + w - 30, y + h - 16); ctx.lineTo(x + w - 30, y + h - 5); ctx.stroke();
+      tinyLabel(x + 5, y + h - 3, "照明");
+    }
+    function thumbRoad(x, y, w, h) {
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(x + 22, y + h - 9); ctx.lineTo(x + w - 22, y + h - 9);
+      ctx.lineTo(x + w * .62, y + 14); ctx.lineTo(x + w * .38, y + 14);
+      ctx.closePath(); ctx.stroke();
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.moveTo(x + w * .5, y + 16); ctx.lineTo(x + w * .5, y + h - 11); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(x + 52, y + 58); ctx.lineTo(x + 54, y + 48);
+      ctx.lineTo(x + 68, y + 44); ctx.lineTo(x + 84, y + 48);
+      ctx.lineTo(x + 88, y + 58); ctx.closePath(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + 59, y + 60, 3.4, 0, 6.2832); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + 81, y + 60, 3.4, 0, 6.2832); ctx.stroke();
+      tinyLabel(x + 5, y + h - 3, "交通距离");
+    }
+    function thumbBag(x, y, w, h) {
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.lineWidth = 1.3;
+      ctx.strokeRect(x + 32, y + 26, 34, 34);
+      ctx.beginPath(); ctx.arc(x + 49, y + 26, 10, Math.PI, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 39, y + 34); ctx.lineTo(x + 39, y + 60); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x + 82, y + 34); ctx.lineTo(x + 100, y + 34);
+      ctx.lineTo(x + 97, y + 56); ctx.lineTo(x + 85, y + 56); ctx.closePath(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + 100, y + 43, 5, -1.2, 1.2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 80, y + 62); ctx.lineTo(x + 104, y + 62); ctx.stroke();
+      tinyLabel(x + 5, y + h - 3, "日常生活");
+    }
+    function thumbCar(x, y, w, h) {
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(x + 26, y + 54);
+      ctx.lineTo(x + 32, y + 36);
+      ctx.quadraticCurveTo(x + 69, y + 24, x + 106, y + 36);
+      ctx.lineTo(x + 112, y + 54);
+      ctx.closePath(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + 44, y + 56, 7, 0, 6.2832); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + 94, y + 56, 7, 0, 6.2832); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 40, y + 40); ctx.lineTo(x + 98, y + 40); ctx.stroke();
+      tinyLabel(x + 5, y + h - 3, "私家车");
+    }
+    [[105, thumbLamp], [210, thumbRoad], [315, thumbBag], [420, thumbCar]].forEach(function (c) {
+      cardFrame(18, c[0], 138, 88);
+      c[1](18, c[0], 138, 88);
+    });
+
+    /* ===== 左栏：食·食物种类 圆形图标 ===== */
+    /* 参考图里圆直径约 65px（r≈33），下面的名字在圆心下 55px。
+       图形是按 r=21 画的，统一以圆心为原点放大 1.55 倍即可，名字画在放大外面。 */
+    function foodIcon(cx, cy, kind, label) {
+      var K = 1.55;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(K, K);
+      ctx.translate(-cx, -cy);
+      ctx.strokeStyle = "rgba(255,255,255,.82)";
+      ctx.lineWidth = 1.05;
+      ctx.beginPath(); ctx.arc(cx, cy, 21, 0, 6.2832); ctx.stroke();
+      ctx.lineWidth = 1.3;
+      if (kind === 0) { /* 牛肉 */
+        ctx.beginPath(); ctx.ellipse(cx - 2, cy, 11, 8, -0.35, 0, 6.2832); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx + 10, cy - 7, 3.4, 0, 6.2832); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + 7, cy - 10); ctx.lineTo(cx - 6, cy + 4); ctx.stroke();
+      } else if (kind === 1) { /* 羊肉 */
+        ctx.beginPath(); ctx.ellipse(cx - 3, cy - 1, 10, 7, 0.5, 0, 6.2832); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + 4, cy + 5); ctx.lineTo(cx + 13, cy + 10); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx + 14, cy + 11, 2.2, 0, 6.2832); ctx.stroke();
+      } else if (kind === 2) { /* 咖啡 */
+        ctx.beginPath();
+        ctx.moveTo(cx - 9, cy - 4); ctx.lineTo(cx + 7, cy - 4);
+        ctx.lineTo(cx + 4, cy + 8); ctx.lineTo(cx - 6, cy + 8); ctx.closePath(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx + 8, cy + 1, 4.5, -1.2, 1.2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx - 11, cy + 11); ctx.lineTo(cx + 8, cy + 11); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx - 4, cy - 9); ctx.quadraticCurveTo(cx - 6, cy - 12, cx - 4, cy - 15); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + 1, cy - 9); ctx.quadraticCurveTo(cx - 1, cy - 12, cx + 1, cy - 15); ctx.stroke();
+      } else if (kind === 3) { /* 蛋类 */
+        ctx.beginPath(); ctx.ellipse(cx, cy, 8.5, 11, 0, 0, 6.2832); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy + 1, 4.4, 0, 6.2832); ctx.stroke();
+      } else { /* 玉米 */
+        ctx.beginPath(); ctx.ellipse(cx, cy - 1, 6.5, 11, 0, 0, 6.2832); ctx.stroke();
+        for (var cr = -6; cr <= 6; cr += 4) {
+          ctx.beginPath(); ctx.moveTo(cx - 6, cy - 1 + cr); ctx.lineTo(cx + 6, cy - 1 + cr); ctx.stroke();
+        }
+        ctx.beginPath(); ctx.moveTo(cx - 6, cy + 4); ctx.quadraticCurveTo(cx - 13, cy - 2, cx - 9, cy - 10); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + 6, cy + 4); ctx.quadraticCurveTo(cx + 13, cy - 2, cx + 9, cy - 10); ctx.stroke();
+      }
+      ctx.restore();
+      ctx.fillStyle = "rgba(255,255,255,.72)";
+      ctx.font = "10.5px 'Microsoft YaHei',sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(label, cx, cy + 55);
+      ctx.textAlign = "left";
+    }
+    /* 页面坐标 → 画布坐标：x-85 / y-250；三行圆心 y = 1030 / 1248 / 1351 */
+    foodIcon(46, 780, 0, "牛肉");
+    foodIcon(117, 780, 1, "羊肉");
+    foodIcon(46, 998, 2, "咖啡");
+    foodIcon(117, 998, 3, "蛋类");
+    foodIcon(46, 1101, 4, "玉米");
+
+  }
+
+  function initLife() {
+    if (lfReady) return;
+    lfReady = true;
+    buildLifeArt();
+    buildLifeBand();
+    buildLifeLinks();
+    buildLifePlumes();
+  }
+
+  /* ================= 初始化 ================= */
+  function initSpiral() {
+    if (spiralReady) return;
+    spiralReady = true;
+    buildMiniCharts();
+    buildSpiral();
+    buildRidge();
+    buildMolecules();
+    buildOrbs();
+    buildEarthStars();
+    bindLegendHover();
+    bindCo2();
+    bindEarthLabels();
+  }
+
+  var hash = (location.hash || "").replace("#", "");
+  if (hash === "spiral" || hash === "life") {
+    setBoard(hash);
+  } else {
+    setBoard("dept");
+  }
+})();
+</script>
+</body>
+</html>
