@@ -308,17 +308,6 @@ class ConversationRepository:
             await connection.execute("UPDATE sessions SET updated_at = now() WHERE id = %s", (session_id,))
             return TaskState(**payload, revision=row["revision"])
 
-    async def workspace(self, session_id: UUID) -> Path:
-        async with self.database.connection() as connection:
-            cursor = await connection.execute(
-                "SELECT w.root_path, w.host_path FROM sessions s JOIN workspaces w ON w.id = s.workspace_id AND w.binding_status = 'bound' "
-                "WHERE s.id = %s", (session_id,),
-            )
-            row = await cursor.fetchone()
-            if row is None or host_path_for(Path(row["root_path"])) != row["host_path"]:
-                raise ValueError("Session does not exist")
-            return Path(row["root_path"])
-
     async def messages(self, session_id: UUID, current_run: UUID | None = None, *, project_artifacts: bool = False) -> list[StoredMessage]:
         """All records for inspection, or completed/current-run history for the model.
 
@@ -373,6 +362,25 @@ class RunRepository:
         row = await cursor.fetchone()
         if row is None:
             raise RunOwnershipLost("Run ownership lost or lease expired")
+        return row
+
+    async def check_finished_owner(self, connection, run_id: UUID, token: UUID) -> DictRow:
+        """The one gate a write may pass after the run is already terminal.
+
+        Post-turn compaction runs once the answer is visible, which is exactly
+        when ``check_owner`` stops admitting writes. The capability is the token
+        the finishing process still holds: only that process could have been the
+        run's owner, and the row lock keeps a concurrent writer waiting instead
+        of racing. Nothing else may use this gate — a summary written here is
+        still attributed to the run that produced its sources.
+        """
+        cursor = await connection.execute(
+            "SELECT id, session_id, status FROM runs WHERE id = %s AND status = 'completed' "
+            "AND owner_token = %s FOR UPDATE", (run_id, token),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            raise RunOwnershipLost("Run is not completed or no longer belongs to this writer")
         return row
 
     async def heartbeat(self, run_id: UUID, lease_seconds: float = 30) -> None:

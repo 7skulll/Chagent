@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass, field, replace
+from functools import partial
 import logging
 from time import monotonic_ns
 from uuid import UUID, uuid4
@@ -100,6 +101,10 @@ class ContextManager:
         self._projections: dict[UUID, ProjectionCache] = {}
         # Speculative summaries in flight, keyed by run.
         self._speculations: dict[UUID, _Speculation] = {}
+        # Post-turn passes in flight, keyed by session: the run they belong to is
+        # already terminal, so they outlive it and are deliberately not cancelled
+        # by ``release``.
+        self._post_turn_tasks: dict[UUID, asyncio.Task] = {}
 
     async def release(self, run_id: UUID):
         speculation = self._speculations.pop(run_id, None)
@@ -120,6 +125,140 @@ class ContextManager:
     def _cache(self, run_id: UUID) -> ProjectionCache:
         return self._projections.setdefault(
             run_id, ProjectionCache(max_tool_result_tokens=self.builder.policy.max_tool_result_tokens))
+
+    # -- after the answer is already visible ---------------------------------
+
+    def schedule_post_turn(self, *, session_id: UUID, run_id: UUID, state: RunState, model: Model,
+                           client: ModelClient, post_run_token: UUID, prompt_mode: str | None,
+                           deferred: tuple[tuple[str, str], ...] = ()) -> asyncio.Task | None:
+        """Compact the run that just finished, with nobody waiting on it.
+
+        The cheap win is placement, not frequency: the same summary the next
+        request would have paid for (and paused for) is produced while the user
+        reads the answer, so a later run opens with a smaller prompt. Nothing is
+        written until the work succeeds, and ``post_run_token`` is what lets the
+        terminal run own the checkpoint — see ``SummaryRepository.save``.
+
+        One session runs one pass at a time. A second run that finishes while the
+        first is still summarizing skips this turn: two writers would race for the
+        same boundary, and the newer span is covered by the next pass anyway.
+        """
+        if not (self.policy.enabled and self.policy.post_turn):
+            return None
+        running = self._post_turn_tasks.get(session_id)
+        if running is not None and not running.done():
+            return None
+        task = asyncio.create_task(
+            self._post_turn_guarded(
+                session_id=session_id, run_id=run_id, state=state, model=model, client=client,
+                post_run_token=post_run_token, prompt_mode=prompt_mode, deferred=deferred,
+            ),
+            name=f"post-turn-compaction-{run_id}",
+        )
+        self._post_turn_tasks[session_id] = task
+        task.add_done_callback(partial(self._forget_post_turn, session_id))
+        return task
+
+    def _forget_post_turn(self, session_id: UUID, task: asyncio.Task) -> None:
+        if self._post_turn_tasks.get(session_id) is task:
+            self._post_turn_tasks.pop(session_id, None)
+
+    async def drain_post_turn(self, timeout: float = 10.0) -> None:
+        """Let scheduled passes finish before the process gives the pool back."""
+        tasks = [task for task in self._post_turn_tasks.values() if not task.done()]
+        if tasks:
+            await asyncio.wait(tasks, timeout=timeout)
+
+    async def _post_turn_guarded(self, *, session_id: UUID, run_id: UUID, state: RunState, model: Model,
+                                 client: ModelClient, post_run_token: UUID, prompt_mode: str | None,
+                                 deferred: tuple[tuple[str, str], ...]) -> SessionSummary | None:
+        """Never let a background optimisation surface as a run failure.
+
+        A failure is still audited: the calls already paid for are written with
+        their real status, because the alternative — a summary that quietly cost
+        money and left no row — is the one outcome this subsystem refuses.
+        """
+        recorder = MemoryCalls()
+        try:
+            return await self._post_turn(
+                session_id=session_id, run_id=run_id, state=state, model=model, client=client,
+                post_run_token=post_run_token, prompt_mode=prompt_mode, deferred=deferred,
+                recorder=recorder,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            try:
+                await self.summaries.record_calls(run_id, recorder.calls, post_run_token=post_run_token)
+            except Exception as record_error:
+                logger.warning("post-turn compaction for %s could not record its calls (%s)",
+                               run_id, type(record_error).__name__)
+            # The reason, not the exception text: an error raised by a provider
+            # can carry the credential that was used to call it.
+            logger.warning("post-turn compaction for run %s abandoned (%s)", run_id, self._reason(error))
+            return None
+
+    async def _post_turn(self, *, session_id: UUID, run_id: UUID, state: RunState, model: Model,
+                         client: ModelClient, post_run_token: UUID, prompt_mode: str | None,
+                         deferred: tuple[tuple[str, str], ...], recorder: MemoryCalls) -> SessionSummary | None:
+        history = list(state.history)
+        current_input = next((item for item in reversed(history) if isinstance(item.message, UserMessage)), None)
+        if current_input is None:
+            return None
+        # Cheapest possible answer first: a run with nothing new to summarize costs
+        # no build at all, which matters when this runs after every completed run.
+        owned = any(item.run_id == run_id for item in history)
+        eligible = self._eligible(history, run_id, state.summary, owned, current_input)
+        if not eligible:
+            return None
+        # A build with no current run: it prices the request the *next* run would
+        # send if it existed now — including the checkpoint already in force —
+        # which is the only baseline this pass can verify its own against.
+        cache = ProjectionCache(max_tool_result_tokens=self.builder.policy.max_tool_result_tokens)
+        inputs = _Inputs(history, state.task_state, state.summary, state.recovery, state.environment, None)
+        build = self._build_for(history=history, model=model, tools=state.tools, inputs=inputs, run_id=None,
+                                prompt_mode=prompt_mode,
+                                other_modes=tuple(name for name in self.modes if name != prompt_mode),
+                                scale=1.0, deferred=deferred, cache=cache)
+        baseline = await build(state.summary, None)
+        budget = baseline.snapshot.input_budget
+        # Below the threshold the next request still has room, so a checkpoint
+        # would buy tokens the user does not need to spend yet.
+        if baseline.snapshot.projected_token_estimate < budget * self.policy.post_turn_trigger:
+            return None
+        identity, started = uuid4(), monotonic_ns()
+        limit = min(self.policy.max_summary_tokens, budget // 4)
+        checkpoint = self._checkpoint_maker(
+            session_id=session_id, run_id=run_id, model=model, previous=state.summary, revision=0,
+            identity=identity, history=history, owned=owned, current_input=current_input, eligible=eligible,
+        )
+        length = await self._fit_length(eligible, limit, baseline, build, checkpoint)
+        candidate = checkpoint(length)
+        task_input = self._task_input(current_input, candidate)
+        candidate.content, candidate.usage = await self.compactor.compact(
+            model=model, client=client, turns=eligible[:length],
+            previous=state.summary.content if state.summary else "", limit=limit,
+            compaction_id=identity, run_id=run_id, task_input=task_input,
+            task_sequence=current_input.sequence if task_input else None, recorder=recorder,
+        )
+        result = self._checked(await build(candidate, None))
+        self._verify_reduction(result, baseline)
+        # The revision can only come from the database, and it may have moved
+        # while this pass was running; ``save`` re-checks it either way.
+        candidate = replace(candidate, id=uuid4(), revision=await self.summaries.next_revision(session_id))
+        await self.summaries.record_calls(run_id, recorder.calls, post_run_token=post_run_token)
+        await self.summaries.save(candidate, run_id, post_run_token=post_run_token, completed_event={
+            "compaction_id": str(identity), "summary_id": str(candidate.id), "revision": candidate.revision,
+            "covered_through_sequence": candidate.covered_through_sequence,
+            "source_run_id": str(candidate.source_run_id) if candidate.source_run_id else None,
+            "tokens_before": baseline.snapshot.projected_token_estimate,
+            "tokens_after": result.snapshot.token_estimate,
+            "duration_ms": (monotonic_ns() - started) // 1_000_000,
+            "implementation": COMPACTION_SUMMARY, "post_turn": True,
+        })
+        logger.info("post-turn compaction for run %s covered through %s",
+                    run_id, candidate.covered_through_sequence)
+        return candidate
 
     @staticmethod
     def _checked(built):
@@ -215,20 +354,24 @@ class ContextManager:
             checkpoint=checkpoint, current_input=current_input,
         )
 
-    def _build_for(self, *, history, model: Model, tools, inputs: _Inputs, run_id: UUID,
+    def _build_for(self, *, history, model: Model, tools, inputs: _Inputs, run_id: UUID | None,
                    prompt_mode: str | None, other_modes: tuple[str, ...], scale: float,
-                   deferred: tuple[tuple[str, str], ...] = ()):
+                   deferred: tuple[tuple[str, str], ...] = (),
+                   cache: ProjectionCache | None = None):
         """Bind one build to one history.
 
         Background work gets its own list: the run keeps appending to
         ``state.history`` while a speculative summary is in flight, and a build
         that silently observed those appends would price a request nobody makes.
+        ``cache`` is passed explicitly by work that outlives the run, because the
+        run's cache is released with it.
         """
 
         async def build(summary, observed):
             return await self.builder.build(history, model, tools, task_state=inputs.task_state,
                                             current_run_id=run_id, summary=summary, allow_over_budget=True,
-                                            cache=self._cache(run_id), recovery=inputs.recovery,
+                                            cache=cache if cache is not None else self._cache(run_id),
+                                            recovery=inputs.recovery,
                                             environment=inputs.environment, mode=prompt_mode,
                                             other_modes=other_modes, observed=observed, scale=scale,
                                             deferred=deferred)
@@ -317,7 +460,9 @@ class ContextManager:
         candidate.content, candidate.usage = await self.compactor.compact(
             model=model, client=client, turns=eligible[:length],
             previous=previous.content if previous else "", limit=limit,
-            compaction_id=identity, run_id=run_id, task_input=task_input, recorder=recorder,
+            compaction_id=identity, run_id=run_id, task_input=task_input,
+            task_sequence=current_input.sequence if task_input else None,
+            recorder=recorder,
         )
         return _Candidate(candidate, baseline.snapshot.projected_token_estimate)
 
@@ -536,6 +681,7 @@ class ContextManager:
             candidate.content, candidate.usage = await self.compactor.compact(
                 model=model, client=client, turns=prefix, previous=previous.content if previous else "",
                 limit=limit, compaction_id=identity, run_id=run_id, task_input=task_input,
+                task_sequence=current_input.sequence if task_input else None,
             )
         else:
             candidate.content = fresh_window_content(prefix, limit, self.builder.counter,

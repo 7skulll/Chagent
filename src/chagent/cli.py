@@ -147,6 +147,10 @@ async def _run(
             remaining = await worker.jobs.unfinished()
             if remaining:
                 print(f"Memory: {remaining} extraction job(s) still open; they resume on the next run.")
+        # Same rule for a post-turn checkpoint: a one-shot process must not exit
+        # while a summary it already paid for is still being written.
+        if runner.context_manager is not None:
+            await runner.context_manager.drain_post_turn()
         history = await runner.conversations.messages(session_id)
         events = await runner.runs.events(result.run_id)
         print(f"Persisted: {len(history)} messages; {len(events)} events in this run.")

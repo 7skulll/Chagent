@@ -80,6 +80,20 @@ class OutputService:
             await connection.execute('INSERT INTO file_operations (workspace_id, source, operation, path) VALUES (%s,%s,%s,%s)',
                                      (workspace_id, source, operation, path))
 
+    async def operations(self, workspace_id, limit=50):
+        """Most recent writes to one workspace; the read side of ``record``.
+
+        Newest first, with ``id`` as the tie-break so entries written inside the
+        same transaction still come back in the order they happened.
+        """
+        limit = max(1, min(int(limit), 200))
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                'SELECT id, source, operation, path, created_at FROM file_operations '
+                'WHERE workspace_id = %s ORDER BY created_at DESC, id DESC LIMIT %s',
+                (workspace_id, limit))
+            return [dict(row) for row in await cursor.fetchall()]
+
     async def submit(self, workspace_id, root, path, data, *, source, session_id=None, run_id=None, tool_call_id=None, request_id=None, workspace_identity=None):
         fs = OutputFS(root, expected_identity=workspace_identity)
         if not fs.parts(path):

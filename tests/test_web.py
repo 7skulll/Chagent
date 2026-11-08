@@ -304,6 +304,27 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn((await self.client.post(base+'/entries', json={'path':path})).status_code, [400,403])
         self.assertEqual((await self.client.get(base+'/text', params={'path':'missing'})).status_code,404)
 
+    async def test_workspace_operations_record_manual_and_scoped_writes(self):
+        opened = (await self.client.post('/api/workspaces', json={'path': str(self.workspace)})).json()
+        base = f"/api/workspaces/{opened['id']}"
+        self.assertEqual((await self.client.post(base+'/entries', json={'path':'notes.md', 'content':'one'})).status_code, 201)
+        read = (await self.client.get(base+'/text', params={'path':'notes.md'})).json()
+        payload = {key: read[key] for key in ('path', 'version', 'identity')}
+        payload['content'] = 'two'
+        self.assertEqual((await self.client.put(base+'/text', json=payload)).status_code, 200)
+        page = await self.client.get(base+'/operations')
+        self.assertEqual(page.status_code, 200, page.text)
+        items = page.json()['items']
+        self.assertEqual([item['path'] for item in items], ['notes.md', 'notes.md'])
+        # Newest first: the save is what just happened, the create is behind it.
+        self.assertEqual([item['operation'] for item in items], ['save_text', 'create'])
+        self.assertEqual({item['source'] for item in items}, {'manual'})
+        self.assertTrue(all(item['created_at'] for item in items))
+        self.assertEqual(len((await self.client.get(base+'/operations', params={'limit':1})).json()['items']), 1)
+        # Scoped like every other workspace route: rows are not readable just
+        # because they exist, only for a directory this process may open.
+        self.assertIn((await self.client.get(f'/api/workspaces/{uuid4()}/operations')).status_code, [403, 404])
+
     async def test_unavailable_workspace_and_file_scope(self):
         with tempfile.TemporaryDirectory() as other:
             target = Path(other).resolve()

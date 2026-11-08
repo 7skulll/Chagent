@@ -18,7 +18,10 @@ from chagent.storage.summaries import SummaryRepository
 from chagent.domain.artifacts import artifact_text
 
 
-PROMPT_VERSION = "session-summary-v3"
+#: Bumped when the checkpoint's shape changes, not only its prompt: v4 adds the
+#: host-authored user-quote block, so a reader can tell what a summary contains
+#: without parsing it.
+PROMPT_VERSION = "session-summary-v4"
 
 #: Which implementation produced a checkpoint. Recorded on every compaction event
 #: so the two can be compared after the fact without reading the summary row.
@@ -83,6 +86,15 @@ RETAINED_HEADER = "Recent tool output retained verbatim (not summarized):"
 RETAINED_MARKER = "\n\n" + RETAINED_HEADER + "\n\n"
 RETAINED_PER_RESULT_CHARS = 800
 RETAINED_TOTAL_CHARS = 1600
+
+# The user's own words are the one part of a checkpoint the summarizer must not
+# touch: a constraint restated by a model is a claim about what the model read,
+# not evidence of what was asked. They are quoted by the host, carried forward
+# by the host, and removed from the text the model sees, so a second generation
+# copies them rather than paraphrasing the first generation's paraphrase.
+USER_QUOTES_HEADER = "User requests quoted verbatim (not summarized):"
+USER_QUOTES_MARKER = "\n\n" + USER_QUOTES_HEADER + "\n\n"
+USER_QUOTES_PER_REQUEST_CHARS = 600
 
 #: Version of the host-authored checkpoint used when nothing is summarized. It is
 #: written into ``session_summaries.prompt_version`` so a reader can tell a model
@@ -171,8 +183,111 @@ def retained_outputs(turns: list[list[StoredMessage]], count: int) -> str:
 
 
 def strip_retained(content: str) -> str:
-    """Drop a previous summary's retained block so evidence never accumulates."""
-    return content.split(RETAINED_MARKER)[0]
+    """The summary text alone: no quoted requests, no retained tool output."""
+    return split_evidence(content)[0]
+
+
+def split_evidence(content: str) -> tuple[str, list[dict]]:
+    """Separate the model's summary from the host-authored blocks.
+
+    The model never writes these blocks, so carrying them into the next
+    checkpoint is a copy rather than a re-summary. A block that cannot be read
+    back is dropped instead of guessed at: a corrupted quote must not become a
+    fact the next generation believes it was told.
+    """
+    body, quotes_text = content, ""
+    if USER_QUOTES_MARKER in content:
+        body, _, rest = content.partition(USER_QUOTES_MARKER)
+        quotes_text = rest.partition(RETAINED_MARKER)[0]
+    else:
+        body = content.partition(RETAINED_MARKER)[0]
+    quotes: list[dict] = []
+    if quotes_text.strip():
+        try:
+            payload = json.loads(quotes_text)
+            for item in payload.get("user_requests") or []:
+                if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
+                    quotes.append({"sequence": int(item.get("sequence", 0)), "text": item["text"]})
+        except (AttributeError, TypeError, ValueError):
+            quotes = []
+    return body.rstrip(), quotes
+
+
+def user_requests(turns: list[list[StoredMessage]], current: str = "",
+                  current_sequence: int | None = None) -> list[dict]:
+    """User text in the turns being summarized, oldest first, with its sequence.
+
+    A message that carries an image still contributes its text: dropping the
+    words because the block list is not a string would lose the request itself.
+    """
+    requests = []
+    for turn in turns:
+        for item in turn:
+            message = item.message
+            if not isinstance(message, UserMessage):
+                continue
+            text = (message.content if isinstance(message.content, str) else
+                    "\n".join(block.text for block in message.content if isinstance(block, TextContent)))
+            text = text.strip()
+            if text:
+                requests.append({"sequence": item.sequence, "text": text})
+    if isinstance(current, str) and current.strip() and current_sequence is not None:
+        if all(request["sequence"] != current_sequence for request in requests):
+            requests.append({"sequence": current_sequence, "text": current.strip()})
+    return requests
+
+
+def merge_requests(*groups: list[dict]) -> list[dict]:
+    """Union by sequence, oldest first: carried quotes precede the new ones."""
+    merged: dict[int, dict] = {}
+    for group in groups:
+        for request in group:
+            merged.setdefault(request["sequence"], request)
+    return [merged[sequence] for sequence in sorted(merged)]
+
+
+def quote_block(content: str, requests: list[dict], counter, limit: int, keep: int) -> str:
+    """Attach the newest requests that still fit, dropping the oldest first.
+
+    Packing from the newest backwards is the point: when the budget only holds
+    two of five requests, the two that produced the current task are the ones
+    that must survive. A request too large for the remaining room is truncated,
+    not paraphrased.
+    """
+    if keep <= 0 or not requests:
+        return content
+    picked: list[dict] = []
+    block = ""
+    for request in reversed(requests[-keep:]):
+        text = request["text"]
+        if len(text) > USER_QUOTES_PER_REQUEST_CHARS:
+            text = text[:USER_QUOTES_PER_REQUEST_CHARS] + " [truncated]"
+        trial = [{"sequence": request["sequence"], "text": text}, *picked]
+        candidate = content + USER_QUOTES_MARKER + json.dumps({"user_requests": trial}, ensure_ascii=False)
+        if counter.count([BasicContextBuilder.summary_message(candidate)]) > limit:
+            break
+        picked, block = trial, candidate
+    return block or content
+
+
+def retained_block(content: str, retained: str, counter, limit: int) -> str:
+    """Attach tool evidence only if the requests above it left room for it."""
+    if not retained:
+        return content
+    candidate = content + RETAINED_MARKER + retained
+    return (candidate if counter.count([BasicContextBuilder.summary_message(candidate)]) <= limit
+            else content)
+
+
+def attach_evidence(content: str, requests: list[dict], retained: str, counter, limit: int,
+                    *, keep: int) -> str:
+    """Add host-authored blocks in order of value: requests, then tool output.
+
+    Unlike the summary text, neither block can be shrunk by the model, so each
+    is added only while the checkpoint still fits its reserved budget.
+    """
+    return retained_block(quote_block(content, requests, counter, limit, keep),
+                          retained, counter, limit)
 
 
 def serialize_turn(turn: list[StoredMessage]) -> str:
@@ -229,12 +344,17 @@ class ContextCompactor:
 
     async def compact(self, *, model: Model, client: ModelClient, turns: list[list[StoredMessage]],
                       previous: str, limit: int, compaction_id: UUID, run_id: UUID,
-                      task_input: str = "", recorder=None) -> tuple[str, Usage | None]:
+                      task_input: str = "", task_sequence: int | None = None,
+                      recorder=None) -> tuple[str, Usage | None]:
         recorder = recorder if recorder is not None else self.calls
         serialized = [serialize_turn(turn) for turn in turns]
-        # Evidence from an earlier summary is re-derived from these turns, so it
-        # must not be carried into the next summary as if it were a fact.
-        previous = strip_retained(previous)
+        # Both evidence blocks are re-derived from these turns or carried by the
+        # host, so neither may enter the model's input as if it were a fact: the
+        # summarizer would then rewrite the very text that must stay verbatim.
+        previous, carried = split_evidence(previous)
+        requests = merge_requests(carried, user_requests(turns, task_input, task_sequence))
+        # Depends only on the covered turns, so one derivation serves every chunk.
+        retained = retained_outputs(turns, self.policy.retained_tool_results)
         index, calls = 0, 0
         usage: Usage | None = None
         usage_missing = False
@@ -266,14 +386,6 @@ class ContextCompactor:
                                         if isinstance(block, TextContent)).strip()
                     if not content:
                         raise CompactionError("Summary is empty")
-                    retained = retained_outputs(turns, self.policy.retained_tool_results)
-                    if retained:
-                        candidate = content + RETAINED_MARKER + retained
-                        # Best effort: if the evidence does not fit next to the
-                        # summary, keep the summary and drop the evidence rather
-                        # than failing the whole compaction.
-                        if self.builder.counter.count([self.builder.summary_message(candidate)]) <= limit:
-                            content = candidate
                     if self.builder.counter.count([self.builder.summary_message(content)]) > limit:
                         raise CompactionError("Summary exceeds its reserved budget")
                     await recorder.finish(handle, "completed", response, (monotonic_ns() - started) // 1_000_000)
@@ -299,7 +411,9 @@ class ContextCompactor:
                 else:
                     usage_missing = True
                 previous, index, calls = content, end, calls + 1
-        return previous, None if usage_missing else usage
+        content = attach_evidence(previous, requests, retained, self.builder.counter, limit,
+                                  keep=self.policy.retained_user_requests)
+        return content, None if usage_missing else usage
 
     @staticmethod
     async def _response(client: ModelClient, request: ModelRequest) -> AssistantMessage:

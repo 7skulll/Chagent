@@ -179,6 +179,10 @@ class WebRuntime:
             if not task.cancelling():
                 task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
+        # A post-turn pass belongs to a run that already answered, so it is not
+        # cancelled above; give it a bounded chance to land before the pool goes.
+        if self.runner.context_manager is not None:
+            await self.runner.context_manager.drain_post_turn()
         # Queued jobs survive shutdown: an interrupted job is returned to the
         # queue and picked up by the next process.
         if getattr(self.runner, "memory_worker", None) is not None:

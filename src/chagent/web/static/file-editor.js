@@ -361,6 +361,9 @@
       $(id).hidden=key!==name;$("show-"+key).setAttribute("aria-selected",String(key===name));
     }
     if(name==="context") { $("context-panel").open=true;window.ChagentLoadContext?.(); }
+    // The operations list is fetched on open, not polled: it is a record, and a
+    // record that refreshes itself while being read is worse than a stale one.
+    if(name==="history") window.ChagentLoadOperations?.();
   }
   const downloadUrl=(id,path)=>`/api/workspaces/${id}/content?${new URLSearchParams({path})}`;
   window.ChagentFiles={

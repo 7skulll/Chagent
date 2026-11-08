@@ -153,6 +153,19 @@ class AgentRunner:
                     end_reason=result.end_reason)
             await self.runs.finish(run_id, "completed", end_reason=result.end_reason,
                                    on_completed=commit if self.memory_service is not None else None)
+            # The answer is committed, so the only thing left worth doing with this
+            # run is making the next one cheap. It runs behind the response, on the
+            # token this process still holds for the now-terminal run.
+            if (self.context_manager is not None and result.message is not None
+                    and result.end_reason == "model_stop"):
+                token = self.runs.database.run_owners.get(run_id)
+                if token is not None:
+                    self.context_manager.schedule_post_turn(
+                        session_id=session_id, run_id=run_id, state=state, model=self.model,
+                        client=self.client, post_run_token=token,
+                        prompt_mode=self.prompt_mode_for(state.session.mode),
+                        deferred=self.executor_for(state.session.mode).registry.deferred_index(),
+                    )
             if self.memory_worker is not None and result.message is not None:
                 self.memory_worker.wake()
         except asyncio.CancelledError:

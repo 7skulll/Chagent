@@ -16,7 +16,12 @@ from psycopg.conninfo import make_conninfo
 from chagent.agent.runner import RunFailedError
 from chagent.bootstrap import create_demo_runner
 from chagent.config import Settings
-from chagent.context.compactor import RETAINED_HEADER, retained_outputs, serialize_turn, strip_retained
+from chagent.context.builder import BasicContextBuilder
+from chagent.context.tokens import HeuristicTokenCounter
+from chagent.context.compactor import (
+    RETAINED_HEADER, USER_QUOTES_HEADER, attach_evidence, quote_block, retained_outputs,
+    serialize_turn, split_evidence, strip_retained, user_requests,
+)
 from chagent.domain.messages import AssistantMessage, ImageContent, TextContent, ThinkingContent, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.runs import StoredMessage
 from chagent.domain.sessions import TaskState
@@ -166,6 +171,55 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("compaction_completed", [event["type"] for event in await self.runner.runs.events(result.run_id)])
         calls = await self.calls(result.run_id)
         self.assertTrue(calls and all(call["status"] == "completed" for call in calls))
+
+    async def test_summary_keeps_the_user_requests_it_summarized(self):
+        """The user's words are quoted by the host, not paraphrased by the model."""
+        await self.seed()
+        await self.runner.run(self.session, "keep this constraint")
+        summary = await self.summaries.latest(self.session)
+        self.assertIsNotNone(summary)
+        self.assertIn(USER_QUOTES_HEADER, summary.content)
+        history = await self.runner.conversations.messages(self.session)
+        covered = [item for item in history if str(item.id) in set(summary.source_message_ids)
+                   and isinstance(item.message, UserMessage)]
+        self.assertTrue(covered)
+        for item in covered[-3:]:
+            self.assertIn(item.message.content[:40], summary.content)
+        # The request this run was answering is *not* quoted here: the checkpoint
+        # did not cover it, so it stays in the transcript verbatim and quoting it
+        # twice would only spend budget on a duplicate.
+        self.assertNotIn("keep this constraint", summary.content)
+
+    async def test_user_quotes_are_carried_verbatim_by_the_host(self):
+        await self.seed()
+        manager = self.runner.context_manager
+        manager.policy = replace(manager.policy, retained_user_requests=16)
+        manager.compactor.policy = manager.policy
+        await self.runner.run(self.session, "first compact")
+        first = await self.summaries.latest(self.session)
+        _, quotes = split_evidence(first.content)
+        self.assertTrue(quotes)
+        oldest = quotes[0]["text"][:40]
+
+        await self.seed(count=3, size=2600)
+        await self.runner.run(self.session, "second compact")
+        second = await self.summaries.latest(self.session)
+        self.assertEqual(second.revision, 2)
+        self.assertIn(oldest, second.content)
+        self.assertIn(USER_QUOTES_HEADER, second.content)
+
+    async def test_the_quote_block_never_reaches_the_summarizer(self):
+        """A model that saw the quotes could reword the text meant to stay verbatim."""
+        await self.seed()
+        await self.runner.run(self.session, "first compact")
+        first = await self.summaries.latest(self.session)
+        await self.seed(count=3, size=2600)
+        await self.runner.run(self.session, "second compact")
+        request = [request for request in self.client.requests if request.purpose == "summary"][-1]
+        previous = json.loads(request.messages[1].content)["previous_summary"]
+        self.assertNotIn(USER_QUOTES_HEADER, previous)
+        self.assertNotIn(RETAINED_HEADER, previous)
+        self.assertEqual(previous, strip_retained(first.content))
 
     async def test_compaction_retains_the_newest_tool_output_verbatim(self):
         """Summarizing the evidence makes the model re-read it; carry it instead."""
@@ -372,4 +426,57 @@ class RetainedOutputTests(unittest.TestCase):
     def test_strip_retained_keeps_only_the_summary_text(self):
         content = "Goal: done." + "\n\n" + RETAINED_HEADER + "\n\n[read_file]\nbody"
         self.assertEqual(strip_retained(content), "Goal: done.")
+
+
+class UserQuoteTests(unittest.TestCase):
+    """Quotes are host-authored, newest-first and never invented by the model."""
+
+    def request(self, sequence, text):
+        return {"sequence": sequence, "text": text}
+
+    def turn(self, sequence, text):
+        return [StoredMessage(uuid4(), sequence, UserMessage(text, 1))]
+
+    def test_requests_include_the_current_input_once(self):
+        turns = [self.turn(1, "old ask"), self.turn(2, "next ask")]
+        requests = user_requests(turns, current="current ask", current_sequence=3)
+        self.assertEqual([item["text"] for item in requests], ["old ask", "next ask", "current ask"])
+        twice = user_requests(turns, current="current ask", current_sequence=2)
+        self.assertEqual(len(twice), 2)
+
+    def test_packing_keeps_the_newest_and_drops_the_oldest_whole(self):
+        counter = HeuristicTokenCounter()
+        content = "Goal: done."
+        base = counter.count([BasicContextBuilder.summary_message(content)])
+        requests = [self.request(1, "old " + "a" * 400),
+                    self.request(2, "mid " + "b" * 400),
+                    self.request(3, "new " + "c" * 400)]
+        tight = quote_block(content, requests, counter, base + 150, keep=3)
+        self.assertIn("new ", tight)
+        self.assertNotIn("old ", tight)
+        roomy = quote_block(content, requests, counter, 100_000, keep=3)
+        for marker in ("old ", "mid ", "new "):
+            self.assertIn(marker, roomy)
+
+    def test_long_requests_are_truncated_not_reworded(self):
+        counter = HeuristicTokenCounter()
+        content = quote_block("Goal: done.", [self.request(1, "k" * 2000)], counter, 100_000, keep=1)
+        self.assertIn("k" * 100, content)
+        self.assertIn("[truncated]", content)
+        self.assertLess(len(content), 1400)
+
+    def test_evidence_round_trips_and_strips_both_blocks(self):
+        counter = HeuristicTokenCounter()
+        requests = [self.request(7, "do not delete data")]
+        content = attach_evidence("Goal: done.", requests, "[read_file]\nbody", counter, 100_000, keep=4)
+        body, quotes = split_evidence(content)
+        self.assertEqual(body, "Goal: done.")
+        self.assertEqual(quotes, requests)
+        self.assertIn(USER_QUOTES_HEADER, content)
+        self.assertIn(RETAINED_HEADER, content)
+
+    def test_an_unreadable_block_is_dropped_not_guessed(self):
+        body, quotes = split_evidence("Goal: done." + "\n\n" + USER_QUOTES_HEADER + "\n\n{not json")
+        self.assertEqual(body, "Goal: done.")
+        self.assertEqual(quotes, [])
         self.assertEqual(strip_retained("Goal: done."), "Goal: done.")

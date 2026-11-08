@@ -14,7 +14,7 @@ from pydantic import Field, StrictStr
 from chagent.boundaries import validate_workspace, within_root
 from chagent.files import FileService, FileConflict
 from chagent.storage.repositories import ConversationRepository
-from chagent.web.schemas import DirectoryEntry, DirectoryListing, InputModel
+from chagent.web.schemas import DirectoryEntry, DirectoryListing, FileOperationPage, InputModel
 from chagent.web.deps import Current
 
 router = APIRouter(prefix='/api', tags=['工作区文件'])
@@ -91,6 +91,18 @@ async def perform(fs, method, *args, **kwargs):
 @router.get('/workspaces/{workspace_id}/entries')
 async def entries(workspace_id: UUID, current: Current, path: str = '', offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500), hidden: bool = False):
     return await perform(await service(current, workspace_id), 'listing', path, offset, limit, hidden)
+
+
+@router.get('/workspaces/{workspace_id}/operations', response_model=FileOperationPage)
+async def operations(workspace_id: UUID, current: Current, limit: int = Query(50, ge=1, le=200)):
+    """Recent writes to this workspace, from the agent's tools and the file panel.
+
+    ``service`` is the gate: rows exist whether or not the directory is currently
+    openable, and a caller must not learn about a workspace it cannot open.
+    """
+    fs = await service(current, workspace_id)
+    from chagent.outputs import OutputService
+    return {'items': await OutputService(fs.audit_database).operations(workspace_id, limit)}
 
 
 @router.get('/workspaces/{workspace_id}/text')

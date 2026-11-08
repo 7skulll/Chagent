@@ -32,10 +32,6 @@ READ_ONLY = "read-only"
 GATE_NONE = "none"
 GATE_APPROVAL = "approval"
 
-BOUNDARIES = frozenset({CONTAINER, NONE})
-CAPABILITIES = frozenset({FULL, READ_ONLY})
-GATES = frozenset({GATE_NONE, GATE_APPROVAL})
-
 #: What the product offers today, in the order they are documented.
 PUBLISHED = (
     (CONTAINER, FULL, GATE_NONE),

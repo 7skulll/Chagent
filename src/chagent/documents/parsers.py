@@ -26,7 +26,6 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 #: Extensions handled by this module. ``read_file`` consults this set to decide
 #: whether to decode UTF-8 or to parse.
 BINARY_SUFFIXES = frozenset({".pdf", ".docx", ".xlsx"})
-SUPPORTED_SUFFIXES = BINARY_SUFFIXES | {".txt", ".md", ".markdown"}
 
 #: Old binary Office formats share an extension prefix with the XML ones and
 #: cannot be parsed without external converters, so they get their own message.
