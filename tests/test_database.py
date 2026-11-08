@@ -132,7 +132,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await migrate(self.database), [
             "0020_host_controller.sql", "0021_legacy_workspace_quarantine.sql", "0022_native_interactive.sql",
             "0023_approval_batches.sql", "0024_attempts.sql", "0025_workspace_containers.sql",
-            "0026_memory_usage_index.sql", "0027_task_history.sql"])
+            "0026_site_workdir.sql", "0027_memory_usage_index.sql", "0028_task_history.sql"])
         async with self.database.connection() as connection:
             cursor = await connection.execute(
                 "SELECT b.state, b.host_path FROM workspace_bindings b WHERE b.workspace_id = %s", (legacy_id,))
