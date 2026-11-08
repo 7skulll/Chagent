@@ -1,0 +1,34 @@
+{
+ "at": "2026-11-08T16:10+08:00",
+ "why": "合并后需要证明上下文线的压缩管线在宿主主控线上真的跑起来：同步压缩、投机候选、post-turn 写检查点。",
+ "instance": {"port": 18900, "code": "main@合并后", "db": "Compose 127.0.0.1:5433/chagent",
+              "model": "deepseek/deepseek-v4-flash", "context_window": 12000, "max_tokens": 2048,
+              "config_note": "窗口与 post_turn_trigger 是为触发压缩而缩小/降低的非默认值；机制与生产一致"},
+ "workspace": "/Users/macbook/Desktop/测试用/Chagent-合并验收-压缩",
+ "runs": [
+  {"prompt": "读数列/哈希/环境等 8 条大输出命令后总结",
+   "run_id": "auto", "status": "completed", "end_reason": "model_stop", "tools": 12,
+   "compaction": [
+    {"implementation": "summary", "covered_through_sequence": 1054, "tokens_before": 6428, "tokens_after": 5533},
+    {"speculative": true, "outcome": "completed", "covered_through_sequence": 1064, "tokens_before": 7353, "tokens_after": 4818, "duration_ms": 7686},
+    {"speculative": true, "outcome": "discarded", "reason": "Summary must be a completed text response without tools"}]},
+  {"prompt": "执行 seq 1 500 并说明 Python 版本",
+   "status": "completed", "end_reason": "model_stop", "tools": 3,
+   "post_turn": {"implementation": "summary", "covered_through_sequence": 1078,
+                 "tokens_before": 4182, "tokens_after": 4167,
+                 "run_completed_at": "2026-11-08T08:07:47.182917Z",
+                 "compaction_completed_at": "2026-11-08T08:07:51.257775Z",
+                 "delay_seconds": 4.07,
+                 "compaction_calls": {"completed": 3}}}
+ ],
+ "observed": [
+  "压缩按预算触发：0.75 触发线在 12000 窗口（预留 2048）下对应约 6800 token。",
+  "投机候选一次被采纳、一次被丢弃；丢弃理由是摘要模型返回了带工具调用的响应，不是机制失败。",
+  "post-turn 在 run_completed 之后 4.07 秒写入检查点，compaction_calls 三行 completed，运行终态未被改写。"
+ ],
+ "limits": [
+  "未在默认 65536 窗口下复跑（那需要更长的真实任务）。",
+  "未验证候选在真实长任务里的采纳率与丢弃率分布。",
+  "site 在本轮未启动（该工作区只做压缩，不涉及网站）。"
+ ]
+}
