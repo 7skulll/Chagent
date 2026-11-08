@@ -143,6 +143,19 @@ class ToolSearchTests(unittest.IsolatedAsyncioTestCase):
         await self.call("tool")
         self.assertLessEqual(len(self.deferred.names), MAX_RESULTS)
 
+    async def test_a_query_naming_an_already_declared_tool_loads_nothing(self):
+        """Searching for a tool you already have must not load an unrelated one.
+
+        Measured on 2026-11-08: the model asked for "host_process" (declared),
+        got the deferred "host_exec" back because both descriptions say
+        "native", and reported to the user that host_process had no parameters.
+        """
+        result = await self.call("read_file with a line range")
+        self.assertFalse(result.is_error)
+        self.assertIn("read_file", result.content[0].text)
+        self.assertIn("already declared", result.content[0].text)
+        self.assertEqual(self.deferred.names, set())
+
     async def test_a_query_that_matches_nothing_says_what_exists(self):
         result = await self.call("draw a picture")
         self.assertTrue(result.is_error)

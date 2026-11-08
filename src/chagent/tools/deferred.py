@@ -70,6 +70,20 @@ class ToolSearchTool(AgentTool):
         if signal is not None and signal.is_set():
             raise asyncio.CancelledError()
         query = params["query"]
+        # A query that names a tool already declared in this request needs no
+        # load: its schema is in the tool list the model is about to send.
+        # Answering with an unrelated deferred tool that merely shares a word
+        # (asking for "host_process" and getting "host_exec" because both say
+        # "native") is worse than saying "you already have it" — measured in the
+        # 2026-11-08 acceptance, where the model then reported the tool missing.
+        normalized = _normalize(query)
+        for tool in self.registry.definitions():
+            if tool.name in self.registry.deferred_names:
+                continue
+            if _normalize(tool.name) in normalized:
+                return AgentToolResult(content=[TextContent(
+                    f"`{tool.name}` is already declared in the current request; call it directly. "
+                    "Its parameters are in your tool list, so there is nothing to load.")])
         matches = self.matching(query)
         if not matches:
             available = ", ".join(name for name, _ in self.registry.deferred_index())
