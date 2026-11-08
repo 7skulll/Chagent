@@ -356,6 +356,9 @@ export function initFileEditor(ui) {
       $(id).hidden=key!==name;$("show-"+key).setAttribute("aria-selected",String(key===name));
     }
     if(name==="context") { $("context-panel").open=true;ui.loadContext(); }
+    // The operations list is fetched on open, not polled: it is a record, and a
+    // record that refreshes itself while being read is worse than a stale one.
+    if(name==="history") ui.loadOperations();
   }
   const downloadUrl=(id,path)=>`/api/workspaces/${id}/content?${new URLSearchParams({path})}`;
   const preview=createPreview({active,current:()=>current,readPreview,paint,downloadUrl});

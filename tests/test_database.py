@@ -1,10 +1,13 @@
 """Opt-in PostgreSQL checks, isolated in a fresh schema for every test."""
 
 import asyncio
+from hashlib import sha256
 import os
 import sys
 from importlib.resources import files
 import unittest
+import tempfile
+from pathlib import Path
 from uuid import uuid4
 
 from psycopg import AsyncConnection, errors, sql
@@ -48,6 +51,99 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT count(*) AS total FROM schema_migrations")
             self.assertEqual((await cursor.fetchone())["total"], expected)
+
+    async def test_two_host_bindings_never_share_sessions_or_memories(self):
+        """Two host directories are two workspaces: nothing leaks between them.
+
+        The binding model replaced the old ``workspaces.host_path`` column: the
+        identity of a directory is (host_path, device, inode) in
+        ``workspace_bindings``, enforced unique, and sessions and memories hang
+        off the workspace row that binding points at. This is the repository-level
+        half of ``test_host_controller``'s end-to-end check.
+        """
+        from chagent.domain.memories import MemoryProposal
+        from chagent.storage.memories import MemoryRepository
+        from chagent.storage.repositories import ConversationRepository
+        await migrate(self.database)
+        with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
+            first, second = Path(one), Path(two)
+            repository = ConversationRepository(self.database)
+            first_session = await repository.create_session(first)
+            second_session = await repository.create_session(second)
+            first_id = (await repository.get_session(first_session)).workspace_id
+            second_id = (await repository.get_session(second_session)).workspace_id
+            self.assertNotEqual(first_id, second_id)
+
+            memories = MemoryRepository(self.database)
+            first_memory = await memories.propose(
+                MemoryProposal("project.marker", "first project", "workspace", origin="manual"), first_id)
+            second_memory = await memories.propose(
+                MemoryProposal("project.marker", "second project", "workspace", origin="manual"), second_id)
+            self.assertEqual([item.id for item in (await memories.list(first_id))["items"]], [first_memory.id])
+            self.assertEqual([item.id for item in (await memories.list(second_id))["items"]], [second_memory.id])
+            self.assertEqual([item.id for item in await memories.recall(first_id, ["marker"])], [first_memory.id])
+            with self.assertRaises(LookupError):
+                await memories.get(first_memory.id, second_id)
+
+            # Each session belongs to exactly one workspace, and the listing for
+            # a directory returns only that directory's sessions.
+            self.assertEqual([item.id for item in (await repository.list_sessions(workspace=first)).items],
+                             [first_session])
+            self.assertEqual([item.id for item in (await repository.list_sessions(workspace=second)).items],
+                             [second_session])
+
+            # A directory that was already mounted somewhere else cannot be
+            # claimed twice: the second active binding for one host path is a
+            # constraint violation, not a silent merge.
+            async with self.database.connection() as connection:
+                for workspace_id, path in ((first_id, first), (second_id, second)):
+                    stat = path.stat()
+                    await connection.execute(
+                        "INSERT INTO workspace_bindings (workspace_id, host_path, device, inode, state) "
+                        "VALUES (%s, %s, %s, %s, 'active')",
+                        (workspace_id, str(path), stat.st_dev, stat.st_ino))
+            stat = first.stat()
+            other = uuid4()
+            async with self.database.connection() as connection:
+                await connection.execute("INSERT INTO workspaces (id, root_path) VALUES (%s, %s)",
+                                         (other, str(first)))
+                with self.assertRaises(errors.UniqueViolation):
+                    await connection.execute(
+                        "INSERT INTO workspace_bindings (workspace_id, host_path, device, inode, state) "
+                        "VALUES (%s, %s, %s, %s, 'active')",
+                        (other, str(first), stat.st_dev, stat.st_ino))
+
+    async def test_migration_quarantines_legacy_container_binding(self):
+        """A ``/workspaces`` row cannot prove its host directory: mark it rebind-only."""
+        migrations = files("chagent.storage").joinpath("migrations")
+        async with self.database.transaction() as connection:
+            await connection.execute("CREATE TABLE schema_migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())")
+            for path in sorted(migrations.iterdir(), key=lambda item: item.name):
+                if not path.name.endswith(".sql") or path.name >= "0020":
+                    continue
+                source = path.read_text(encoding="utf-8")
+                await connection.execute(source)
+                await connection.execute("INSERT INTO schema_migrations (name, checksum) VALUES (%s, %s)",
+                                         (path.name, sha256(source.encode()).hexdigest()))
+            legacy_id, legacy_session = uuid4(), uuid4()
+            await connection.execute("INSERT INTO workspaces (id, root_path) VALUES (%s, '/workspaces')", (legacy_id,))
+            await connection.execute("INSERT INTO sessions (id, workspace_id) VALUES (%s, %s)",
+                                     (legacy_session, legacy_id))
+        self.assertEqual(await migrate(self.database), [
+            "0020_host_controller.sql", "0021_legacy_workspace_quarantine.sql", "0022_native_interactive.sql",
+            "0023_approval_batches.sql", "0024_attempts.sql", "0025_workspace_containers.sql",
+            "0026_memory_usage_index.sql", "0027_task_history.sql"])
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT b.state, b.host_path FROM workspace_bindings b WHERE b.workspace_id = %s", (legacy_id,))
+            row = await cursor.fetchone()
+            # Kept for audit, but never a usable host workspace.
+            self.assertEqual((row["state"], row["host_path"]), ("rebind_required", "/workspaces"))
+            cursor = await connection.execute("SELECT root_path FROM workspaces WHERE id = %s", (legacy_id,))
+            self.assertEqual((await cursor.fetchone())["root_path"], "/workspaces")
+            # The session survives for inspection; the runtime is what refuses it.
+            cursor = await connection.execute("SELECT workspace_id FROM sessions WHERE id = %s", (legacy_session,))
+            self.assertEqual((await cursor.fetchone())["workspace_id"], legacy_id)
 
     async def test_run_owner_token_and_expired_lease_reject_writes_and_renewal(self):
         from pathlib import Path

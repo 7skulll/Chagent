@@ -518,7 +518,8 @@ ASSETS = {
     "views/memory.js": "text/javascript", "views/sessions.js": "text/javascript",
     "views/drafts.js": "text/javascript", "views/layout.js": "text/javascript",
     "views/preview.js": "text/javascript",
-    "views/uploads.js": "text/javascript", "views/workspace.js": "text/javascript",
+    "views/uploads.js": "text/javascript", "views/operations.js": "text/javascript",
+    "views/workspace.js": "text/javascript",
 }
 
 
@@ -699,7 +700,8 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            process_wall_timeout=configured.process_timeout,
                                            max_processes=configured.max_processes, web=web,
                                            host_exec=host_exec,
-                                           native_host_exec=configured.execution_profile == "host-controller")
+                                           native_host_exec=configured.execution_profile == "host-controller",
+                                           defer_tools=configured.deferred_tools)
                 app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env(),
                                                programmable=not demo)
                 if host_auth is not None:

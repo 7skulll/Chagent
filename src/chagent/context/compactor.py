@@ -2,6 +2,7 @@
 
 import asyncio
 from copy import deepcopy
+from dataclasses import dataclass, replace
 import json
 from time import monotonic_ns
 from uuid import UUID
@@ -17,7 +18,68 @@ from chagent.storage.summaries import SummaryRepository
 from chagent.domain.artifacts import artifact_text
 
 
-PROMPT_VERSION = "session-summary-v3"
+#: Bumped when the checkpoint's shape changes, not only its prompt: v4 adds the
+#: host-authored user-quote block, so a reader can tell what a summary contains
+#: without parsing it.
+PROMPT_VERSION = "session-summary-v4"
+
+#: Which implementation produced a checkpoint. Recorded on every compaction event
+#: so the two can be compared after the fact without reading the summary row.
+COMPACTION_SUMMARY = "summary"
+COMPACTION_FRESH_WINDOW = "fresh_window"
+
+
+@dataclass(slots=True)
+class RecordedCall:
+    """One summarization request and its outcome, in the shape the audit table wants."""
+
+    iteration: int
+    request: ModelRequest
+    compaction_id: UUID | None = None
+    status: str = "running"
+    response: AssistantMessage | None = None
+    duration_ms: int | None = None
+    error: str | None = None
+
+
+class MemoryCalls:
+    """Keeps the audit trail in memory until the caller decides to publish it.
+
+    A speculative compaction may never be adopted. Writing rows immediately would
+    leave entries for a checkpoint that does not exist, and those rows cannot be
+    retracted once the run reaches a terminal state (the ownership gate in
+    ``SummaryRepository`` closes with it). Recording in memory and inserting at
+    adoption keeps one rule: only the caller that owns the run writes.
+    """
+
+    def __init__(self):
+        self.calls: list[RecordedCall] = []
+
+    async def start(self, compaction_id: UUID, run_id: UUID, iteration: int, request: ModelRequest) -> int:
+        # Snapshot the request: the caller keeps mutating it afterwards (the
+        # provider fields are set once the row reference exists), and an audit
+        # record that observes later writes describes a request nobody sent.
+        self.calls.append(RecordedCall(iteration, replace(request), compaction_id=compaction_id))
+        return len(self.calls) - 1
+
+    async def finish(self, handle: int, status: str, response: AssistantMessage | None,
+                     duration_ms: int, error: str | None = None) -> None:
+        record = self.calls[handle]
+        record.status, record.response, record.duration_ms, record.error = status, response, duration_ms, error
+
+
+class DatabaseCalls:
+    """Writes each call as it happens; the shape the synchronous path has always used."""
+
+    def __init__(self, summaries: SummaryRepository):
+        self.summaries = summaries
+
+    async def start(self, compaction_id: UUID, run_id: UUID, iteration: int, request: ModelRequest) -> UUID:
+        return await self.summaries.start_call(compaction_id, run_id, iteration, request)
+
+    async def finish(self, handle: UUID, status: str, response: AssistantMessage | None,
+                     duration_ms: int, error: str | None = None) -> None:
+        await self.summaries.finish_call(handle, status, response, duration_ms, error)
 
 # Recent tool output is quoted verbatim inside the summary. Summarizing it is
 # what makes a model re-read a file or re-run a command after compaction; the
@@ -27,6 +89,71 @@ RETAINED_HEADER = "Recent tool output retained verbatim (not summarized):"
 RETAINED_MARKER = "\n\n" + RETAINED_HEADER + "\n\n"
 RETAINED_PER_RESULT_CHARS = 800
 RETAINED_TOTAL_CHARS = 1600
+
+# The user's own words are the one part of a checkpoint the summarizer must not
+# touch: a constraint restated by a model is a claim about what the model read,
+# not evidence of what was asked. They are quoted by the host, carried forward
+# by the host, and removed from the text the model sees, so a second generation
+# copies them rather than paraphrasing the first generation's paraphrase.
+USER_QUOTES_HEADER = "User requests quoted verbatim (not summarized):"
+USER_QUOTES_MARKER = "\n\n" + USER_QUOTES_HEADER + "\n\n"
+USER_QUOTES_PER_REQUEST_CHARS = 600
+
+#: Version of the host-authored checkpoint used when nothing is summarized. It is
+#: written into ``session_summaries.prompt_version`` so a reader can tell a model
+#: summary from a restatement without consulting the events.
+FRESH_WINDOW_VERSION = "fresh-window-v1"
+FRESH_WINDOW_MODEL = "host"
+FRESH_WINDOW_LEAD = (
+    "Earlier conversation was removed from this context window to make room. It was NOT summarized: "
+    "nothing below is a reconstruction of what those turns said. The original messages are still "
+    "stored outside this conversation, but no tool in this session can read them back, so do not "
+    "assume, quote, or summarize what they contained."
+)
+#: How much of a dropped user request is carried over. Losing every user word is
+#: the most expensive part of a fresh window, so the requests themselves survive
+#: as truncated quotes; anything longer belongs in task state.
+FRESH_WINDOW_REQUESTS = 3
+FRESH_WINDOW_REQUEST_CHARS = 300
+
+
+def fresh_window_content(turns: list[list[StoredMessage]], limit: int, counter,
+                         *, retained: int = 2) -> str:
+    """The checkpoint body for a compaction that bought no summary.
+
+    Three parts, in order of how much they are worth: what was dropped (so the
+    model knows the context is discontinuous), the user requests that drove those
+    turns (truncated), and the newest tool evidence (carried because it is the
+    part that made models re-read files after a summary). Everything is bounded.
+    """
+    if not turns:
+        raise CompactionError("Fresh window requires at least one completed turn")
+    first, last = turns[0][0].sequence, turns[-1][-1].sequence
+    parts = [FRESH_WINDOW_LEAD,
+             f"Dropped: {len(turns)} completed turn(s), sequences {first}-{last}."]
+    requests = []
+    for turn in turns:
+        for item in turn:
+            if isinstance(item.message, UserMessage) and isinstance(item.message.content, str):
+                text = item.message.content.strip()
+                if text:
+                    requests.append(text)
+    if requests:
+        kept = []
+        for text in requests[-FRESH_WINDOW_REQUESTS:]:
+            kept.append(text if len(text) <= FRESH_WINDOW_REQUEST_CHARS
+                        else text[:FRESH_WINDOW_REQUEST_CHARS] + " [truncated]")
+        parts.append("User requests from those turns, quoted and possibly truncated:\n"
+                     + "\n".join(f"- {text}" for text in kept))
+    content = "\n\n".join(parts)
+    evidence = retained_outputs(turns, retained)
+    if evidence:
+        candidate = content + RETAINED_MARKER + evidence
+        if counter.count([BasicContextBuilder.summary_message(candidate)]) <= limit:
+            content = candidate
+    if counter.count([BasicContextBuilder.summary_message(content)]) > limit:
+        raise CompactionError("Fresh window does not fit its reserved budget")
+    return content
 
 
 class CompactionError(ValueError):
@@ -59,8 +186,111 @@ def retained_outputs(turns: list[list[StoredMessage]], count: int) -> str:
 
 
 def strip_retained(content: str) -> str:
-    """Drop a previous summary's retained block so evidence never accumulates."""
-    return content.split(RETAINED_MARKER)[0]
+    """The summary text alone: no quoted requests, no retained tool output."""
+    return split_evidence(content)[0]
+
+
+def split_evidence(content: str) -> tuple[str, list[dict]]:
+    """Separate the model's summary from the host-authored blocks.
+
+    The model never writes these blocks, so carrying them into the next
+    checkpoint is a copy rather than a re-summary. A block that cannot be read
+    back is dropped instead of guessed at: a corrupted quote must not become a
+    fact the next generation believes it was told.
+    """
+    body, quotes_text = content, ""
+    if USER_QUOTES_MARKER in content:
+        body, _, rest = content.partition(USER_QUOTES_MARKER)
+        quotes_text = rest.partition(RETAINED_MARKER)[0]
+    else:
+        body = content.partition(RETAINED_MARKER)[0]
+    quotes: list[dict] = []
+    if quotes_text.strip():
+        try:
+            payload = json.loads(quotes_text)
+            for item in payload.get("user_requests") or []:
+                if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
+                    quotes.append({"sequence": int(item.get("sequence", 0)), "text": item["text"]})
+        except (AttributeError, TypeError, ValueError):
+            quotes = []
+    return body.rstrip(), quotes
+
+
+def user_requests(turns: list[list[StoredMessage]], current: str = "",
+                  current_sequence: int | None = None) -> list[dict]:
+    """User text in the turns being summarized, oldest first, with its sequence.
+
+    A message that carries an image still contributes its text: dropping the
+    words because the block list is not a string would lose the request itself.
+    """
+    requests = []
+    for turn in turns:
+        for item in turn:
+            message = item.message
+            if not isinstance(message, UserMessage):
+                continue
+            text = (message.content if isinstance(message.content, str) else
+                    "\n".join(block.text for block in message.content if isinstance(block, TextContent)))
+            text = text.strip()
+            if text:
+                requests.append({"sequence": item.sequence, "text": text})
+    if isinstance(current, str) and current.strip() and current_sequence is not None:
+        if all(request["sequence"] != current_sequence for request in requests):
+            requests.append({"sequence": current_sequence, "text": current.strip()})
+    return requests
+
+
+def merge_requests(*groups: list[dict]) -> list[dict]:
+    """Union by sequence, oldest first: carried quotes precede the new ones."""
+    merged: dict[int, dict] = {}
+    for group in groups:
+        for request in group:
+            merged.setdefault(request["sequence"], request)
+    return [merged[sequence] for sequence in sorted(merged)]
+
+
+def quote_block(content: str, requests: list[dict], counter, limit: int, keep: int) -> str:
+    """Attach the newest requests that still fit, dropping the oldest first.
+
+    Packing from the newest backwards is the point: when the budget only holds
+    two of five requests, the two that produced the current task are the ones
+    that must survive. A request too large for the remaining room is truncated,
+    not paraphrased.
+    """
+    if keep <= 0 or not requests:
+        return content
+    picked: list[dict] = []
+    block = ""
+    for request in reversed(requests[-keep:]):
+        text = request["text"]
+        if len(text) > USER_QUOTES_PER_REQUEST_CHARS:
+            text = text[:USER_QUOTES_PER_REQUEST_CHARS] + " [truncated]"
+        trial = [{"sequence": request["sequence"], "text": text}, *picked]
+        candidate = content + USER_QUOTES_MARKER + json.dumps({"user_requests": trial}, ensure_ascii=False)
+        if counter.count([BasicContextBuilder.summary_message(candidate)]) > limit:
+            break
+        picked, block = trial, candidate
+    return block or content
+
+
+def retained_block(content: str, retained: str, counter, limit: int) -> str:
+    """Attach tool evidence only if the requests above it left room for it."""
+    if not retained:
+        return content
+    candidate = content + RETAINED_MARKER + retained
+    return (candidate if counter.count([BasicContextBuilder.summary_message(candidate)]) <= limit
+            else content)
+
+
+def attach_evidence(content: str, requests: list[dict], retained: str, counter, limit: int,
+                    *, keep: int) -> str:
+    """Add host-authored blocks in order of value: requests, then tool output.
+
+    Unlike the summary text, neither block can be shrunk by the model, so each
+    is added only while the checkpoint still fits its reserved budget.
+    """
+    return retained_block(quote_block(content, requests, counter, limit, keep),
+                          retained, counter, limit)
 
 
 def serialize_turn(turn: list[StoredMessage]) -> str:
@@ -93,6 +323,9 @@ def serialize_turn(turn: list[StoredMessage]) -> str:
 class ContextCompactor:
     def __init__(self, builder: BasicContextBuilder, summaries: SummaryRepository, policy: CompactionPolicy):
         self.builder, self.summaries, self.policy = builder, summaries, policy
+        # The default recorder keeps today's behaviour: audit rows are written as
+        # the summarizer runs, before anyone knows whether the checkpoint is used.
+        self.calls = DatabaseCalls(summaries)
 
     def request(self, model: Model, previous: str, turns: list[str], limit: int, task_input: str = "") -> ModelRequest:
         return ModelRequest(model=model, max_tokens=min(model.max_tokens, self.policy.max_summary_tokens), purpose="summary", messages=[
@@ -114,11 +347,17 @@ class ContextCompactor:
 
     async def compact(self, *, model: Model, client: ModelClient, turns: list[list[StoredMessage]],
                       previous: str, limit: int, compaction_id: UUID, run_id: UUID,
-                      task_input: str = "", workspace=None) -> tuple[str, Usage | None]:
+                      task_input: str = "", task_sequence: int | None = None,
+                      recorder=None, workspace=None) -> tuple[str, Usage | None]:
+        recorder = recorder if recorder is not None else self.calls
         serialized = [serialize_turn(turn) for turn in turns]
-        # Evidence from an earlier summary is re-derived from these turns, so it
-        # must not be carried into the next summary as if it were a fact.
-        previous = strip_retained(previous)
+        # Both evidence blocks are re-derived from these turns or carried by the
+        # host, so neither may enter the model's input as if it were a fact: the
+        # summarizer would then rewrite the very text that must stay verbatim.
+        previous, carried = split_evidence(previous)
+        requests = merge_requests(carried, user_requests(turns, task_input, task_sequence))
+        # Depends only on the covered turns, so one derivation serves every chunk.
+        retained = retained_outputs(turns, self.policy.retained_tool_results)
         index, calls = 0, 0
         usage: Usage | None = None
         usage_missing = False
@@ -137,7 +376,10 @@ class ContextCompactor:
                 if end == index:
                     raise CompactionError("One completed turn exceeds the summarization input budget")
                 request = self.request(model, previous, serialized[index:end], limit, task_input)
-                identity = await self.summaries.start_call(compaction_id, run_id, calls, request)
+                handle = await recorder.start(compaction_id, run_id, calls, request)
+                # Set after the handle so the stored snapshot stays JSON-safe (a
+                # Path would not serialize) while the provider request still says
+                # which workspace and run it belongs to, for outbound auditing.
                 request.workspace = workspace
                 request.run_id = run_id
                 started = monotonic_ns()
@@ -152,21 +394,13 @@ class ContextCompactor:
                                         if isinstance(block, TextContent)).strip()
                     if not content:
                         raise CompactionError("Summary is empty")
-                    retained = retained_outputs(turns, self.policy.retained_tool_results)
-                    if retained:
-                        candidate = content + RETAINED_MARKER + retained
-                        # Best effort: if the evidence does not fit next to the
-                        # summary, keep the summary and drop the evidence rather
-                        # than failing the whole compaction.
-                        if self.builder.counter.count([self.builder.summary_message(candidate)]) <= limit:
-                            content = candidate
                     if self.builder.counter.count([self.builder.summary_message(content)]) > limit:
                         raise CompactionError("Summary exceeds its reserved budget")
-                    await self.summaries.finish_call(identity, "completed", response, (monotonic_ns() - started) // 1_000_000)
+                    await recorder.finish(handle, "completed", response, (monotonic_ns() - started) // 1_000_000)
                 except BaseException as error:
                     status = "cancelled" if isinstance(error, asyncio.CancelledError) else "failed"
                     reason = str(error) if isinstance(error, CompactionError) else type(error).__name__
-                    await self.summaries.finish_call(identity, status, response, (monotonic_ns() - started) // 1_000_000, reason)
+                    await recorder.finish(handle, status, response, (monotonic_ns() - started) // 1_000_000, reason)
                     raise
                 if response.usage:
                     if usage is None:
@@ -185,7 +419,9 @@ class ContextCompactor:
                 else:
                     usage_missing = True
                 previous, index, calls = content, end, calls + 1
-        return previous, None if usage_missing else usage
+        content = attach_evidence(previous, requests, retained, self.builder.counter, limit,
+                                  keep=self.policy.retained_user_requests)
+        return content, None if usage_missing else usage
 
     @staticmethod
     async def _response(client: ModelClient, request: ModelRequest) -> AssistantMessage:

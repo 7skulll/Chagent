@@ -7,9 +7,10 @@ from fastapi import APIRouter
 
 from chagent.domain.memories import Memory, MemoryProposal
 from chagent.storage.memories import MemoryRepository
+from chagent.storage.task_history import TaskHistoryRepository
 from chagent.web.deps import Current, PageLimit, WorkspacePath
 from chagent.web.schemas import (ErrorResponse, MemoryCreate, MemoryDetail, MemoryEdit, MemoryPage,
-                                 MemoryReview, RevisionRequest)
+                                 MemoryReview, MemoryUsageView, RevisionRequest)
 
 router = APIRouter(
     prefix="/api", tags=["长期记忆"],
@@ -69,3 +70,21 @@ async def reject_memory(memory_id: UUID, value: RevisionRequest, current: Curren
 async def memory_history(memory_id: UUID, current: Current, workspace: WorkspacePath = None):
     return await MemoryRepository(current.runner.conversations.database).revisions(
         memory_id, await current.memory_scope(workspace))
+
+
+@router.get("/memories/{memory_id}/usage", response_model=MemoryUsageView)
+async def memory_usage(memory_id: UUID, current: Current, workspace: WorkspacePath = None):
+    return await MemoryRepository(current.runner.conversations.database).usage(
+        memory_id, await current.memory_scope(workspace))
+
+
+@router.get("/task-history")
+async def task_history(current: Current, workspace: WorkspacePath = None, query: str = ""):
+    return {"items": await TaskHistoryRepository(current.runner.conversations.database).search(
+        await current.memory_scope(workspace), query)}
+
+
+@router.get("/task-history/{run_id}")
+async def task_history_detail(run_id: UUID, current: Current, workspace: WorkspacePath = None):
+    return await TaskHistoryRepository(current.runner.conversations.database).get(
+        await current.memory_scope(workspace), run_id)

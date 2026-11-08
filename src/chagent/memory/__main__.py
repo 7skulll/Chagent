@@ -12,6 +12,7 @@ from chagent.domain.memories import MemoryProposal
 from chagent.storage.database import Database
 from chagent.storage.memories import MemoryRepository
 from chagent.storage.migrate import migrate
+from chagent.storage.workspace_identity import ensure_workspace
 
 
 async def run(args):
@@ -21,9 +22,7 @@ async def run(args):
     async with Database(Settings.from_env()) as database:
         await migrate(database)
         async with database.connection() as connection:
-            cursor = await connection.execute("INSERT INTO workspaces (id, root_path) VALUES (%s, %s) ON CONFLICT (root_path) DO UPDATE SET root_path = EXCLUDED.root_path RETURNING id",
-                                              (uuid4(), str(workspace)))
-            workspace_id = (await cursor.fetchone())["id"]
+            workspace_id = await ensure_workspace(connection, workspace)
         repository = MemoryRepository(database)
         if args.command == "list":
             page = await repository.list(workspace_id, status=args.status, limit=args.limit, before=args.before)

@@ -22,6 +22,7 @@ import { createConfigView } from "./views/config.js";
 import { createContextView } from "./views/context.js";
 import { createGeneratedView } from "./views/generated.js";
 import { createMemoryView } from "./views/memory.js";
+import { createOperationsView } from "./views/operations.js";
 import { createSessionsView } from "./views/sessions.js";
 import { createUploadsView } from "./views/uploads.js";
 import { createWorkspaceView } from "./views/workspace.js";
@@ -181,6 +182,9 @@ ui.loadGeneratedFiles = generated.loadGeneratedFiles;
 
 const context = createContextView(ui);
 ui.loadContext = context.loadContext;
+
+const operations = createOperationsView(ui);
+ui.loadOperations = operations.loadOperations;
 
 const sessions = createSessionsView(ui);
 Object.assign(ui, {

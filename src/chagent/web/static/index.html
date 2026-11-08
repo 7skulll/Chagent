@@ -179,6 +179,11 @@
         <p class="artifacts-intro">本会话中生成的文件</p>
         <div id="artifacts-list" class="artifacts-list" aria-live="polite"><p class="artifacts-empty">选择会话后查看文件。</p></div>
       </section>
+      <section class="artifacts-panel" aria-labelledby="operations-heading">
+        <div class="artifacts-heading"><h2 id="operations-heading">工作区最近改动</h2><span id="operations-count">0</span></div>
+        <p class="artifacts-intro">Agent 工具与文件面板的写入记录</p>
+        <div id="operations-list" class="artifacts-list" aria-live="polite"><p class="artifacts-empty">选择工作区后查看。</p></div>
+      </section>
     </div>
     <div class="tools-body" id="file-context-pane" hidden>
       <details id="context-panel">
@@ -208,15 +213,17 @@
   <dialog id="memory-dialog" aria-labelledby="memory-heading">
     <div class="memory-heading"><div><h2 id="memory-heading">长期记忆</h2><p>用户偏好跨工作区使用，项目事实仅用于当前工作区。</p></div><button id="close-memory" class="quiet" aria-label="关闭记忆">关闭 ×</button></div>
     <div id="memory-notice" role="status"></div>
-    <div class="memory-toolbar"><label for="memory-filter">查看</label><select id="memory-filter"><option value="active">已生效</option><option value="candidate">待审核</option><option value="deleted">已删除</option><option value="rejected">已拒绝</option></select><button id="new-memory">＋ 添加记忆</button></div>
+    <div class="memory-toolbar"><label for="memory-filter">查看</label><select id="memory-filter"><option value="active">已生效</option><option value="candidate">待审核</option><option value="deleted">已删除</option><option value="rejected">已拒绝</option><option value="quarantined">历史隔离</option></select><button id="new-memory">＋ 添加记忆</button></div>
     <form id="memory-editor" hidden>
       <label for="memory-scope">作用范围</label><select id="memory-scope"><option value="workspace">当前工作区</option><option value="user">用户偏好（所有工作区）</option></select>
       <label for="memory-key">记忆键</label><input id="memory-key" required maxlength="80" placeholder="例如 response.language 或 project.framework">
       <label for="memory-content">内容</label><textarea id="memory-content" required maxlength="2000" rows="3"></textarea>
-      <label class="memory-pin"><input id="memory-pinned" type="checkbox"> 优先保留，即使本轮没有匹配关键词</label>
+      <label class="memory-pin"><input id="memory-pinned" type="checkbox"> 即使本轮没有匹配关键词，也纳入候选</label>
       <div><button type="submit">保存</button><button type="button" id="cancel-memory-edit" class="quiet">取消编辑</button></div>
     </form>
     <div id="memory-list"></div><button id="more-memories" class="quiet" hidden>加载更多记忆</button>
+    <div class="memory-toolbar"><button id="task-history-button" class="quiet" type="button">查看近期任务经历</button></div>
+    <div id="task-history-list" hidden></div>
     <p class="memory-footnote">自动提取的候选审核后才生效。删除会停止后续检索，原始聊天与版本审计仍保留。</p>
   </dialog>
 

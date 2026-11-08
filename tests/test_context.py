@@ -6,7 +6,8 @@ from uuid import uuid4
 
 from chagent.context.builder import BasicContextBuilder, ContextBudgetError, ContextIntegrityError
 from chagent.context.projection import ProjectionCache
-from chagent.domain.context import ContextPolicy
+from chagent.context.tokens import HeuristicTokenCounter, estimate_tokens
+from chagent.domain.context import ContextPolicy, ObservedUsage
 from chagent.domain.messages import AssistantMessage, SystemMessage, TextContent, ToolCall, ToolResultMessage, UserMessage
 from chagent.domain.runs import StoredMessage
 from chagent.domain.sessions import TaskState
@@ -15,7 +16,7 @@ from chagent.models.base import Model
 
 
 class RecordingCounter:
-    """Same numbers as ByteTokenCounter, but records serialization volume.
+    """Same numbers as HeuristicTokenCounter, but records serialization volume.
 
     ``additive=False`` mimics a future counter (for example one that models
     inter-message structure) that cannot promise additive per-message costs.
@@ -157,7 +158,8 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
     async def test_utf8_estimate_and_invalid_limits(self):
         history = [self.record(1, UserMessage("你好", 1))]
         built = await BasicContextBuilder().build(history, self.model, [])
-        self.assertEqual(built.snapshot.token_counter, "utf8_json_bytes_estimate")
+        self.assertEqual(built.snapshot.token_counter, HeuristicTokenCounter.name)
+        self.assertEqual(built.snapshot.estimate_source, "coarse")
         self.assertEqual(built.snapshot.input_budget, 100_000 - 128 - 256)
         with self.assertRaises(ContextBudgetError):
             await BasicContextBuilder(policy=ContextPolicy(output_tokens=129)).build(history, self.model, [])
@@ -289,9 +291,9 @@ class PromptSectionTests(unittest.IsolatedAsyncioTestCase):
                                      environment="Working directory: /tmp")
         self.assertEqual(first.request.messages[0].sections, second.request.messages[0].sections)
 
-    async def test_snapshot_records_every_counter_separately(self):
+    async def test_snapshot_names_the_counter_that_produced_the_estimate(self):
         class StubCounter:
-            name = "stub_bpe"
+            name = "stub_counter"
             additive = True
 
             def count(self, messages):
@@ -299,8 +301,139 @@ class PromptSectionTests(unittest.IsolatedAsyncioTestCase):
 
         builder = BasicContextBuilder(counter=StubCounter(), policy=ContextPolicy(safety_tokens=0))
         built = await builder.build(self.history(), self.model, [])
-        self.assertEqual(built.snapshot.token_counter, "stub_bpe")
-        self.assertEqual(built.snapshot.token_estimate, built.snapshot.token_estimates["stub_bpe"])
-        self.assertIn("utf8_json_bytes_estimate", built.snapshot.token_estimates)
-        self.assertNotEqual(built.snapshot.token_estimates["utf8_json_bytes_estimate"],
-                            built.snapshot.token_estimates["stub_bpe"])
+        self.assertEqual(built.snapshot.token_counter, "stub_counter")
+        self.assertEqual(built.snapshot.token_estimates, {"stub_counter": built.snapshot.token_estimate})
+        self.assertEqual(built.snapshot.estimate_source, "coarse")
+
+
+class ObservedUsageTests(unittest.IsolatedAsyncioTestCase):
+    """The provider's own count anchors the estimate; only the tail is inferred."""
+
+    def setUp(self):
+        self.model = Model("test", "test", "fake", 100_000, 128)
+        self.counter = HeuristicTokenCounter()
+
+    def record(self, sequence, message, run_id=None):
+        return StoredMessage(uuid4(), sequence, message, run_id)
+
+    async def test_only_the_messages_appended_since_the_last_response_are_estimated(self):
+        run_id = uuid4()
+        history = [self.record(1, UserMessage("约束" * 60, 1), run_id),
+                   self.record(2, AssistantMessage([ToolCall("a", "echo", {"text": "x"})], "fake", "test", "test", 2, "toolUse"), run_id),
+                   self.record(3, ToolResultMessage("a", "echo", [TextContent("x" * 900)], False, 3), run_id)]
+        built = await BasicContextBuilder(counter=self.counter).build(
+            history, self.model, [], current_run_id=run_id, observed=ObservedUsage(4_000, 3_800, after_sequence=2))
+        self.assertEqual(built.snapshot.estimate_source, "observed")
+        self.assertEqual(built.snapshot.observed_prompt_tokens, 4_000)
+        # Only the tool result is new; the user turn and the call were already paid for.
+        self.assertEqual(built.snapshot.tail_token_estimate,
+                         self.counter.count([built.request.messages[-1]]))
+        self.assertEqual(built.snapshot.token_estimate, 4_000 + built.snapshot.tail_token_estimate)
+        self.assertEqual(built.snapshot.token_estimate - built.snapshot.tail_token_estimate, 4_000)
+
+    async def test_an_anchor_with_nothing_appended_is_exact(self):
+        run_id = uuid4()
+        history = [self.record(1, UserMessage("hello", 1), run_id),
+                   self.record(2, AssistantMessage([TextContent("答案")], "fake", "test", "test", 2, "stop"), run_id)]
+        built = await BasicContextBuilder(counter=self.counter).build(
+            history, self.model, [], current_run_id=run_id, observed=ObservedUsage(1_234, 1_200, after_sequence=2))
+        self.assertEqual((built.snapshot.token_estimate, built.snapshot.tail_token_estimate), (1_234, 0))
+
+    async def test_a_summary_that_covers_the_anchor_invalidates_it(self):
+        """After compaction the anchored prompt no longer exists; count afresh."""
+        from chagent.domain.summaries import SessionSummary
+        run_id = uuid4()
+        history = [self.record(1, UserMessage("old", 1), run_id),
+                   self.record(2, AssistantMessage([TextContent("old answer")], "fake", "test", "test", 2, "stop"), run_id),
+                   self.record(3, UserMessage("new", 3), run_id)]
+        summary = SessionSummary(
+            id=uuid4(), session_id=uuid4(), revision=1, previous_summary_id=None,
+            covered_through_sequence=2, first_kept_message_id=history[2].id, content="摘要",
+            model="test", provider="test", prompt_version="v", compaction_id=uuid4(),
+        )
+        built = await BasicContextBuilder(counter=self.counter).build(
+            history, self.model, [], current_run_id=run_id, summary=summary,
+            observed=ObservedUsage(9_999, 9_500, after_sequence=1))
+        self.assertEqual(built.snapshot.estimate_source, "coarse")
+        self.assertIsNone(built.snapshot.observed_prompt_tokens)
+        self.assertEqual(built.snapshot.token_estimate, self.counter.count(built.request.messages))
+
+    async def test_the_snapshot_reports_how_much_of_a_result_the_model_saw(self):
+        run_id = uuid4()
+        history = [self.record(1, UserMessage("看日志", 1), run_id),
+                   self.record(2, AssistantMessage([ToolCall("a", "exec_command", {})], "fake", "test", "test", 2, "toolUse"), run_id),
+                   self.record(3, ToolResultMessage("a", "exec_command", [TextContent("日志" * 4_000)], False, 3), run_id)]
+        built = await BasicContextBuilder(counter=self.counter, policy=ContextPolicy(max_tool_result_tokens=300)).build(
+            history, self.model, [], current_run_id=run_id)
+        self.assertGreater(built.snapshot.truncated_tool_results, 0)
+        self.assertLessEqual(estimate_tokens(built.request.messages[-1].content[0].text), 300)
+
+
+class EstimateScaleTests(unittest.IsolatedAsyncioTestCase):
+    """The provider's measured error must reach turn selection, not just the report."""
+
+    def setUp(self):
+        self.builder = BasicContextBuilder()
+
+    def history(self, turns=8, width=300):
+        """One completed run per turn, so only the last turn is required."""
+        records, sequence, run_id = [], 0, None
+        for index in range(turns):
+            run_id = uuid4()
+            sequence += 1
+            records.append(StoredMessage(uuid4(), sequence, UserMessage(f"turn {index} " + "x" * width, sequence), run_id))
+            sequence += 1
+            records.append(StoredMessage(uuid4(), sequence, AssistantMessage(
+                [TextContent("ok")], "fake", "test", "test", sequence, "stop"), run_id))
+        return records, run_id
+
+    def test_scale_is_the_measured_ratio_and_is_bounded(self):
+        self.assertEqual(ObservedUsage(300, 300, after_sequence=1, coarse_prompt_tokens=200).scale, 1.5)
+        self.assertEqual(ObservedUsage(300, 300, after_sequence=1).scale, 1.0, "no coarse reference")
+        self.assertEqual(ObservedUsage(300, 300, after_sequence=1, coarse_prompt_tokens=1).scale, 3.0)
+        self.assertEqual(ObservedUsage(300, 30, after_sequence=1, coarse_prompt_tokens=100).scale, 1.0,
+                         "a ratio below one never widens the budget")
+
+    async def test_a_shortfalling_heuristic_tightens_selection(self):
+        history, run_id = self.history()
+        model = Model("test", "test", "fake", 1_600, 128)
+        plain = await self.builder.build(history, model, [], current_run_id=run_id)
+        coarse = plain.snapshot.coarse_token_estimate
+        anchor = ObservedUsage(prompt_tokens=round(coarse * 1.3), input_tokens=round(coarse * 1.3),
+                               after_sequence=history[-1].sequence, coarse_prompt_tokens=coarse)
+        self.assertAlmostEqual(anchor.scale, 1.3, places=2)
+        tightened = await self.builder.build(history, model, [], current_run_id=run_id, observed=anchor)
+        self.assertLess(len(tightened.snapshot.source_message_ids),
+                        len(plain.snapshot.source_message_ids),
+                        "the same content must not be admitted twice over")
+        self.assertGreater(tightened.snapshot.projected_token_estimate,
+                           plain.snapshot.projected_token_estimate,
+                           "the projection is reported in the provider's units")
+        self.assertLessEqual(tightened.snapshot.token_estimate, tightened.snapshot.input_budget)
+
+    async def test_the_estimate_and_the_projection_agree_on_what_fits(self):
+        """A budget-maximal selection may not be rejected by the anchored total."""
+        history, run_id = self.history()
+        model = Model("test", "test", "fake", 1_600, 128)
+        plain = await self.builder.build(history, model, [], current_run_id=run_id)
+        coarse = plain.snapshot.coarse_token_estimate
+        anchor = ObservedUsage(prompt_tokens=round(coarse * 1.3), input_tokens=round(coarse * 1.3),
+                               after_sequence=history[-1].sequence, coarse_prompt_tokens=coarse)
+        built = await self.builder.build(history, model, [], current_run_id=run_id, observed=anchor)
+        self.assertLessEqual(built.snapshot.token_estimate, built.snapshot.input_budget,
+                             "selection and the final check must agree on what fits")
+
+    async def test_dropping_an_anchored_turn_falls_back_to_the_corrected_estimate(self):
+        """An anchor that covers a dropped turn describes a prompt that no longer exists."""
+        history, run_id = self.history()
+        model = Model("test", "test", "fake", 2_000, 128)
+        plain = await self.builder.build(history, model, [], current_run_id=run_id)
+        coarse = plain.snapshot.coarse_token_estimate
+        anchor = ObservedUsage(prompt_tokens=round(coarse * 1.5), input_tokens=round(coarse * 1.5),
+                               after_sequence=history[-1].sequence, coarse_prompt_tokens=coarse)
+        # The correction alone pushes the oldest turns out: the anchor now covers
+        # messages the request will not contain.
+        built = await self.builder.build(history, model, [], current_run_id=run_id, observed=anchor)
+        self.assertEqual(built.snapshot.estimate_source, "scaled")
+        self.assertLess(len(built.snapshot.source_message_ids), len(plain.snapshot.source_message_ids))
+        self.assertLessEqual(built.snapshot.token_estimate, built.snapshot.input_budget)

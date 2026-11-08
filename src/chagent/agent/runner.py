@@ -169,11 +169,25 @@ class AgentRunner:
                 # Explicit memories are deterministic; automatic extraction only
                 # enqueues a job so this answer never waits for a second model call.
                 await self.memory_service.on_completed(
-                    connection, session_id, run_id, state=state, has_answer=result.message is not None)
+                    connection, session_id, run_id, state=state, has_answer=result.message is not None,
+                    end_reason=result.end_reason)
             await self._record_network_after(run_id, network_audit)
             await self._record_manifest_after(run_id, manifest_root, manifest_before)
             await self.runs.finish(run_id, "completed", end_reason=result.end_reason,
                                    on_completed=commit if self.memory_service is not None else None)
+            # The answer is committed, so the only thing left worth doing with this
+            # run is making the next one cheap. It runs behind the response, on the
+            # token this process still holds for the now-terminal run.
+            if (self.context_manager is not None and result.message is not None
+                    and result.end_reason == "model_stop"):
+                token = self.runs.database.run_owners.get(run_id)
+                if token is not None:
+                    self.context_manager.schedule_post_turn(
+                        session_id=session_id, run_id=run_id, state=state, model=self.model,
+                        client=self.client, post_run_token=token,
+                        prompt_mode=self.prompt_mode_for(state.session.mode),
+                        deferred=self.executor_for(state.session.mode).registry.deferred_index(),
+                    )
             if self.memory_worker is not None and result.message is not None:
                 self.memory_worker.wake()
         except asyncio.CancelledError:
@@ -245,7 +259,7 @@ class AgentRunner:
             self._manifest_after_recorded.discard(run_id)
             self._network_after_recorded.discard(run_id)
             if self.context_manager is not None:
-                self.context_manager.release(run_id)
+                await self.context_manager.release(run_id)
             try:
                 # A pending question must not outlive its run.
                 await self.scheduler.cancel_approvals(run_id)
@@ -427,24 +441,35 @@ class AgentRunner:
         prompt_mode = self.prompt_mode_for(state.session.mode)
         tool_context = ToolContext(
             workspace=state.session.workspace, session_id=session_id, run_id=run_id,
-            workspace_identity=state.workspace_identity,
+            workspace_identity=state.workspace_identity, deferred=state.deferred,
         )
         for iteration in range(self.max_turns):
             from chagent.tools.workspace import WorkspaceFS
             WorkspaceFS(state.session.workspace, expected_identity=state.workspace_identity)
             state.iteration = iteration
-            if state.tool_revision != executor.registry.revision:
-                state.tools = executor.registry.definitions()
-                state.tool_revision = executor.registry.revision
+            # The declared face, not the registry, decides the prefix: a tool the
+            # model loaded through tool_search changes it just as a registry change
+            # would, and neither may go unnoticed. The key is O(1) so an unchanged
+            # face costs nothing per turn.
+            key = (executor.registry.revision, len(state.deferred.names))
+            if key != state.declared_key:
+                state.tools = executor.registry.declarations(state.deferred.names)
+                state.declared_key = key
+                state.tool_revision += 1
                 state.context_revision += 1
+                # Tool declarations live in the system message; a new set means
+                # the anchor describes a prompt this run will never send again.
+                state.observed = None
             try:
                 if self.context_manager is not None:
-                    built = await self.context_manager.prepare(session_id, run_id, self.model, self.client,
-                                                                state.tools, state=state, prompt_mode=prompt_mode)
+                    built = await self.context_manager.prepare(
+                        session_id, run_id, self.model, self.client, state.tools, state=state,
+                        prompt_mode=prompt_mode, deferred=executor.registry.deferred_index())
                 else:
                     built = await self.context.build(state.history, self.model, state.tools,
                                                      task_state=state.task_state, current_run_id=run_id,
-                                                     recovery=state.recovery, environment=state.environment)
+                                                     recovery=state.recovery, environment=state.environment,
+                                                     deferred=executor.registry.deferred_index())
             except ContextBudgetError as error:
                 await self.runs.event(run_id, "context_rejected", {
                     "reason": str(error), "required_tokens": error.required_tokens,
@@ -475,6 +500,9 @@ class AgentRunner:
             message = await self._response(run_id, built.request)
             record = await self.runs.save_response(run_id, session_id, model_call_id, message)
             state.append_committed(record)
+            state.record_usage(message.usage, after_sequence=record.sequence,
+                               memory_tokens=built.snapshot.memory_token_estimate,
+                               coarse_tokens=built.snapshot.coarse_token_estimate)
             state.active_model_call_id = None
             if message.stop_reason in {"error", "aborted"}:
                 raise RunExecutionError(message.error_message or "Model request failed",

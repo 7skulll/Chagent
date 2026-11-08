@@ -131,9 +131,11 @@ class WebSurfaceTests(unittest.TestCase):
         self.assertEqual(orphans, [], f"这些按钮没有任何行为：{orphans}")
 
     def test_button_surface_is_pinned(self):
-        # The site restart and explicit container rebuild controls are included.
-        # Every button must also pass the handler check above.
-        self.assertEqual(len(self.page.buttons), 62)
+        # The site restart and explicit container rebuild controls are included,
+        # as is the task-history disclosure from the context line. Every button
+        # must also pass the handler check above; this count only prevents
+        # accidental duplicates.
+        self.assertEqual(len(self.page.buttons), 63)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)

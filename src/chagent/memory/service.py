@@ -24,6 +24,7 @@ from chagent.domain.messages import SystemMessage, TextContent, UserMessage
 from chagent.models.base import ModelRequest
 from chagent.storage.memories import MemoryRepository
 from chagent.storage.memory_jobs import MemoryJob, MemoryJobRepository
+from chagent.storage.task_history import TaskHistoryRepository
 
 
 PROMPT_VERSION = "memory-candidates-v1"
@@ -86,7 +87,11 @@ class MemoryService:
         cached = self._recall.get(run_id)
         if cached is not None and cached[0] == workspace_id and cached[1] == text:
             return cached[2]
-        candidates = await self.repository.recall(workspace_id, query_terms(text), self.policy.max_items)
+        # Retrieve fallbacks too: an early candidate may be too large for the
+        # actual request budget, while a later one still fits.
+        candidates = await self.repository.recall(workspace_id, query_terms(text),
+                                                  min(80, self.policy.max_items * 4),
+                                                  workspace_slots=max(1, self.policy.max_items - 2))
         self._recall[run_id] = (workspace_id, text, candidates)
         return candidates
 
@@ -109,6 +114,8 @@ class MemoryService:
             budget = min(self.policy.max_tokens, built.snapshot.input_budget // 10)
             additive = getattr(self.counter, "additive", False)
             for candidate in candidates:
+                if len(selected) >= self.policy.max_items:
+                    break
                 reference = self.reference([*selected, candidate])
                 reference_cost = self.counter.count([reference])
                 if reference_cost > budget:
@@ -168,12 +175,14 @@ class MemoryService:
         return source.message.content, source.id
 
     async def on_completed(self, connection, session_id, run_id, *, state: RunState | None = None,
-                           has_answer: bool = True) -> None:
+                           has_answer: bool = True, end_reason: str = "model_stop") -> None:
         """Persist explicit memories and enqueue extraction in the completion txn.
 
         Runs inside ``runs.finish``: a failure here rolls back only memory work,
         because the caller wraps it in a savepoint.
         """
+        if state is not None and has_answer and end_reason == "model_stop":
+            await TaskHistoryRepository(self.repository.database).record(connection, state)
         if not self.policy.enabled:
             return
         records = state.history if state else await self.conversations.messages(

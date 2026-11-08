@@ -33,6 +33,7 @@ from chagent.tools.host import HostExecTool
 from chagent.hostexec.native import NativeHostExecTool, NativeHostProcessTool
 from chagent.tools.site import SiteTool
 from chagent.tools.collect_file import CollectFileTool
+from chagent.tools.task_history import TaskHistoryTool
 
 
 #: Tools that change files in the workspace. Shared by both modes; what a
@@ -42,6 +43,23 @@ WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "create_direc
 #: ``tools.policy.HOST_TOOLS``: that one is about which calls need a human, this
 #: one is about which tools may exist at all.
 EXECUTION_TOOLS = frozenset({"exec_command", "run_tests", "process"})
+
+#: Tools whose declaration is indexed rather than sent, when deferral is on.
+#: Chosen by measured cost and by when a session needs them: together they are
+#: 1663 of the 3923 declaration tokens, and every one of them is something a
+#: session reaches for late or never (a web lookup, a test run, a long-lived
+#: process, a downloadable file, host execution).
+#:
+#: Deliberately **not** deferred: the read/write/edit/patch loop, directory
+#: listing, glob, grep, command execution and artifact pagination. Those are what
+#: the first three turns of every session use, and one extra `tool_search` turn
+#: costs more than the declaration it saves.
+DEFERRABLE_TOOLS = frozenset({"web_search", "web_fetch", "host_exec", "process", "run_tests", "create_file",
+                              "search_task_history", "read_task_history"})
+
+#: Below this many deferrable tools the index and `tool_search` cost about what
+#: they save, so the face is declared whole.
+MIN_DEFERRED_TOOLS = 3
 
 
 def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
@@ -56,7 +74,9 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
                             process_stdin: bool = True,
                             versioned_files: bool = False,
                             host_exec: tuple[str, str] | None = None,
-                            native_host_exec: bool = False) -> ToolRegistry:
+                            native_host_exec: bool = False,
+                            defer_tools: bool = False,
+                            history_tools: bool = True) -> ToolRegistry:
     """One tool face. ``mode`` is required so no call site gets a face by accident.
 
     The second layer (``ToolExecutor``) is the registry itself: an executor built
@@ -117,6 +137,9 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
             registry.register(CollectFileTool(sandbox, artifacts.database))
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
+        if history_tools:
+            registry.register(TaskHistoryTool(artifacts.database))
+            registry.register(TaskHistoryTool(artifacts.database, detail=True))
         if allow_workspace_writes and not readonly_code:
             registry.register(CreateFileTool(artifacts.database))
     if web is not None:
@@ -125,4 +148,13 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
         # registers nothing at all.
         for tool in create_web_tools(web):
             registry.register(tool)
+    if defer_tools:
+        # One decision, after everything is registered: defer the whole set or
+        # none of it. A half-deferred face would pay for `tool_search` without
+        # getting its savings.
+        candidates = sorted(DEFERRABLE_TOOLS & {tool.name for tool in registry.definitions()})
+        if len(candidates) >= MIN_DEFERRED_TOOLS:
+            registry.defer(candidates)
+            from chagent.tools.deferred import ToolSearchTool
+            registry.register(ToolSearchTool(registry))
     return registry

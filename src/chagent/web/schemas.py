@@ -174,6 +174,25 @@ class WorkspacePage(BaseModel):
     items: list[WorkspaceView]
 
 
+class FileOperationView(BaseModel):
+    """One recorded write to a workspace, from whichever surface performed it.
+
+    ``source`` names the surface (``agent`` for a tool, ``manual`` for the in-page
+    editor) and ``operation`` the verb it used, so the two are never conflated:
+    a rename from the file panel and an ``edit_file`` call look different here.
+    """
+
+    id: int
+    source: str
+    operation: str
+    path: str
+    created_at: datetime
+
+
+class FileOperationPage(BaseModel):
+    items: list[FileOperationView]
+
+
 class WorkspaceCreate(InputModel):
     path: Annotated[StrictStr, Field(min_length=1, max_length=4096)]
     touch: StrictBool = True
@@ -423,6 +442,12 @@ class MemoryDetail(BaseModel):
     conflict: Memory | None
 
 
+class MemoryUsageView(BaseModel):
+    injection_count: int
+    last_injected_at: datetime | None
+    correction_count: int
+
+
 class MemoryJobView(BaseModel):
     id: UUID
     run_id: UUID
@@ -435,12 +460,3 @@ class MemoryJobView(BaseModel):
 
 class MemoryJobState(BaseModel):
     job: MemoryJobView | None
-
-
-class UploadView(BaseModel):
-    """The stored location of one uploaded file, relative to the workspace."""
-
-    path: Annotated[StrictStr, Field(min_length=1, max_length=200)]
-    name: Annotated[StrictStr, Field(min_length=1, max_length=200)]
-    size: Annotated[int, Field(ge=1)]
-    sha256: Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]

@@ -28,7 +28,7 @@ from chagent.agent.runner import RunFailedError
 from chagent.bootstrap import create_runner
 from chagent.config import Settings
 from chagent.context.builder import BasicContextBuilder
-from chagent.context.tokens import ByteTokenCounter
+from chagent.context.tokens import HeuristicTokenCounter
 from chagent.domain.context import ContextPolicy
 from chagent.domain.memories import MemoryPolicy
 from chagent.domain.messages import AssistantMessage, TextContent, ToolCall, UserMessage
@@ -96,13 +96,13 @@ class ObservedDatabase(Database):
 
 
 class CountingCounter:
-    name = "diagnostic_utf8_json_bytes"
-    # Delegates to ByteTokenCounter, so per-message costs are additive.
+    name = "diagnostic_wire_tokens"
+    # Delegates to HeuristicTokenCounter, so per-message costs are additive.
     additive = True
 
     def __init__(self):
         self.calls = self.items = 0
-        self.delegate = ByteTokenCounter()
+        self.delegate = HeuristicTokenCounter()
 
     def count(self, messages):
         self.calls += 1

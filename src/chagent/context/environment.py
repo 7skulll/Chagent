@@ -10,6 +10,19 @@ limitation but the contract: this text is part of the provider prompt prefix, so
 it has to stay byte-identical across every turn of one run. It is therefore
 labelled as a snapshot, and the model is told to use tools for anything that may
 have changed since.
+
+**Not wired.** Nothing in the request path calls :func:`build` today. Commit
+``6917378`` (container execution isolation) removed the call from
+``agent/runner.py`` together with the ``environment_projected`` audit event.
+``tests/test_environment.py`` still covers :func:`collect` on its own, and
+``tests/test_runner.py::test_environment_is_not_injected_into_prompt`` pins the
+removal: implemented, tested, and deliberately not injected.
+``RunState.environment`` is still set — but only by the containerized branch of
+``AgentRunner._load_state``, to a fixed boundary sentence, not to anything
+produced here. The module is kept because it is the only implementation of the
+idea and re-deriving it is expensive; see ``docs/会话与上下文设计.md`` for why
+the snapshot was taken back out of the prefix. Read this file as a proposal, not
+as current behaviour.
 """
 
 from dataclasses import dataclass, field

@@ -24,6 +24,11 @@ from chagent.sessions.errors import StateConflictError
 from chagent.storage.database import Database
 from chagent.storage.memories import MemoryRepository
 from chagent.storage.migrate import migrate
+from chagent.storage.task_history import TaskHistoryRepository
+from chagent.tools.task_history import TaskHistoryTool
+from chagent.tools.context import ToolContext
+from chagent.tools.builtin import create_builtin_registry
+from chagent.storage.artifacts import ArtifactRepository
 
 
 class ExtractClient(FakeModelClient):
@@ -235,6 +240,89 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["memory_references"], [])
         self.assertEqual(snapshot["memory_omitted"], 1)
         self.assertLessEqual(snapshot["token_estimate"], snapshot["input_budget"])
+
+    async def test_recall_prioritizes_matching_workspace_over_unrelated_pins(self):
+        for index in range(10):
+            await self.repository.propose(MemoryProposal(f"user.pin{index}", f"unrelated preference {index}",
+                                                         "user", True, "manual"), self.workspace)
+        target = await self.repository.propose(MemoryProposal("project.database", "项目数据库使用 PostgreSQL",
+                                                             origin="manual"), self.workspace)
+        recalled = await self.repository.recall(self.workspace, query_terms("数据库配置"), limit=8)
+        self.assertEqual(recalled[0].id, target.id)
+        self.assertIn(target.id, [item.id for item in recalled])
+
+    async def test_recall_reserves_room_for_matching_user_preference(self):
+        for index in range(10):
+            await self.repository.propose(MemoryProposal(f"project.database{index}",
+                                                         f"数据库配置细节 {index}", origin="manual"), self.workspace)
+        preference = await self.repository.propose(MemoryProposal("user.database.preference",
+                                                                  "数据库问题请用中文回答", "user", origin="manual"), self.workspace)
+        recalled = await self.repository.recall(self.workspace, query_terms("数据库配置"), limit=8)
+        self.assertIn(preference.id, [item.id for item in recalled])
+        self.assertEqual(sum(item.scope == "workspace" for item in recalled), 7)
+
+    async def test_usage_counts_runs_from_first_snapshot_and_tracks_corrections(self):
+        memory = await self.repository.propose(MemoryProposal("project.database", "项目数据库使用 PostgreSQL",
+                                                             origin="manual"), self.workspace)
+        before = await self.repository.usage(memory.id, self.workspace)
+        self.assertEqual(before["injection_count"], 0)
+        self.assertIsNone(before["last_injected_at"])
+        await self.runner.run(self.session, "数据库如何配置？")
+        await self.runner.run(self.session, "数据库如何配置？")
+        changed = await self.repository.change(memory.id, self.workspace, expected_revision=1,
+                                               content="项目数据库使用 PostgreSQL 17")
+        after = await self.repository.usage(changed.id, self.workspace)
+        self.assertEqual(after["injection_count"], 2)
+        self.assertIsNotNone(after["last_injected_at"])
+        self.assertEqual(after["correction_count"], 1)
+
+    async def test_recall_tries_smaller_fallback_after_oversized_match(self):
+        await self.repository.propose(MemoryProposal("project.database.settings", "数据库配置" + "大" * 1800,
+                                                     origin="manual"), self.workspace)
+        small = await self.repository.propose(MemoryProposal("project.database", "数据库使用 PostgreSQL",
+                                                           origin="manual"), self.workspace)
+        await self.runner.run(self.session, "数据库配置怎么做？")
+        snapshot = (await self.runner.conversations.context_snapshots(self.session))[0]["snapshot"]
+        self.assertIn(str(small.id), [item["id"] for item in snapshot["memory_references"]])
+
+    async def test_task_history_index_is_source_linked_and_workspace_scoped(self):
+        history = TaskHistoryRepository(self.database)
+        result = await self.runner.run(self.session, "数据库迁移怎么检查？")
+        indexed = await history.search(self.workspace, "数据库")
+        self.assertEqual([item["run_id"] for item in indexed], [result.run_id])
+        detail = await history.get(self.workspace, result.run_id)
+        self.assertEqual(detail["session_id"], self.session)
+        self.assertIn("数据库迁移", detail["request_excerpt"])
+        self.assertIsNotNone(detail["user_message_id"])
+        self.assertIsNotNone(detail["answer_message_id"])
+        self.assertEqual(detail["run_outcome"], "answer_recorded")
+        self.assertEqual(detail["task_completion"], "unknown_without_current_verification")
+        self.assertEqual(detail["task_state"]["pending"], [])
+        other = await self.runner.conversations.create_session(self.workspace_dir / "other")
+        other_workspace = (await self.runner.conversations.get_session(other)).workspace_id
+        self.assertEqual(await history.search(other_workspace, "数据库"), [])
+        with self.assertRaises(LookupError):
+            await history.get(other_workspace, result.run_id)
+        tool = TaskHistoryTool(self.database)
+        found = await tool.execute("history-search", {"query": "数据库"},
+                                   context=ToolContext(self.workspace_dir, session_id=self.session))
+        self.assertIn(str(result.run_id), found.content[0].text)
+        read = await TaskHistoryTool(self.database, detail=True).execute(
+            "history-read", {"run_id": str(result.run_id)},
+            context=ToolContext(self.workspace_dir, session_id=self.session))
+        self.assertIn(str(detail["answer_message_id"]), read.content[0].text)
+        live_tools = {tool.name for tool in create_builtin_registry(
+            mode="work", artifacts=ArtifactRepository(self.database)).definitions()}
+        self.assertTrue({"search_task_history", "read_task_history"} <= live_tools)
+        await self.runner.run(self.session, "/remember workspace project.database = PostgreSQL")
+        self.assertEqual(len(await history.search(self.workspace)), 1)
+        replacement = await self.runner.run(self.session, "重新检查迁移")
+        async with self.database.connection() as connection:
+            await connection.execute("UPDATE messages SET superseded_by = %s WHERE id = %s",
+                                     (replacement.run_id, detail["answer_message_id"]))
+        self.assertEqual(await history.search(self.workspace, "数据库"), [])
+        with self.assertRaises(LookupError):
+            await history.get(self.workspace, result.run_id)
 
     async def test_invalid_extraction_isolated_and_errors_do_not_leak_credentials(self):
         self.runner.memory_service.policy = MemoryPolicy()

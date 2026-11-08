@@ -1,27 +1,64 @@
-"""Replaceable token counting: a real BPE encoder when available, bytes otherwise.
+"""One coarse token estimate over the wire body, corrected later by the provider.
 
-The byte estimate is not a tokenizer. It is roughly 4x too high on English and
-close on Chinese, so the *same* task compacts at different points in different
-languages: English gets summarized while the code the model just read is still
-useful, and the model reads it again. That is a correctness problem, not a
-cosmetic one.
+The estimate is deliberately not a tokenizer. A real encoder needs a dependency
+that may be missing (the container image has no extras), may fail to load its
+vocabulary without network, and differs per provider anyway. Instead this module
+does two things and nothing more:
 
-The BPE counter is optional: ``tiktoken`` loads its vocabulary from a cache or
-the network, and a machine without either must still run. When it is unavailable
-the builder keeps working with bytes, and the snapshot records *both* numbers
-under their own names, so the two are never mixed in one figure.
+1. :func:`estimate_tokens` turns a piece of wire text into a coarse token count.
+2. :class:`HeuristicTokenCounter` applies it per message and stays additive, so
+   turn selection stays linear.
+
+Accuracy is not the point. :class:`chagent.domain.context.ObservedUsage` anchors
+the next turn's estimate on the prompt size the provider actually reported, so
+this number only has to be good enough for (a) the first request of a run, (b)
+the messages appended since the last response, and (c) comparing candidate
+turns against each other. Those are all "same ballpark" decisions.
+
+Calibration (measured with the encoders available on 2026-11-06, 6 samples):
+
+=============  ==================  ==================  ===============
+sample         cl100k tokens        o200k tokens        ascii B/token
+=============  ==================  ==================  ===============
+en prose       201                 201                 4.48
+python code    366                 366                 4.70
+zh prose       780                 480                 —
+json (en)      170                 170                 3.02
+json (zh)      164                 154                 1.82
+=============  ==================  ==================  ===============
+
+Non-ASCII characters measured 0.75-1.44 tokens each, so this module charges one
+token per non-ASCII character: it is close for cl100k_base, a deliberate
+underestimate for o200k_base, and never the 3.4x overestimate that counting raw
+UTF-8 bytes as tokens produced.
 """
 
-from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 import json
-import os
-import sys
 from typing import Protocol
 
 from chagent.domain.messages import Message, SystemMessage
 from chagent.models.base import Model
 from chagent.models.transcript import openai_message, openai_tools
+
+
+#: ASCII characters per token. English prose and code measured 4.5-4.7; dense
+#: JSON measured 3.0, because structure (`{"role":"toolResult",...}`) costs
+#: tokens that carry no bytes of payload. 4 is the middle of that band.
+ASCII_BYTES_PER_TOKEN = 4
+
+#: Tokens per non-ASCII character. Measured 0.75 (o200k Chinese) to 1.44
+#: (cl100k Chinese code comments). One token per character keeps CJK from being
+#: charged as if it were English, which is the failure this replaced.
+WIDE_CHAR_TOKENS = 1
+
+#: Role markers and separators the chat template adds around each message.
+MESSAGE_OVERHEAD = 10
+
+#: Wrapper tokens the provider adds around a tool schema. Carried over from the
+#: five-call deepseek-flash calibration (9 tools); it is a chat-completions
+#: figure, not a universal one.
+TOOL_DECLARATION_OVERHEAD = 40
 
 
 class TokenCounter(Protocol):
@@ -36,25 +73,16 @@ class TokenCounter(Protocol):
 
     name: str
 
-    def count(self, messages: Sequence[Message]) -> int: ...
-
-
-class TokenizerUnavailable(RuntimeError):
-    """The environment cannot provide a real tokenizer; callers fall back."""
+    def count(self, messages: list[Message]) -> int: ...
 
 
 def wire_text(message: Message) -> str:
     """The message in the shape the provider actually receives.
 
-    Both counters measure this same text, so they stay comparable. It models the
-    chat-completions adapter (the default for every preset except Anthropic);
-    anything provider-specific and absent from that body — thinking blocks,
-    host metadata, the ``timestamp`` — costs nothing here, because it costs
-    nothing there either.
-
-    Measured against real usage, serializing the dataclass instead of this body
-    is what made the byte estimate 3.4x too high: the extra keys and the missing
-    ``{"type":"function"}`` wrappers both push in the wrong direction.
+    Anything provider-specific and absent from the chat-completions body —
+    thinking blocks, host metadata, the ``timestamp`` — costs nothing here,
+    because it costs nothing there either. Tool declarations are included because
+    the adapter really sends them inside the system message.
     """
     if isinstance(message, SystemMessage):
         body = {"role": "system", "content": message.text()}
@@ -70,86 +98,39 @@ def wire_text(message: Message) -> str:
         return json.dumps(asdict(message), ensure_ascii=False, separators=(",", ":"))
 
 
-class ByteTokenCounter:
-    """Conservative fallback: UTF-8 JSON bytes plus per-message overhead.
+def estimate_tokens(text: str) -> int:
+    """Coarse token count for one piece of wire text."""
+    if not text:
+        return 0
+    if text.isascii():
+        return -(-len(text) // ASCII_BYTES_PER_TOKEN)
+    # ``encode("ascii", "ignore")`` drops exactly the non-ASCII characters, so
+    # its length is both the ASCII character count and the ASCII byte count.
+    ascii_bytes = len(text.encode("ascii", "ignore"))
+    wide_chars = len(text) - ascii_bytes
+    return -(-ascii_bytes // ASCII_BYTES_PER_TOKEN) + wide_chars * WIDE_CHAR_TOKENS
 
-    The per-message overhead is constant and messages do not interact, so this
-    counter is exactly additive.
-    """
 
-    name = "utf8_json_bytes_estimate"
+class HeuristicTokenCounter:
+    """Chars-and-bytes heuristic; additive over messages, so selection is linear."""
+
+    name = "wire_tokens_ascii4_wide1"
     additive = True
 
-    def count(self, messages: Sequence[Message]) -> int:
-        return sum(len(wire_text(message).encode("utf-8")) + 8 for message in messages)
-
-
-class BpeTokenCounter:
-    """A real encoder from the model's family, via the optional ``tiktoken``.
-
-    The per-message constant covers role markers and separators that the JSON
-    serialization does not spend tokens on; it keeps the counter additive so
-    turn selection stays linear.
-    """
-
-    additive = True
-    # Wrapper tokens the chat template adds around each message.
-    MESSAGE_OVERHEAD = 4
-    # Per-declaration boilerplate the provider adds around a tool schema that
-    # our JSON body does not model. Calibrated on 5 real deepseek-flash calls
-    # with 9 tools: without it, a first-turn prompt reads 15-17% short, while
-    # later turns (where the same declarations are amortized over more messages)
-    # read 2-8% short. It is a chat-completions figure, not a universal one.
-    TOOL_DECLARATION_OVERHEAD = 40
-
-    def __init__(self, encoding: str = "cl100k_base"):
-        try:
-            import tiktoken
-        except ImportError as error:
-            raise TokenizerUnavailable("tiktoken is not installed") from error
-        try:
-            self._encoder = tiktoken.get_encoding(encoding)
-        except Exception as error:  # cache miss without network, or a bad name
-            raise TokenizerUnavailable(f"tiktoken cannot load {encoding}: {type(error).__name__}") from error
-        self.encoding = encoding
-        self.name = f"tiktoken/{encoding}"
-
-    def count(self, messages: Sequence[Message]) -> int:
+    def count(self, messages: list[Message]) -> int:
         total = 0
         for message in messages:
-            # disallowed_special=() keeps ordinary text that looks like a
-            # special token from raising; the provider would tokenize it too.
-            total += len(self._encoder.encode(wire_text(message), disallowed_special=())) + self.MESSAGE_OVERHEAD
+            total += estimate_tokens(wire_text(message)) + MESSAGE_OVERHEAD
             if isinstance(message, SystemMessage) and message.tools_added:
-                total += self.TOOL_DECLARATION_OVERHEAD * len(message.tools_added)
+                total += TOOL_DECLARATION_OVERHEAD * len(message.tools_added)
         return total
 
 
-# OpenAI-compatible families that use a larger vocabulary. Everything else is
-# closer to cl100k; the choice only has to be within the acceptance band, and it
-# is recorded by name in the snapshot either way.
-O200K_PREFIXES = ("gpt-4o", "gpt-4.1", "gpt-5", "o1", "o3", "o4")
+def select_counter(model: Model) -> TokenCounter:
+    """One estimate for every model; the provider's own count corrects it later.
 
-
-def encoding_for(model_id: str) -> str:
-    lowered = model_id.strip().lower()
-    return "o200k_base" if lowered.startswith(O200K_PREFIXES) else "cl100k_base"
-
-
-def select_counter(model: Model, env: Mapping[str, str] | None = None) -> TokenCounter:
-    """Pick a counter for this model; fall back to bytes and say so once.
-
-    ``CHAGENT_TOKENIZER`` overrides the choice: ``bytes`` forces the fallback,
-    any other value is treated as a ``tiktoken`` encoding name.
+    ``model`` is accepted so call sites do not have to know that the choice has
+    stopped depending on the model family, and so a future encoder can be
+    selected here without touching them.
     """
-    values = os.environ if env is None else env
-    choice = values.get("CHAGENT_TOKENIZER", "").strip().lower()
-    if choice in {"bytes", "off", "none"} or model.api == "fake":
-        return ByteTokenCounter()
-    try:
-        return BpeTokenCounter(choice or encoding_for(model.id))
-    except TokenizerUnavailable as error:
-        # Visible on stderr, never in the transcript: the snapshot already says
-        # which counter was used.
-        print(f"Tokenizer: bytes (fallback; {error})", file=sys.stderr)
-        return ByteTokenCounter()
+    return HeuristicTokenCounter()

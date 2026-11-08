@@ -20,6 +20,7 @@ from psycopg.conninfo import conninfo_to_dict
 from chagent.config import Settings
 from chagent.config import dotenv
 from chagent.context.tokens import select_counter
+from chagent.domain.context import DEFAULT_OUTPUT_RESERVATION, ContextPolicy
 from chagent.diagnostics.behavior import describe as describe_behavior
 from chagent.domain.summaries import CompactionPolicy
 from chagent.models.settings import ModelConfigurationError, ModelSettings
@@ -45,9 +46,9 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
         sections["budgets"] = (f"context_window={model.context_window} max_tokens={model.max_tokens} "
                                f"request_timeout={model.request_timeout:g} run_timeout={model.run_timeout:g} "
                                f"retries={model.retry_attempts}")
-        # Which counter is in effect decides when compaction triggers; a fallback
-        # here is invisible in every other output.
-        sections["tokenizer"] = select_counter(model.model(), env).name
+        # Which counter is in effect decides when compaction triggers; it is the
+        # only place the estimator shows up in a configuration dump.
+        sections["tokenizer"] = select_counter(model.model()).name
     except ModelConfigurationError as error:
         problems.append(f"model: {error}")
     if settings is not None:
@@ -78,7 +79,28 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
                                   f"keep_recent={compaction.keep_recent_ratio:g} "
                                   f"summary_tokens={compaction.max_summary_tokens} "
                                   f"max_calls={compaction.max_calls} timeout={compaction.timeout:g} "
-                                  f"max_per_run={compaction.max_compactions_per_run}")
+                                  f"max_per_run={compaction.max_compactions_per_run} "
+                                  f"speculative={str(compaction.speculative).lower()}"
+                                  + (f"/{compaction.speculative_trigger:g}" if compaction.speculative else "")
+                                  + f" fresh_window={compaction.fresh_window}")
+    try:
+        context_policy = ContextPolicy.from_env(env)
+        # The reserved amount is what the request actually asks for, which is not
+        # CHAGENT_MAX_TOKENS once there is a calibrated ceiling: printing only the
+        # ceiling would misreport the budget this process will use.
+        reserved = (context_policy.reservation(model.model()) if model is not None
+                    else context_policy.output_tokens or DEFAULT_OUTPUT_RESERVATION)
+        ceiling = context_policy.output_tokens or (
+            f"min(max_tokens, {DEFAULT_OUTPUT_RESERVATION})" if model is not None
+            else DEFAULT_OUTPUT_RESERVATION)
+        sections["context"] = (f"output_reserved={reserved} of {ceiling} "
+                               f"safety={context_policy.safety_tokens} "
+                               f"max_history={context_policy.max_history_messages} "
+                               f"max_tool_result={context_policy.max_tool_result_tokens}")
+    except ValueError as error:
+        problems.append(f"context: {error}")
+    if settings is not None:
+        sections["tools"] = f"deferred={str(settings.deferred_tools).lower()}"
     sections["env_file"] = (f"{env_file.resolve()} ({len(file_env)} keys)" if file_env
                             else f"none ({env_file})")
     sections["shadowed"] = dotenv.describe(dotenv.shadowed(env, file_env))

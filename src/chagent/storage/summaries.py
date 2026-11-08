@@ -57,11 +57,16 @@ class SummaryRepository:
             )
             return [self._summary(row) for row in await cursor.fetchall()]
 
-    async def save(self, summary: SessionSummary, run_id: UUID, *, completed_event: JsonObject | None = None) -> SessionSummary:
+    async def save(self, summary: SessionSummary, run_id: UUID, *, completed_event: JsonObject | None = None,
+                   post_run_token: UUID | None = None) -> SessionSummary:
         async with self.database.transaction() as connection:
             # One gate: it validates the owner, locks the run row and returns
             # the columns the checkpoint needs, so the run is not read twice.
-            run = await RunRepository(self.database).check_owner(connection, run_id)
+            # ``post_run_token`` selects the gate for the writer that finished the
+            # run and is compacting it afterwards; the checks below are identical.
+            runs = RunRepository(self.database)
+            run = (await runs.check_owner(connection, run_id) if post_run_token is None
+                   else await runs.check_finished_owner(connection, run_id, post_run_token))
             if run["session_id"] != summary.session_id:
                 raise StateConflictError("Compaction run belongs to another session")
             await connection.execute("SELECT id FROM sessions WHERE id = %s FOR UPDATE", (summary.session_id,))
@@ -133,6 +138,36 @@ class SummaryRepository:
         if completed_event is not None:
             self.database.notifications.notify(run_id)
         return summary
+
+    async def record_calls(self, run_id: UUID, records, *, post_run_token: UUID | None = None) -> None:
+        """Insert summarization calls that were captured off the critical path.
+
+        The rows are written already terminal, because by adoption time they are.
+        The same ownership gate as ``start_call`` decides whether they may exist,
+        so a lost lease cannot attach audit rows to a run someone else owns. A
+        post-turn pass names its own token instead, because by then the run is
+        completed — the calls still belong to it, and their cost stays visible.
+        """
+        records = [record for record in records if record.response is not None or record.error is not None]
+        if not records:
+            return
+        token = post_run_token if post_run_token is not None else self.database.run_owners.get(run_id)
+        # One writer, expressed for whichever state the run is in. The fragment is
+        # a constant: no caller input reaches it.
+        gate = ("r.status = 'completed' AND r.owner_token = %s" if post_run_token is not None
+                else "r.status = 'running' AND r.owner_token = %s AND r.lease_expires_at > clock_timestamp()")
+        async with self.database.transaction() as connection:
+            for record in records:
+                cursor = await connection.execute(
+                    "INSERT INTO compaction_calls (id, compaction_id, run_id, iteration, status, request, response, error, duration_ms, ended_at) "
+                    "SELECT %s, %s, r.id, %s, %s, %s, %s, %s, %s, now() FROM runs r "
+                    "WHERE r.id = %s AND " + gate,
+                    (uuid4(), record.compaction_id, record.iteration, record.status, Jsonb(asdict(record.request)),
+                     Jsonb(message_to_dict(record.response)) if record.response else None,
+                     record.error, record.duration_ms, run_id, token),
+                )
+                if cursor.rowcount == 0:
+                    raise RunOwnershipLost("Run ownership lost or lease expired")
 
     async def start_call(self, compaction_id: UUID, run_id: UUID, iteration: int, request: ModelRequest) -> UUID:
         identity = uuid4()

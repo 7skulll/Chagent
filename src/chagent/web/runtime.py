@@ -19,6 +19,7 @@ from chagent.sessions.errors import SessionNotFoundError
 from chagent.sessions.manager import SessionManager
 from chagent.storage.approvals import ApprovalRepository
 from chagent.web.policy import validate_web_runner
+from chagent.storage.workspace_identity import ensure_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -120,10 +121,7 @@ class WebRuntime:
             return identity
         if root not in self._workspace_ids:
             async with self.runner.conversations.database.connection() as connection:
-                cursor = await connection.execute(
-                    "INSERT INTO workspaces (id, root_path) VALUES (%s, %s) ON CONFLICT (root_path) "
-                    "DO UPDATE SET root_path = EXCLUDED.root_path RETURNING id", (uuid4(), str(root)))
-                self._workspace_ids[root] = (await cursor.fetchone())["id"]
+                self._workspace_ids[root] = await ensure_workspace(connection, root)
         return self._workspace_ids[root]
 
     async def memory_scope(self, raw: str | None):
@@ -242,6 +240,10 @@ class WebRuntime:
             if not task.cancelling():
                 task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
+        # A post-turn pass belongs to a run that already answered, so it is not
+        # cancelled above; give it a bounded chance to land before the pool goes.
+        if self.runner.context_manager is not None:
+            await self.runner.context_manager.drain_post_turn()
         # Queued jobs survive shutdown: an interrupted job is returned to the
         # queue and picked up by the next process.
         if getattr(self.runner, "memory_worker", None) is not None:

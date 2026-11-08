@@ -125,5 +125,38 @@ export function createMemoryView(ui) {
     } catch (error) { memoryNotice(error.message, true); }
   });
 
-  return {loadMemories};
+  // Task history is derived evidence, not memory: it is shown with its sources
+  // and it never enters the model's context on its own.
+  async function loadTaskHistory() {
+    const list = $("task-history-list");
+    if (!list.hidden) { list.hidden = true; return; }
+    try {
+      const page = await api(scoped("/api/task-history"));
+      list.replaceChildren(textNode("p", "以下是历史任务线索；项目现状请重新核实。", "muted"));
+      if (!page.items.length) list.append(textNode("p", "暂无任务经历。", "muted"));
+      for (const item of page.items) {
+        const card = document.createElement("article");
+        card.className = "memory-card";
+        card.append(textNode("div", item.request_excerpt, "memory-body"));
+        const open = textNode("button", "查看来源与结果", "quiet");
+        on(open, "click", async () => {
+          try {
+            const detail = await api(scoped(`/api/task-history/${item.run_id}`));
+            card.append(textNode("pre", JSON.stringify({session_id: detail.session_id,
+              user_message_id: detail.user_message_id, answer_message_id: detail.answer_message_id,
+              run_outcome: detail.run_outcome, task_completion: detail.task_completion,
+              task_state: detail.task_state, request: detail.request_detail,
+              answer: detail.answer_detail}, null, 2)));
+            open.remove();
+          } catch (error) { memoryNotice(error.message, true); }
+        });
+        card.append(open);
+        list.append(card);
+      }
+      list.hidden = false;
+    } catch (error) { memoryNotice(error.message, true); }
+  }
+  on($("task-history-button"), "click", () => loadTaskHistory());
+
+  return {loadMemories, loadTaskHistory};
 }

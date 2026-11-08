@@ -93,7 +93,8 @@ async def _run(
                                         wall_timeout=settings.run_wall_timeout,
                                         approval_decider=local_approver(), approval_remote=False,
                                         process_wall_timeout=settings.process_timeout,
-                                        max_processes=settings.max_processes, web=web)
+                                        max_processes=settings.max_processes, web=web,
+                                        defer_tools=settings.deferred_tools)
         else:
             assert client is not None
             runner = create_runner(database, model_settings.model(), client,
@@ -148,6 +149,10 @@ async def _run(
             remaining = await worker.jobs.unfinished()
             if remaining:
                 print(f"Memory: {remaining} extraction job(s) still open; they resume on the next run.")
+        # Same rule for a post-turn checkpoint: a one-shot process must not exit
+        # while a summary it already paid for is still being written.
+        if runner.context_manager is not None:
+            await runner.context_manager.drain_post_turn()
         history = await runner.conversations.messages(session_id)
         events = await runner.runs.events(result.run_id)
         print(f"Persisted: {len(history)} messages; {len(events)} events in this run.")
