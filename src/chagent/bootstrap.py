@@ -166,6 +166,9 @@ def create_runner(
     containerized: bool = False,
     host_exec: tuple[str, str] | None = None,
     native_host_exec: bool = False,
+    #: Harness default is off so diagnostics and tests stay deterministic; the
+    #: product entry points pass the configured value (Settings default: remind).
+    require_verification: str = "off",
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -202,6 +205,7 @@ def create_runner(
         wall_timeout=wall_timeout,
         max_turns=max_turns,
         max_tool_concurrency=max_tool_concurrency,
+        require_verification=require_verification,
     )
     # Approval questions are asked by the scheduler before it takes execution
     # resources; the broker owns the wait and the single-use grant.

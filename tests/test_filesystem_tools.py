@@ -24,6 +24,33 @@ class FilesystemToolTests(unittest.IsolatedAsyncioTestCase):
     async def call(self, name, **arguments):
         return await self.executor.execute(ToolCall("test-call", name, arguments), context=self.context)
 
+    async def test_write_creates_missing_parent_directories(self):
+        """B6：写文件不该要求先单独调一次 create_directory。
+
+        实测：模型写 `semis-ai-dashboard/server.py` 时目录还不存在，一次
+        FileNotFoundError 报销了一个半小时里的一轮。
+        """
+        written = await self.call("write_file", path="pkg/src/app.py", content="print(1)\n")
+        self.assertFalse(written.is_error, written.content[0].text)
+        self.assertEqual((self.workspace / "pkg" / "src" / "app.py").read_text(), "print(1)\n")
+
+    async def test_write_refuses_symlinked_parent(self):
+        """自动建目录不能绕过 O_NOFOLLOW：符号链接组件仍然拒绝。
+
+        工具把异常折成错误结果（不抛出），所以断言落在结果与磁盘上。
+        """
+        outside = self.root / "outside"
+        outside.mkdir()
+        os.symlink(outside, self.workspace / "link")
+        refused = await self.call("write_file", path="link/escaped.txt", content="x")
+        self.assertTrue(refused.is_error)
+        self.assertFalse((outside / "escaped.txt").exists())
+
+    async def test_write_still_rejects_traversal(self):
+        refused = await self.call("write_file", path="../escaped.txt", content="x")
+        self.assertTrue(refused.is_error)
+        self.assertFalse((self.root / "escaped.txt").exists())
+
     async def test_create_read_edit_and_sha_guard(self):
         original = "第一行\nsecond line\n"
         created = await self.call("write_file", path="notes.txt", content=original)

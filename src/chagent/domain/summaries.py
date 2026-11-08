@@ -10,6 +10,21 @@ from uuid import UUID
 from chagent.domain.usage import Usage
 
 
+#: A compaction buys roughly twelve turns of headroom at the default budget
+#: (measured on a real 43-call run: one compaction every ~14 turns). A fixed
+#: quota of four is therefore a cliff for a long run: past it, history is dropped
+#: silently instead of summarized, which is exactly when summarization matters.
+TURNS_PER_COMPACTION = 12
+MIN_COMPACTIONS_PER_RUN = 4
+
+
+def compactions_for_turns(max_turns: int | None) -> int:
+    """Per-run compaction quota that scales with the turn budget."""
+    if not max_turns or max_turns < 1:
+        return MIN_COMPACTIONS_PER_RUN
+    return max(MIN_COMPACTIONS_PER_RUN, math.ceil(max_turns / TURNS_PER_COMPACTION))
+
+
 @dataclass(frozen=True, slots=True)
 class CompactionPolicy:
     enabled: bool = True
@@ -36,11 +51,14 @@ class CompactionPolicy:
             raise ValueError("Retained tool results must be an integer between 0 and 64")
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> "CompactionPolicy":
+    def from_env(cls, env: Mapping[str, str] | None = None, *, max_turns: int | None = None) -> "CompactionPolicy":
         values = os.environ if env is None else env
         enabled = values.get("CHAGENT_COMPACTION_ENABLED", "true").lower()
         if enabled not in {"true", "false"}:
             raise ValueError("CHAGENT_COMPACTION_ENABLED must be true or false")
+        # Absent the override, the quota follows the turn budget; setting the
+        # variable pins it, so an operator can still say "exactly four".
+        per_run = values.get("CHAGENT_COMPACTION_MAX_PER_RUN")
         try:
             return cls(enabled=enabled == "true",
                        trigger_ratio=float(values.get("CHAGENT_COMPACTION_TRIGGER", "0.8")),
@@ -48,7 +66,8 @@ class CompactionPolicy:
                        max_summary_tokens=int(values.get("CHAGENT_COMPACTION_SUMMARY_TOKENS", "2048")),
                        max_calls=int(values.get("CHAGENT_COMPACTION_MAX_CALLS", "8")),
                        timeout=float(values.get("CHAGENT_COMPACTION_TIMEOUT", "60")),
-                       max_compactions_per_run=int(values.get("CHAGENT_COMPACTION_MAX_PER_RUN", "4")),
+                       max_compactions_per_run=(int(per_run) if per_run
+                                                else compactions_for_turns(max_turns)),
                        retained_tool_results=int(values.get("CHAGENT_COMPACTION_RETAINED_TOOL_RESULTS", "2")))
         except (ValueError, OverflowError):
             raise ValueError("Invalid compaction configuration") from None

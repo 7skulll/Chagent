@@ -342,3 +342,20 @@ class ApprovalBatchTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class WriteBatchingPromptTests(unittest.TestCase):
+    """B7：跨轮次的写入无法合并，所以提示必须要求同一步的写入进同一个响应。
+
+    实测：一次 run 的 4 张写审批卡全部 batch_size=1，因为它们分属 4 个轮次。
+    批次机制本身没问题（同一响应的 3 个写入只问一次，见上面的测试），能改的
+    只有让模型把同一步的写入放进同一轮。
+    """
+
+    def test_prompt_asks_for_one_response_per_step(self):
+        from chagent.context.builder import TOOLS_SECTION
+        self.assertIn("same response", TOOLS_SECTION)
+        self.assertIn("approval question", TOOLS_SECTION)
+
+
+if __name__ == "__main__":
+    unittest.main()

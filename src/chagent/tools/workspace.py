@@ -78,6 +78,43 @@ class WorkspaceFS:
         finally:
             os.close(descriptor)
 
+    def makedirs(self, path: str) -> None:
+        """Create ``path`` and any missing component, inside the workspace.
+
+        ``write_file`` used to fail with FileNotFoundError when the model wrote
+        ``pkg/src/app.py`` before creating ``pkg/src``. That error told the model
+        nothing it could not already have known, and it cost a whole turn; the
+        tool's job is the file, not the ceremony. Components are created one level
+        at a time relative to an open descriptor, so a symlinked component is
+        refused exactly like every other path here.
+        """
+        self._mkdirs(self.parts(path))
+
+    def _mkdirs(self, parts: tuple[str, ...]) -> None:
+        if not parts:
+            return
+        if validate_workspace(self.logical_root) != self.root:
+            raise PermissionError("Workspace path changed")
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        descriptor = os.open(self.root, flags)
+        try:
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) != self.identity:
+                raise PermissionError("Workspace directory was replaced")
+            for part in parts:
+                try:
+                    next_descriptor = os.open(part, flags, dir_fd=descriptor)
+                except FileNotFoundError:
+                    try:
+                        os.mkdir(part, 0o700, dir_fd=descriptor)
+                    except FileExistsError:  # another writer created it first
+                        pass
+                    next_descriptor = os.open(part, flags, dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = next_descriptor
+        finally:
+            os.close(descriptor)
+
     @contextmanager
     def parent(self, path: str):
         parts = self.parts(path)
@@ -108,6 +145,9 @@ class WorkspaceFS:
     ) -> str:
         if len(data) > limit:
             raise ValueError(f"Content exceeds the {limit} byte limit")
+        # Creating the parents is part of writing the file; failing here would
+        # only cost the model a turn to call create_directory and retry.
+        self._mkdirs(self.parts(path)[:-1])
         with self.parent(path) as (parent, name):
             mode = 0o600
             try:

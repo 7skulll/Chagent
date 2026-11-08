@@ -64,7 +64,9 @@ TOOLS_SECTION = (
     "what you need; if edit_file is available, batch related edits and verify once. If "
     "create_file is available and a file is requested, write complete content under a "
     "descriptive filename. Independent calls belong in one response: send reads and searches "
-    "together when they do not depend on each other; dependent calls stay sequential."
+    "together when they do not depend on each other; dependent calls stay sequential. "
+    "Writing or editing several files for one step belongs in one response too: writes in the "
+    "same response share a single approval question, writes in separate turns ask again."
 )
 
 # The tool list alone is a weak signal: a model that cannot find ``exec_command``

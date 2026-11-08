@@ -14,6 +14,7 @@ from psycopg_pool import PoolTimeout
 from chagent.boundaries import validate_workspace
 from chagent.agent.budget import RunBudget
 from chagent.agent.types import FinishDecision, RunState
+from chagent.agent.verification import NUDGE as VERIFICATION_NUDGE, mutations, verified
 from chagent.agent.stream_writer import TextStreamWriter
 from chagent.agent.turn_note import turn_note
 from chagent.context.builder import ContextBudgetError, ContextBuilder
@@ -70,10 +71,14 @@ class AgentRunner:
         memory_service: MemoryService | None = None,
         max_tool_concurrency: int = 4,
         memory_worker=None,
+        require_verification: str = "off",
     ):
         if max_turns < 1 or not math.isfinite(timeout) or timeout <= 0 or (wall_timeout is not None and
                 (not math.isfinite(wall_timeout) or wall_timeout <= 0)):
             raise ValueError("Run limits must be positive and finite")
+        if require_verification not in {"off", "remind"}:
+            raise ValueError("require_verification must be off or remind")
+        self.require_verification = require_verification
         self.model = model
         self.client = client
         self.context = context
@@ -380,6 +385,14 @@ class AgentRunner:
                         "workspace's Docker container. host_exec runs a command on the user's computer and "
                         "needs one page approval per request; a native process started with yield_time_ms is "
                         "managed with host_process, where every stdin write needs its own approval. "
+                        # Verified on the live deployment: exec and the site share one
+                        # network namespace (127.0.0.1:8000 and the proxy both answer
+                        # from inside). A model that reads a connection refusal as
+                        # "isolated networks" spends calls proving a false hypothesis.
+                        "A site started with site() runs in this same container: commands can reach it on "
+                        "its listen port at 127.0.0.1:<port>, and site(probe) goes through the loopback URL "
+                        "the user opens. A refused connection means the process is not listening yet — "
+                        "check site(status) or site(logs) rather than assuming the networks are separate. "
                         "Maven, Java and Node are installed. Do not use nohup."
                     )
                 else:
@@ -458,14 +471,24 @@ class AgentRunner:
             # turn from the last one it will get. The transcript renderer merges
             # consecutive user-role messages, so on the wire this rides with the
             # tool result as a second part rather than as a new turn.
+            #
+            # The verification nudge goes first and the scheduling note second,
+            # so an over-budget request drops the note (advice) before the nudge
+            # (the reason this turn exists).
+            extras: list[UserMessage] = []
+            if state.pending_note:
+                extras.append(UserMessage(state.pending_note, time_ns() // 1_000_000))
+                state.pending_note = None
             if iteration:
-                messages = built.request.messages
-                messages.append(UserMessage(turn_note(iteration, self.max_turns), time_ns() // 1_000_000))
-                # Selection sized this request to fit, and compaction may have
-                # just run. A few dozen tokens of advice is not worth pushing
-                # the request past the window, so the note yields.
-                if not self._note_fits(messages):
-                    messages.pop()
+                extras.append(UserMessage(turn_note(iteration, self.max_turns), time_ns() // 1_000_000))
+            messages = built.request.messages
+            messages.extend(extras)
+            # Selection sized this request to fit, and compaction may have just
+            # run. A few dozen tokens of advice is not worth pushing the request
+            # past the window, so the notes yield.
+            while extras and not self._note_fits(messages):
+                messages.pop()
+                extras.pop()
             model_call_id = await self.runs.start_model_call(run_id, iteration, built)
             # Local outbound metadata is deliberately absent from the stored
             # model-call request, which remains an audit of the raw transcript.
@@ -486,6 +509,9 @@ class AgentRunner:
             if not calls:
                 if message.stop_reason != "stop":
                     raise RunExecutionError("Model requested tools but supplied no calls", "model_protocol_error")
+                if await self._verify_gate(state, iteration):
+                    # One more turn: the nudge rides in as a trailing message.
+                    continue
                 decision = decide_next_step([])
                 return RunResult(run_id, session_id, message, decision.reason)
             if message.stop_reason != "toolUse":
@@ -506,6 +532,35 @@ class AgentRunner:
             if decision.action == "complete":
                 return RunResult(run_id, session_id, None, decision.reason, batch.messages)
         raise RunExecutionError("Maximum model turns exceeded", "turn_limit")
+
+    async def _verify_gate(self, state: RunState, iteration: int) -> bool:
+        """Ask for one verification turn; True means "continue the loop".
+
+        The rule is deliberately mechanical so it can be audited: this run
+        rewrote workspace files, and no check of the result succeeded. What
+        counts as a check is a fixed list (``agent/verification.py``), not a
+        judgement about the task, so the same transcript always produces the
+        same answer.
+        """
+        if self.require_verification == "off":
+            return False
+        changed = mutations(state.history)
+        if not changed or verified(state.history):
+            return False
+        # No turns left to spend, or already asked once: record the fact and let
+        # the run end. Nagging past one attempt costs the user a turn each time
+        # and cannot change the outcome.
+        if state.verification_nudged or iteration >= self.max_turns - 1:
+            await self.runs.event(state.run_id, "verification_missing", {
+                "mutations": changed, "nudged": state.verification_nudged, "iteration": iteration,
+            })
+            return False
+        state.verification_nudged = True
+        state.pending_note = VERIFICATION_NUDGE
+        await self.runs.event(state.run_id, "verification_required", {
+            "mutations": changed, "iteration": iteration,
+        })
+        return True
 
     async def _response(self, run_id: UUID, request: ModelRequest) -> AssistantMessage:
         async def save(delta: str, count: int):

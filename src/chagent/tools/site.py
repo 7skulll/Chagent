@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from pathlib import Path, PosixPath
 from time import monotonic
 
 import httpx
@@ -21,17 +22,24 @@ class SiteTool(AgentTool):
         super().__init__(name="site", label="Manage local website",
             description="Start, inspect, stop or HTTP-check a website in this workspace's Docker container. "
                         "Start persists across agent runs; supply the command and its actual listen port. "
+                        "Start returns only once the site answers; a cold request may still be slow. "
+                        "probe takes timeout_s (default 20) for endpoints that fan out before answering. "
                         "The returned 127.0.0.1 URL works in the user's browser. Inspect status and HTTP response before claiming success.",
             parameters={"type": "object", "properties": {
                 "action": {"type": "string", "enum": ["start", "status", "stop", "probe", "logs"]},
                 "command": {"type": "string", "minLength": 1, "maxLength": 32768},
                 "workdir": {"type": "string", "minLength": 1},
                 "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-                "path": {"type": "string", "maxLength": 1000}},
+                "path": {"type": "string", "maxLength": 1000},
+                # A cold first request may fan out to an upstream API before it
+                # answers; 10 s was too tight in a real run.
+                "timeout_s": {"type": "integer", "minimum": 1, "maximum": 45}},
                 "required": ["action"], "additionalProperties": False},
             requires_workspace=True, requires_host_execution=True)
 
     def execution_timeout(self, params):
+        # Must outlast a probe's own timeout, or the tool is killed before it can
+        # report why it failed.
         return 60.0
 
     async def _state(self, name: str):
@@ -65,30 +73,70 @@ class SiteTool(AgentTool):
                 state["state"] = "stopped"
         return state
 
+    @staticmethod
+    async def _answering(url: str) -> bool:
+        """True once the forwarded site answers at all, whatever the status.
+
+        Any HTTP answer — including 404 — proves the child process bound its port;
+        only a transport failure means "still importing".
+        """
+        try:
+            async with httpx.AsyncClient(timeout=3, trust_env=False, follow_redirects=False) as client:
+                await client.get(url + "/")
+            return True
+        except httpx.HTTPError:
+            return False
+
     async def _port(self, name: str) -> int:
         code, output = await self.sandbox._docker("port", name, "18080/tcp")
         if code:
             raise RuntimeError("Workspace container has no host loopback port")
         return int(output.strip().rsplit(":", 1)[1])
 
-    async def _save(self, workspace, name, command, internal_port, host_port, status):
+    async def _save(self, workspace, name, command, internal_port, host_port, status, workdir=None):
+        """Persist the service row; ``workdir=None`` keeps the stored directory.
+
+        The container's state file records the directory too, but it lives inside
+        the container: a recreated container loses it, and a restart then fell
+        back to "." — the workspace root — where ``python3 server.py`` does not
+        exist. The row is the durable copy.
+        """
         async with self.database.connection() as connection:
             cursor = await connection.execute("SELECT id FROM workspaces WHERE root_path=%s", (str(workspace),))
             row = await cursor.fetchone()
             if row is None:
                 raise RuntimeError("Workspace identity is missing")
             await connection.execute(
-                "INSERT INTO workspace_services (workspace_id, container_name, command, internal_port, host_port, status) "
-                "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (workspace_id) DO UPDATE SET "
+                "INSERT INTO workspace_services (workspace_id, container_name, command, internal_port, host_port, status, workdir) "
+                "VALUES (%s,%s,%s,%s,%s,%s,COALESCE(%s, '.')) ON CONFLICT (workspace_id) DO UPDATE SET "
                 "container_name=EXCLUDED.container_name, command=EXCLUDED.command, "
                 "internal_port=EXCLUDED.internal_port, host_port=EXCLUDED.host_port, "
-                "status=EXCLUDED.status, updated_at=now()",
-                (row["id"], name, command, internal_port, host_port, status))
+                "status=EXCLUDED.status, workdir=COALESCE(%s, workspace_services.workdir), updated_at=now()",
+                (row["id"], name, command, internal_port, host_port, status, workdir, workdir))
+
+    async def _saved_workdir(self, workspace) -> str | None:
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT s.workdir FROM workspace_services s JOIN workspaces w ON w.id = s.workspace_id "
+                "WHERE w.root_path = %s", (str(workspace),))
+            row = await cursor.fetchone()
+            return (row["workdir"] if row else None) or None
+
+    @staticmethod
+    def _relative_workdir(workspace: Path, value) -> str | None:
+        """One format in the row: workspace-relative, whatever the state file says."""
+        if not value:
+            return None
+        try:
+            return Path(value).resolve().relative_to(Path(workspace).resolve()).as_posix()
+        except ValueError:
+            return None
 
     async def _reconcile(self, workspace, name, host_port, current):
         if current is not None:
             await self._save(workspace, name, current.get("command", ""),
-                             current.get("actual_port", 1), host_port, current.get("state", "unknown"))
+                             current.get("actual_port", 1), host_port, current.get("state", "unknown"),
+                             workdir=self._relative_workdir(workspace, current.get("workdir")))
             return
         async with self.database.connection() as connection:
             await connection.execute(
@@ -156,7 +204,10 @@ class SiteTool(AgentTool):
             if current and current.get("state") in {"running", "starting"}:
                 return AgentToolResult(content=[TextContent("A website is already running; inspect or stop it first.")],
                                        is_error=True, details={"url": url, "service": current})
-            parts = fs.parts(params.get("workdir") or (current or {}).get("workdir", "."))
+            # Order: this call, the container's state file, then the durable row.
+            requested = (params.get("workdir") or (current or {}).get("workdir")
+                         or await self._saved_workdir(fs.root) or ".")
+            parts = fs.parts(requested)
             with fs.directory(parts):
                 pass
             cwd = fs.root.joinpath(*parts)
@@ -169,14 +220,24 @@ class SiteTool(AgentTool):
                 "--port", str(port), "--command", command)
             if code:
                 raise RuntimeError("Could not start website: " + output[-400:])
-            await self._save(fs.root, name, command, port, host_port, "starting")
+            # Store it workspace-relative: the row survives a remount, an absolute
+            # container path does not.
+            await self._save(fs.root, name, command, port, host_port, "starting",
+                             workdir=PosixPath(*parts).as_posix() if parts else ".")
             deadline = monotonic() + 30
             while monotonic() < deadline:
                 await asyncio.sleep(0.5)
                 current = await self._state(name)
+                # ``running`` is the worker's own proxy listening, not the site
+                # answering. Returning on that signal is what produced
+                # ``HTTP probe failed: ReadTimeout`` in a real run: the probe hit
+                # the proxy inside the startup gap and the proxy dropped the
+                # connection because the upstream had not bound yet.
                 if current and current.get("state") == "running":
+                    if not await self._answering(url):
+                        continue
                     await self._save(fs.root, name, command, port, host_port, "running")
-                    return AgentToolResult(content=[TextContent(f"Website process started. URL: {url}. Call site(probe) to verify HTTP content.")],
+                    return AgentToolResult(content=[TextContent(f"Website started and answering. URL: {url}. Call site(probe) to verify content.")],
                         details={"url": url, "service": current, "container": name,
                                  "log": f"docker:{name}:/cache/site/chagent-site.log"})
                 if current and current.get("state") in {"stopped", "failed", "unknown"}:
@@ -189,15 +250,29 @@ class SiteTool(AgentTool):
             path = params.get("path", "/")
             if not path.startswith("/") or path.startswith("//"):
                 raise ValueError("HTTP path must start with one slash")
+            timeout = params.get("timeout_s", 20)
+            started = monotonic()
             try:
-                async with httpx.AsyncClient(timeout=10, trust_env=False, follow_redirects=False) as client:
+                async with httpx.AsyncClient(timeout=timeout, trust_env=False, follow_redirects=False) as client:
                     response = await client.get(url + path)
-                body = response.text[:2000]
-                result = {"url": url + path, "status_code": response.status_code,
-                          "body": body, "service": current}
-                return AgentToolResult(content=[TextContent(json.dumps(result, ensure_ascii=False))],
-                    details=result, is_error=response.status_code >= 400)
+            except httpx.TimeoutException:
+                # A bare "ReadTimeout" tells the model nothing it can act on: it
+                # retried the same call in a real run and only then hit the cache.
+                # Name the budget, the elapsed time, and the two ways forward.
+                elapsed = monotonic() - started
+                return AgentToolResult(content=[TextContent(
+                    f"HTTP probe did not answer within {timeout}s (waited {elapsed:.1f}s): {url}{path}. "
+                    "The connection was accepted, so the site is up; a cold first request can be slower "
+                    "than one page load. Raise timeout_s (max 45) for a heavy endpoint, or read "
+                    "site(logs) to see what the process is doing before deciding.")],
+                    details={"url": url + path, "service": current, "timeout_s": timeout,
+                             "elapsed_s": round(elapsed, 1)}, is_error=True)
             except httpx.HTTPError as error:
                 return AgentToolResult(content=[TextContent(f"HTTP probe failed: {type(error).__name__}")],
                                        details={"url": url + path, "service": current}, is_error=True)
+            body = response.text[:2000]
+            result = {"url": url + path, "status_code": response.status_code,
+                      "body": body, "service": current}
+            return AgentToolResult(content=[TextContent(json.dumps(result, ensure_ascii=False))],
+                                   details=result, is_error=response.status_code >= 400)
         raise ValueError("Unknown website action")

@@ -105,6 +105,7 @@ async def _run(
                                    unified=settings.axes.executable,
                                    containerized=settings.axes.boundary == "container",
                                    process_stdin=False,
+                                   require_verification=settings.require_verification,
                                    timeout=model_settings.run_timeout, max_turns=settings.max_turns,
                                    max_tool_concurrency=settings.max_tool_concurrency,
                                    memory_worker_concurrency=settings.memory_worker_concurrency,
@@ -123,7 +124,7 @@ async def _run(
         if model_settings is not None:
             print(f"Resolved: {model_settings.describe()}", flush=True)
         # Report the actual command switch after the container check.
-        print(f"Behavior: {describe_behavior(replace(settings, allow_host_commands=host_commands), CompactionPolicy.from_env(), runner.context.counter.name)}", flush=True)
+        print(f"Behavior: {describe_behavior(replace(settings, allow_host_commands=host_commands), CompactionPolicy.from_env(max_turns=settings.max_turns), runner.context.counter.name)}", flush=True)
         for warning in describe_warnings(settings):
             print(f"Warning: {warning}", flush=True)
         result = await runner.run(session_id, text)

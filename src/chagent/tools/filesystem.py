@@ -199,7 +199,7 @@ def read_document(filesystem: WorkspaceFS, path: str, offset: int, limit: int) -
 
 class WriteFileTool(FileTool):
     def __init__(self):
-        super().__init__("write_file", "Create a UTF-8 file in an existing workspace directory. Overwrite requires overwrite=true; expected_sha256 detects stale content.", {
+        super().__init__("write_file", "Create a UTF-8 file in the workspace; missing parent directories are created. Overwrite requires overwrite=true; expected_sha256 detects stale content.", {
             "path": PATH_SCHEMA, "content": {"type": "string", "maxLength": 1_048_576},
             "overwrite": {"type": "boolean"}, "expected_sha256": HASH_SCHEMA,
         }, ["path", "content"], read_only=False)

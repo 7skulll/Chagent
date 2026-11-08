@@ -35,6 +35,10 @@ class Settings:
     db_timeout: float = 5.0
     allow_host_commands: bool = False
     max_turns: int = 32
+    #: ``remind`` gives a run one extra turn when it changed workspace files and
+    #: no check of the result succeeded; ``off`` keeps "the model stopped, so it
+    #: is done" as the only completion condition.
+    require_verification: str = "remind"
     max_tool_concurrency: int = 4
     memory_worker_concurrency: int = 1
     # Legacy setting accepted only as "off"; the deployment supplies the boundary.
@@ -191,6 +195,9 @@ class Settings:
         container_declared = values.get("CHAGENT_CONTAINER_DECLARED", "false").lower()
         if container_declared not in {"true", "false"}:
             raise ValueError("CHAGENT_CONTAINER_DECLARED must be true or false")
+        require_verification = values.get("CHAGENT_REQUIRE_VERIFICATION", "remind").strip().lower()
+        if require_verification not in {"off", "remind"}:
+            raise ValueError("CHAGENT_REQUIRE_VERIFICATION must be off or remind")
         return cls(
             execution_profile=values.get("CHAGENT_EXECUTION_PROFILE", "configured").strip().lower(),
             container_declared=container_declared == "true",
@@ -202,6 +209,7 @@ class Settings:
             db_timeout=float(values.get("CHAGENT_DB_TIMEOUT", "5")),
             allow_host_commands=allow_commands == "true",
             max_turns=int(values.get("CHAGENT_MAX_TURNS", "32")),
+            require_verification=require_verification,
             max_tool_concurrency=int(values.get("CHAGENT_MAX_TOOL_CONCURRENCY", "4")),
             memory_worker_concurrency=int(values.get("CHAGENT_MEMORY_WORKER_CONCURRENCY", "1")),
             sandbox=values.get("CHAGENT_SANDBOX", "off").strip().lower(),

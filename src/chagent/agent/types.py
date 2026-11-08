@@ -37,6 +37,11 @@ class RunState:
     # start. It is part of the prompt prefix, so it must not change mid-run.
     environment: str | None = None
     workspace_identity: tuple[int, int] | None = None
+    #: A trailing message the runner wants on the next request (the verification
+    #: nudge). Set and consumed inside one loop iteration; never persisted.
+    pending_note: str | None = None
+    #: One nudge per run: asking twice is nagging, not supervision.
+    verification_nudged: bool = False
 
     @property
     def current_input(self) -> StoredMessage:

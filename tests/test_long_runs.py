@@ -34,7 +34,11 @@ from chagent.tools.context import ToolContext
 # Sized so a 2.4 KB tool result plus the fixed prompt still leaves room for the
 # retained input. The named system sections added ~150 bytes of prefix; the
 # fixture follows the prompt rather than the prompt being trimmed to the fixture.
-LONG_RUN_WINDOW = 14_500
+# 2026-11-06 +700: every tool declaration now states its numeric parameter bounds
+# (tools/base.py:bounds_note), which costs ~160 tokens of fixed prefix. The
+# alternative — trimming the declarations for small windows — would hide a bound
+# exactly where the model has the least room to recover from a rejected call.
+LONG_RUN_WINDOW = 15_200
 
 
 class EmitTool(AgentTool):

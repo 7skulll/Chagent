@@ -169,13 +169,19 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await self.runner.conversations.messages(self.session)), 6)
 
     async def test_small_window_still_runs_in_a_large_workspace(self):
-        """The snapshot must not push a small model over its own context budget."""
+        """The snapshot must not push a small model over its own context budget.
+
+        9216 rather than 8192: tool declarations now carry their numeric bounds,
+        which is ~160 tokens of fixed prefix. The assertion this test exists for
+        is that 60 directories do not enter the prompt — not that the prompt is
+        exactly 8 KiB.
+        """
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             for index in range(60):
                 (root / f"module-{index:03d}-with-a-long-name").mkdir()
             session = await self.runner.conversations.create_session(root)
-            self.runner.model.context_window = 8192
+            self.runner.model.context_window = 9216
             result = await self.runner.run(session, "hello")
         self.assertEqual(result.end_reason, "model_stop")
 

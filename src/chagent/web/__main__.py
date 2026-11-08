@@ -155,7 +155,7 @@ def main():
     try:
         settings = Settings.from_env()
         validate_web_settings(settings)
-        compaction = CompactionPolicy.from_env()
+        compaction = CompactionPolicy.from_env(max_turns=settings.max_turns)
         selected = None if args.demo else ModelSettings.from_env(environment)
         app = create_app(workspace=args.workspace, settings=settings, model_settings=selected,
                          demo=args.demo)

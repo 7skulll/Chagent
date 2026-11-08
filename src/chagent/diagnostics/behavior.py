@@ -26,7 +26,10 @@ def describe(settings: Settings, compaction: CompactionPolicy | None = None,
             # The one path that leaves the machine is worth naming on the same
             # line as the one that confines it.
             f" web={settings.web_access}"
-            f" compaction={'on' if policy.enabled else 'off'}"
+            f" compaction={'on' if policy.enabled else 'off'}/{policy.max_compactions_per_run}per-run"
+            # The completion condition is behaviour too: a run that changed files
+            # without checking them ends differently under each value.
+            f" verify={settings.require_verification}"
             # A session process is the one path that outlives its tool call, so
             # its two limits belong on this line too.
             f" processes={settings.max_processes}/{settings.process_timeout:g}s"

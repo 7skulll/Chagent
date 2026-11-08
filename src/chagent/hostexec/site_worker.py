@@ -22,6 +22,26 @@ def write_status(**values):
     target.replace(STATUS)
 
 
+async def wait_ready(port: int, timeout: float = 25.0) -> bool:
+    """True once the child answers on its own port.
+
+    "running" used to mean "the proxy is bound", which happens several seconds
+    before the site is. The controller checks HTTP as well now, but this file is
+    what every reader trusts, so it must not claim readiness it does not have.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        try:
+            _, writer = await asyncio.open_connection("127.0.0.1", port)
+        except OSError:
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(0.2)
+            continue
+        writer.close()
+        return True
+
+
 async def transfer(reader, writer):
     try:
         while data := await reader.read(65536):
@@ -52,14 +72,25 @@ async def main():
             try:
                 target_reader, target_writer = await asyncio.open_connection("127.0.0.1", args.port)
             except OSError:
+                # Say "not yet" rather than dropping the connection: a silent close
+                # reaches the caller as a read timeout and looks like a hang.
+                try:
+                    client_writer.write(b"HTTP/1.1 503 Service Unavailable\r\n"
+                                        b"Content-Length: 16\r\nConnection: close\r\n\r\n"
+                                        b"site is starting")
+                    await client_writer.drain()
+                except OSError:
+                    pass
                 client_writer.close()
                 return
             await asyncio.gather(transfer(client_reader, target_writer),
                                  transfer(target_reader, client_writer), return_exceptions=True)
 
         server = await asyncio.start_server(handle, "0.0.0.0", 18080)
-        write_status(state="running", worker_pid=os.getpid(), worker_start=worker_start, child_pid=child.pid,
-                     actual_port=args.port, command=args.command, workdir=workdir)
+        ready = await wait_ready(args.port)
+        write_status(state="running" if ready else "failed", worker_pid=os.getpid(),
+                     worker_start=worker_start, child_pid=child.pid, actual_port=args.port,
+                     command=args.command, workdir=workdir)
         try:
             stopping = asyncio.Event()
             loop = asyncio.get_running_loop()

@@ -85,4 +85,34 @@ class AgentTool(Tool, ABC):
 
     def declaration(self) -> Tool:
         """Expose only model-visible metadata, never an execution callback."""
-        return Tool(self.name, self.description, deepcopy(self.parameters))
+        bounds = bounds_note(self.parameters)
+        return Tool(self.name, f"{self.description} {bounds}" if bounds else self.description,
+                    deepcopy(self.parameters))
+
+
+def bounds_note(parameters: JsonObject) -> str:
+    """Render numeric bounds inside the description, once, for every tool.
+
+    Measured: a model asked for ``timeout_ms: 60000`` when the schema capped it
+    at 30000 and spent a whole turn on the rejection. The schema was right; the
+    declaration was incomplete, because a model can only learn a bound by
+    failing unless it is written where the model reads. Doing it here rather than
+    in each tool keeps the two from drifting apart.
+    """
+    properties = parameters.get("properties") if isinstance(parameters, dict) else None
+    if not isinstance(properties, dict):
+        return ""
+    parts = []
+    for name, spec in properties.items():
+        if not isinstance(spec, dict):
+            continue
+        low, high = spec.get("minimum"), spec.get("maximum")
+        if isinstance(low, (int, float)) and isinstance(high, (int, float)):
+            parts.append(f"{name} {low}-{high}")
+        elif isinstance(high, (int, float)):
+            parts.append(f"{name}<={high}")
+        elif isinstance(low, (int, float)):
+            parts.append(f"{name}>={low}")
+    # Grammar is deliberately terse: this text repeats in every request of every
+    # run, so it is budget, not documentation. ASCII only — “–” costs three bytes.
+    return "Bounds: " + ", ".join(parts) + "." if parts else ""

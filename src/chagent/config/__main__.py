@@ -35,7 +35,7 @@ def collect(env: dict[str, str], file_env: dict[str, str], env_file: Path) -> tu
         problems.append(f"settings: {error}")
         settings = None
     try:
-        compaction = CompactionPolicy.from_env(env)
+        compaction = CompactionPolicy.from_env(env, max_turns=settings.max_turns if settings else None)
     except ValueError as error:
         problems.append(f"compaction: {error}")
         compaction = None

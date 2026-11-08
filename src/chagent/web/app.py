@@ -101,7 +101,7 @@ async def config(current: Current, workspace_id: UUID | None = None):
     """The resolved switches, so the browser is not blind to what the CLI prints."""
     settings = current.settings
     axes = settings.axes
-    policy = current.compaction or CompactionPolicy.from_env()
+    policy = current.compaction or CompactionPolicy.from_env(max_turns=settings.max_turns)
     tokenizer = current.runner.context.counter.name
     # ``tools`` is the count of the face new sessions actually get: the demo
     # harness has one face, so the default-mode lookup falls back to it.
@@ -690,6 +690,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            process_stdin=True,
                                            timeout=max(selected.run_timeout, 300) if host_exec else selected.run_timeout,
                                            max_turns=configured.max_turns,
+                                           require_verification=configured.require_verification,
                                            max_tool_concurrency=configured.max_tool_concurrency,
                                            memory_worker_concurrency=configured.memory_worker_concurrency,
                                            sandbox=sandbox, approval_policy=approval,
@@ -700,7 +701,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            max_processes=configured.max_processes, web=web,
                                            host_exec=host_exec,
                                            native_host_exec=configured.execution_profile == "host-controller")
-                app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env(),
+                app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env(max_turns=configured.max_turns),
                                                programmable=not demo)
                 if host_auth is not None:
                     app.state.runtime.auth_guard = host_auth.guard_workspace
