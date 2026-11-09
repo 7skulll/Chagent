@@ -393,6 +393,36 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         job = await self.runner.memory_worker.jobs.for_run(result.run_id)
         self.assertEqual((job["status"], job["attempts"]), ("queued", 1))
 
+    async def test_a_failed_recall_audit_does_not_fail_the_answer(self):
+        """Recall is optional, and so is its audit row.
+
+        ``enrich`` degrades to "no memory this run" on any error. Writing the
+        failure event needs a database connection and the run's lease, so the
+        audit write can fail for the very reason recall did — and then the
+        fallback must still be a fallback, not a failed answer.
+        """
+        service = self.runner.memory_service
+        database = self.database
+
+        class Unavailable:
+            async def recall(self, *args, **kwargs):
+                raise RuntimeError("recall unavailable")
+
+        class UnavailableAudit:
+            async def event(self, *args, **kwargs):
+                raise RuntimeError("audit unavailable")
+
+            async def _event(self, *args, **kwargs):
+                raise RuntimeError("audit unavailable")
+
+        service.repository = type("Repository", (), {
+            "recall": Unavailable().recall, "database": database,
+        })()
+        service.runs = UnavailableAudit()
+        result = await self.runner.run(self.session, "普通问题")
+        self.assertEqual(result.end_reason, "model_stop")
+        self.assertEqual((await self.runner.runs.get(result.run_id))["status"], "completed")
+
 
 class MemoryUnitTests(unittest.TestCase):
     def test_commands_policy_and_chinese_terms(self):

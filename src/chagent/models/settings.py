@@ -112,7 +112,6 @@ class ModelSettings:
         values = os.environ if env is None else env
         provider = values.get("CHAGENT_PROVIDER", "").strip().lower()
         generic = values.get("CHAGENT_API_KEY", "").strip()
-        auto_selected = not provider
         if not provider:
             available = [name for name, preset in PRESETS.items() if values.get(preset.key_env, "").strip()]
             if not available and generic:

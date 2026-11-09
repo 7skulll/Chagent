@@ -370,6 +370,13 @@ class AgentRunner:
         root = validate_workspace(session.workspace)
         info = root.stat()
         identity = (info.st_dev, info.st_ino)
+        if len(self._workspace_identities) > 4096:
+            # Bound the map in a long-lived process. A session evicted here gets
+            # a fresh baseline on its next run: the comparison it would have made
+            # is against a directory this process stopped watching, not a lost
+            # guarantee.
+            for stale in list(self._workspace_identities)[:1024]:
+                self._workspace_identities.pop(stale, None)
         previous = self._workspace_identities.setdefault(session_id, identity)
         if previous != identity:
             raise PermissionError("Session workspace directory was replaced")

@@ -148,7 +148,14 @@ class ApprovalBroker:
                     if current.expires_at <= datetime.now(timezone.utc):
                         # The deadline is ours to enforce: a pending row past it
                         # must become expired before anyone can still approve it.
-                        await self.approvals.expire_due(run_id=run_id)
+                        # The database owns that clock, so when it has not retired
+                        # the row yet this must wait instead of spinning: a local
+                        # clock ahead of the server's would otherwise turn this
+                        # branch into a tight loop that the pause ceiling no
+                        # longer bounds.
+                        if await self.approvals.expire_due(run_id=run_id):
+                            continue
+                        await subscription.wait(version, timeout=self.poll)
                         continue
                     if self.remote and self.audience is not None and self.grace > 0:
                         # A page that reloads reconnects in a second or two, so
@@ -215,7 +222,12 @@ class ApprovalBroker:
                     if not pending:
                         return [self._outcome(row) for row in rows]
                     if pending[0].expires_at <= datetime.now(timezone.utc):
-                        await self.approvals.expire_due(run_id=run_id)
+                        # Same clock agreement as ``request``: expire_due is the
+                        # authority, and a verdict of "nothing expired" means
+                        # waiting, not looping.
+                        if await self.approvals.expire_due(run_id=run_id):
+                            continue
+                        await subscription.wait(version, timeout=self.poll)
                         continue
                     if self.remote and self.audience is not None and self.grace > 0:
                         if self.audience(run_id):
@@ -223,10 +235,21 @@ class ApprovalBroker:
                         elif unwatched_since is None:
                             unwatched_since = monotonic()
                         elif monotonic() - unwatched_since >= self.grace:
+                            # The decision is a conditional update: if someone
+                            # answered in the same instant, theirs wins and the
+                            # loop returns that answer instead.
                             if await self.approvals.decide(pending[0].id, approve=False,
                                                            note="no viewer") == "conflict":
                                 continue
-                            continue
+                            # One decision answered the whole batch, so every row
+                            # it closed was closed with *our* reason. Reporting
+                            # the result as "denied" would tell the model the user
+                            # judged these calls and said no, which is the one
+                            # thing a missing viewer does not mean.
+                            rows = await self.approvals.batch(batch_id)
+                            return [ApprovalOutcome(False, row.id, UNWATCHED, "unwatched")
+                                    if row.status == "denied" else self._outcome(row)
+                                    for row in rows]
                     if self.decider is not None and not asked:
                         asked = True
                         answer = await self.decider(pending[0])

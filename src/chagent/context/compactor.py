@@ -1,6 +1,7 @@
 """Bounded, tool-free incremental summarization with no transcript mutation."""
 
 import asyncio
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, replace
 import json
@@ -426,23 +427,34 @@ class ContextCompactor:
     @staticmethod
     async def _response(client: ModelClient, request: ModelRequest) -> AssistantMessage:
         started, final = False, None
-        async for event in client.stream(request):
-            if final is not None:
-                raise CompactionError("Summary stream continued after completion")
-            if isinstance(event, StartEvent):
-                if started:
-                    raise CompactionError("Summary stream started twice")
-                started = True
-            elif isinstance(event, ErrorEvent):
-                if event.reason != event.error.stop_reason:
-                    raise CompactionError("Summary error is inconsistent")
-                final = event.error
-            elif not started:
-                raise CompactionError("Summary stream update arrived before start")
-            elif isinstance(event, DoneEvent):
-                if event.reason != event.message.stop_reason:
-                    raise CompactionError("Summary completion is inconsistent")
-                final = event.message
+        stream = client.stream(request)
+        try:
+            async for event in stream:
+                if final is not None:
+                    raise CompactionError("Summary stream continued after completion")
+                if isinstance(event, StartEvent):
+                    if started:
+                        raise CompactionError("Summary stream started twice")
+                    started = True
+                elif isinstance(event, ErrorEvent):
+                    if event.reason != event.error.stop_reason:
+                        raise CompactionError("Summary error is inconsistent")
+                    final = event.error
+                elif not started:
+                    raise CompactionError("Summary stream update arrived before start")
+                elif isinstance(event, DoneEvent):
+                    if event.reason != event.message.stop_reason:
+                        raise CompactionError("Summary completion is inconsistent")
+                    final = event.message
+        finally:
+            # The stream holds a provider connection. Every rejection above is an
+            # error path, and leaving the generator to the garbage collector
+            # keeps that connection until the loop gets around to it; the run's
+            # own model call closes it explicitly for the same reason.
+            close = getattr(stream, "aclose", None)
+            if close is not None:
+                with suppress(Exception):
+                    await close()
         if final is None:
             raise CompactionError("Summary stream ended without completion")
         return final

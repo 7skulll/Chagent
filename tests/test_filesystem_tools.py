@@ -24,6 +24,27 @@ class FilesystemToolTests(unittest.IsolatedAsyncioTestCase):
     async def call(self, name, **arguments):
         return await self.executor.execute(ToolCall("test-call", name, arguments), context=self.context)
 
+    async def test_a_failed_bookkeeping_write_does_not_fail_a_completed_edit(self):
+        """The file is already on disk; losing the record must not unname it.
+
+        Recording the write for the "recent changes" panel and its download
+        links is bookkeeping that runs after the write succeeded. Reported as a
+        tool error it would tell the model the edit failed, and the obvious next
+        step — sending the same edit again — is wrong and needs a second
+        approval.
+        """
+        tool = self.executor.registry.get("write_file")
+
+        class UnavailableDatabase:
+            def connection(self):
+                raise RuntimeError("connection pool exhausted")
+
+        tool.database = UnavailableDatabase()
+        result = await self.call("write_file", path="kept.txt", content="内容")
+        self.assertFalse(result.is_error, result.content[0].text)
+        self.assertEqual(result.details.get("bookkeeping_error"), "RuntimeError")
+        self.assertEqual((self.workspace / "kept.txt").read_text(encoding="utf-8"), "内容")
+
     async def test_create_read_edit_and_sha_guard(self):
         original = "第一行\nsecond line\n"
         created = await self.call("write_file", path="notes.txt", content=original)

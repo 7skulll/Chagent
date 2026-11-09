@@ -339,6 +339,50 @@ class ApprovalBatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.workspace / "quiet.txt").read_text(encoding="utf-8"), "Q")
         self.assertEqual(await self.approvals(runner).pending(result.run_id), [])
 
+    async def test_no_viewer_is_unwatched_and_not_a_user_refusal(self):
+        """A missing page is not a decision, and the batch path must say so.
+
+        The batch closes its whole question with one conditional update. Reading
+        that closed state back as "denied" would tell the model — and through it
+        the user — that the change was judged and refused, which is the one thing
+        nobody watching does not mean. The single-question path already reports
+        ``unwatched``; the batch one is what every write actually uses.
+        """
+        runner = self.runner([("a.txt", "A"), ("b.txt", "B")])
+        broker = runner.scheduler.approvals
+        broker.audience = lambda run_id: False
+        broker.grace = 0.3
+        broker.poll = 0.1
+        session = await runner.conversations.create_session(self.workspace)
+        result = await asyncio.wait_for(runner.run(session, "没人看着"), timeout=20)
+        self.assertEqual(result.end_reason, "model_stop")
+
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT status, result FROM tool_calls WHERE run_id = %s ORDER BY call_index", (result.run_id,))
+            rows = await cursor.fetchall()
+        self.assertEqual([row["status"] for row in rows], ["failed", "failed"])
+        for row in rows:
+            details = row["result"]["details"]
+            self.assertEqual(details["approval"], "unwatched")
+            self.assertEqual(details["failure_class"], "unwatched")
+            self.assertFalse(details["execution_started"])
+        # Nothing was written, and the model was told nobody judged the change.
+        self.assertEqual((self.workspace / "a.txt").read_text(encoding="utf-8"), "old")
+        self.assertEqual((self.workspace / "b.txt").read_text(encoding="utf-8"), "old")
+        answer = result.message.content[0].text
+        self.assertIn("No browser page was waiting", answer)
+        self.assertNotIn("user declined", answer)
+        # The audit still records why the rows are closed, as internal data.
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT status, note FROM approval_requests WHERE run_id = %s ORDER BY batch_index",
+                (result.run_id,))
+            requests = await cursor.fetchall()
+        self.assertEqual([row["status"] for row in requests], ["denied", "denied"])
+        self.assertEqual([row["note"] for row in requests], ["no viewer", "no viewer"])
+        self.assertEqual(await self.approvals(runner).pending(result.run_id), [])
+
 
 if __name__ == "__main__":
     unittest.main()

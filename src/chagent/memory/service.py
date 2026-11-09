@@ -9,6 +9,7 @@ completion transaction, because it needs no model and must not be lost.
 import asyncio
 from dataclasses import asdict, replace
 import json
+import logging
 import re
 from time import monotonic_ns
 from uuid import UUID, uuid4
@@ -28,6 +29,8 @@ from chagent.storage.task_history import TaskHistoryRepository
 
 
 PROMPT_VERSION = "memory-candidates-v1"
+
+logger = logging.getLogger(__name__)
 
 
 def query_terms(text):
@@ -141,7 +144,16 @@ class MemoryService:
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            await self.runs.event(run_id, "memory_recall_failed", {"reason": type(error).__name__})
+            # Recall is optional, so its failure must not become the run's. The
+            # audit write is part of that promise: if it raises too (the pool is
+            # exhausted, the lease is gone) the run still continues without
+            # memory instead of failing on a best-effort event.
+            try:
+                await self.runs.event(run_id, "memory_recall_failed", {"reason": type(error).__name__})
+            except asyncio.CancelledError:
+                raise
+            except Exception as audit_error:
+                logger.warning("Could not audit failed memory recall (%s)", type(audit_error).__name__)
             return built
 
     # -- completion transaction (no model call) -------------------------

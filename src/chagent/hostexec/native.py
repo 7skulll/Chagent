@@ -90,6 +90,8 @@ class NativeHostExecTool(AgentTool):
     def __init__(self, database, processes: ProcessManager | None = None):
         self.database = database
         self.processes = processes
+        #: Live exit watchers, held for as long as they run.
+        self._watchers: set[asyncio.Task] = set()
         super().__init__(name="host_exec", label="Request native host execution",
             description="Request one native command on the user's computer only when Docker cannot satisfy the task. "
                         "The exact command and workdir require one approval in this page. First run and inspect a "
@@ -217,6 +219,13 @@ class NativeHostExecTool(AgentTool):
                 "WHERE approval_id=%s", (record.id, record.process.pid, grant["id"]))
         watcher = asyncio.create_task(self._record_exit(record, grant["id"]),
                                       name=f"native-exit-{record.id}")
+        # The child can outlive this call, so the watcher must outlive it too.
+        # A bare local reference is enough only while this frame is alive: the
+        # task is kept until it finishes, or a collected watcher would leave the
+        # audit row 'running' with a healthy controller and nothing left to
+        # write it (restart recovery is the backstop, not the plan).
+        self._watchers.add(watcher)
+        watcher.add_done_callback(self._watchers.discard)
         with suppress(TimeoutError):
             await asyncio.wait_for(record.finished.wait(), params["yield_time_ms"] / 1000)
         text, missed = record.page(0)

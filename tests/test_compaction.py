@@ -395,6 +395,47 @@ class CompactionUnitTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 CompactionPolicy.from_env(values)
 
+class CompactorStreamTests(unittest.IsolatedAsyncioTestCase):
+    """The summarizer's provider stream is closed on the error paths too.
+
+    ``_response`` rejects a stream that keeps talking after its terminal event.
+    The connection behind that generator belongs to the provider client and is
+    not released by breaking out of ``async for``, so the rejection has to close
+    it explicitly — the run's own model call does the same.
+    """
+
+    class _BrokenClient:
+        def __init__(self):
+            self.closed = False
+
+        def stream(self, request):
+            async def events():
+                message = AssistantMessage([], request.model.api, request.model.provider,
+                                           request.model.id, 0, "pending")
+                yield StartEvent(message)
+                final = replace(message, content=[TextContent("ok")], stop_reason="stop")
+                yield DoneEvent("stop", final)
+                yield DoneEvent("stop", final)   # rejected: after completion
+
+            async def generator():
+                try:
+                    async for event in events():
+                        yield event
+                finally:
+                    self.closed = True
+            return generator()
+
+    async def test_a_rejected_stream_is_closed(self):
+        from chagent.context.compactor import CompactionError, ContextCompactor
+        from chagent.models.base import Model, ModelRequest
+        client = self._BrokenClient()
+        request = ModelRequest(Model("m", "local-test", "fake", 8192, 512), messages=[],
+                               max_tokens=64, purpose="summary")
+        with self.assertRaises(CompactionError):
+            await ContextCompactor._response(client, request)
+        self.assertTrue(client.closed, "the provider generator must be closed, not left to the GC")
+
+
 class RetainedOutputTests(unittest.TestCase):
     """The retained block is bounded, ordered and never confused with facts."""
 

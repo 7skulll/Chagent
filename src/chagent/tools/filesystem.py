@@ -80,38 +80,55 @@ class FileTool(AgentTool):
         task = asyncio.create_task(asyncio.to_thread(coordinated_handle))
         try:
             result = await asyncio.shield(task)
-            database = getattr(self, "database", None)
-            if database is not None and (not self.read_only or self.name == "read_file"):
-                from chagent.outputs import OutputService
-                async with database.connection() as connection:
-                    cursor = await connection.execute("SELECT id FROM workspaces WHERE root_path=%s", (str(filesystem.root),))
-                    row = await cursor.fetchone()
-                if row:
-                    details = result.details if isinstance(result.details, dict) else {}
-                    paths = [item["path"] for item in details.get("files", [])] or [params.get("path", "")]
-                    links = []
-                    for path in paths:
-                        relative = '/'.join(filesystem.parts(path))
-                        if not self.read_only:
-                            await OutputService(database).record(row['id'], 'agent', self.name, relative)
-                        try:
-                            with filesystem.parent(path) as (parent, name):
-                                info = filesystem.object_info(parent, name)
-                            if stat.S_ISREG(info.st_mode):
-                                links.append({'workspace_id':str(row['id']), 'path':relative, 'name':name,
-                                              'status':'committed', 'size':info.st_size})
-                        except OSError:
-                            pass  # Deleted/moved files have no current download link.
-                    if links:
-                        details['workspace_files'] = links
-                        result.details = details
-            return result
         except asyncio.CancelledError:
             # A thread cannot be forcibly cancelled. Drain it before releasing
             # its scheduler slot so late reads cannot cross a write barrier and
             # a half-finished write is still reported as unknown, not as done.
             await asyncio.gather(task, return_exceptions=True)
             raise
+        # The write has already happened by now. Naming the output and linking
+        # it for the "recent changes" panel is bookkeeping: a database timeout
+        # here must not turn a completed write into a failed tool call, or the
+        # model retries a change that is already on disk and draws a second
+        # approval for it.
+        try:
+            await self._annotate_outputs(result, filesystem, params)
+        except Exception as error:
+            details = result.details if isinstance(result.details, dict) else {}
+            details["bookkeeping_error"] = type(error).__name__
+            result.details = details
+        return result
+
+    async def _annotate_outputs(self, result: AgentToolResult, filesystem: WorkspaceFS,
+                                params: JsonObject) -> None:
+        """Record the write and attach download links for the files it produced."""
+        database = getattr(self, "database", None)
+        if database is None or (self.read_only and self.name != "read_file"):
+            return
+        from chagent.outputs import OutputService
+        async with database.connection() as connection:
+            cursor = await connection.execute("SELECT id FROM workspaces WHERE root_path=%s", (str(filesystem.root),))
+            row = await cursor.fetchone()
+        if not row:
+            return
+        details = result.details if isinstance(result.details, dict) else {}
+        paths = [item["path"] for item in details.get("files", [])] or [params.get("path", "")]
+        links = []
+        for path in paths:
+            relative = '/'.join(filesystem.parts(path))
+            if not self.read_only:
+                await OutputService(database).record(row['id'], 'agent', self.name, relative)
+            try:
+                with filesystem.parent(path) as (parent, name):
+                    info = filesystem.object_info(parent, name)
+                if stat.S_ISREG(info.st_mode):
+                    links.append({'workspace_id': str(row['id']), 'path': relative, 'name': name,
+                                  'status': 'committed', 'size': info.st_size})
+            except OSError:
+                pass  # Deleted/moved files have no current download link.
+        if links:
+            details['workspace_files'] = links
+            result.details = details
 
     def handle(self, filesystem: WorkspaceFS, params: JsonObject) -> AgentToolResult:
         raise NotImplementedError

@@ -38,6 +38,8 @@ class RunBudget:
         self._max_pause = seconds
         self._paused_at: float | None = None
         self._pauses = 0
+        #: Whether any party in the current paused stretch needs the ceiling.
+        self._cap_required = False
         self.expired = False
         self.paused = False
 
@@ -87,16 +89,23 @@ class RunBudget:
         """Stop the clock for one waiting party; nested pauses are counted.
 
         ``capped=False`` is for a wait that already has its own ceiling — an
-        approval is bounded by ``approval_timeout``, and applying the run
-        budget's ceiling on top would end a run that is correctly waiting for
-        a person. The independent wall ceiling still applies. Tool execution
-        keeps the default, because nothing else bounds a stuck tool.
+        approval is bounded by ``approval_timeout``. Tool execution keeps the
+        default, because nothing else bounds a stuck tool.
+
+        A ceiling, once needed, survives every nesting. ``capped=False`` must
+        not cancel one a running tool already relies on: with the cap gone the
+        run has no bound at all, and a tool that never returns would then be
+        capped only by the independent wall ceiling. When an approval and a
+        tool happen to overlap, the cap still applies (the approval's own
+        timeout is normally the shorter of the two).
         """
         self._pauses += 1
+        if capped:
+            self._cap_required = True
         if self._pauses > 1:
-            if not capped and self._pause_cap is not None:
-                self._pause_cap.cancel()
-                self._pause_cap = None
+            # The stretch already started with the outermost pause, so a late
+            # capped sibling only arms what was missing, anchored at that start.
+            self._arm_pause_cap()
             return
         self.paused = True
         if self._handle is not None:
@@ -106,8 +115,15 @@ class RunBudget:
             self._pause_cap.cancel()
             self._pause_cap = None
         self._paused_at = self._loop.time()
-        if capped:
-            self._pause_cap = self._loop.call_later(self._max_pause, self._fire_paused)
+        self._arm_pause_cap()
+
+    def _arm_pause_cap(self) -> None:
+        """Start the paused-stretch ceiling if some waiter needs one."""
+        if not self._cap_required or self._pause_cap is not None or self.expired or not self.paused:
+            return
+        started = self._paused_at if self._paused_at is not None else self._loop.time()
+        remaining = max(0.0, self._max_pause - (self._loop.time() - started))
+        self._pause_cap = self._loop.call_later(remaining, self._fire_paused)
 
     def resume(self) -> None:
         """Give time back for the interval this pause was the outermost one."""
@@ -117,6 +133,7 @@ class RunBudget:
         if self._pauses > 0:
             return
         self.paused = False
+        self._cap_required = False
         if self._pause_cap is not None:
             self._pause_cap.cancel()
             self._pause_cap = None

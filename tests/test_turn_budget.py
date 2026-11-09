@@ -114,3 +114,23 @@ class RunBudgetTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(expired.wait(), 1.0)
         self.assertTrue(budget.expired)
         budget.stop()
+
+    async def test_an_approval_inside_a_tool_pause_keeps_the_ceiling(self):
+        """An uncapped wait must not remove the only bound a running tool has.
+
+        Approvals are asked for before tools run today, but the pause counting
+        is documented as supporting overlapping waiters. If the uncapped one
+        cancels the cap, the remaining tool has no ceiling at all and a tool
+        that never returns leaves the run open until the wall clock instead of
+        one budget.
+        """
+        expired = asyncio.Event()
+        budget = RunBudget(0.05, expired.set)
+        budget.start()
+        budget.pause()                 # a tool is running: this needs a ceiling
+        budget.pause(capped=False)     # an approval wait answers in the same stretch
+        budget.resume()                # the approval was answered; the tool still runs
+        await asyncio.wait_for(expired.wait(), 1.0)
+        self.assertTrue(budget.expired)
+        budget.resume()
+        budget.stop()
