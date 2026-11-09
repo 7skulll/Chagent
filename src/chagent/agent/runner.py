@@ -30,7 +30,7 @@ from chagent.tools.executor import ToolExecutor
 from chagent.tools.base import AgentToolResult
 from chagent.tools.context import ToolContext
 from chagent.tools.scheduler import ToolScheduler
-from chagent.workspace_manifest import snapshot, diff
+from chagent.workspace_manifest import ManifestCache, snapshot, diff
 from chagent.hostexec.network_audit import NetworkAudit
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,16 @@ class AgentRunner:
         # Session processes outlive their invocation, never their run.
         self.processes = None
         self._workspace_identities = {}
+        #: One digest cache per workspace. A run inventories the tree twice and
+        #: consecutive runs see the same files, so re-hashing them every turn is
+        #: the fixed cost this removes. Bounded like the identity map: a process
+        #: that stops watching a workspace may forget it, at the price of one
+        #: full scan when it comes back.
+        self._manifest_caches: dict[str, ManifestCache] = {}
+        #: Four workspaces, each capped at one scan's worth of entries: the map
+        #: is a hot-path optimisation, not a cache worth growing for a directory
+        #: this process has stopped serving.
+        self._manifest_cache_limit = 4
         self._manifest_after_recorded: set[UUID] = set()
         self._network_after_recorded: set[UUID] = set()
 
@@ -290,9 +300,21 @@ class AgentRunner:
             return True
         return counter.count(messages) <= budget_of(self.model)
 
+    def _manifest_cache(self, root) -> ManifestCache:
+        """The digest cache for one workspace, oldest evicted first."""
+        key = str(root)
+        cache = self._manifest_caches.pop(key, None)
+        if cache is None:
+            if len(self._manifest_caches) >= self._manifest_cache_limit:
+                self._manifest_caches.pop(next(iter(self._manifest_caches)))
+            cache = ManifestCache()
+        # Re-inserting keeps the eviction order least-recently-used.
+        self._manifest_caches[key] = cache
+        return cache
+
     async def _record_manifest_before(self, run_id: UUID, root) -> dict | None:
         try:
-            before = await asyncio.to_thread(snapshot, root)
+            before = await asyncio.to_thread(snapshot, root, self._manifest_cache(root))
             await self.runs.event(run_id, "workspace_manifest_before", before)
             return before
         except (OSError, ValueError) as error:
@@ -305,7 +327,7 @@ class AgentRunner:
         if run_id in self._manifest_after_recorded or root is None:
             return
         try:
-            after = await asyncio.to_thread(snapshot, root)
+            after = await asyncio.to_thread(snapshot, root, self._manifest_cache(root))
             summary = diff(before, after) if before is not None else None
             await self.runs.event(run_id, "workspace_manifest_after", {**after, "diff": summary})
             self._manifest_after_recorded.add(run_id)
