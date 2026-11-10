@@ -1,500 +1,52 @@
-"""Single-process local web application, sharing the existing agent and storage."""
+"""Single-process local web application, sharing the existing agent and storage.
+
+This module assembles: the routers live in ``info_api``, ``sessions_api``,
+``context_api``, ``runs_api`` (and the older ``file_api``/``workspace_api``/
+``memory_api``), the dependencies they share live in ``deps``, and the JSON
+reply shape lives in ``responses``. What is left here is the lifespan, the
+request boundary, the error mapping and the static asset allow-list.
+"""
 
 from contextlib import asynccontextmanager
-from dataclasses import asdict
 from importlib.resources import files
-import json
 import logging
 import os
-import httpx
 from pathlib import Path
-from time import monotonic
-from uuid import UUID
-from typing import Annotated, Literal
-from urllib.parse import quote
 
-from fastapi import APIRouter, FastAPI, Header, Query, Request, Response
-from fastapi.encoders import jsonable_encoder
+import httpx
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
 
 from chagent.bootstrap import create_demo_runner, create_runner
+from chagent.boundaries import validate_workspace
 from chagent.config import Settings
-from chagent.tools.policy import ApprovalPolicy
-from chagent.tools.sandbox import Sandbox
-from chagent.tools.web import WebAccess
-from chagent.domain.codec import message_to_dict
-from chagent.diagnostics.behavior import describe as describe_behavior
 from chagent.domain.summaries import CompactionPolicy
 from chagent.models.factory import create_model_client
 from chagent.models.settings import ModelSettings
-from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError
+from chagent.sessions.errors import SessionArchivedError, SessionBusyError, SessionNotFoundError, StateConflictError
 from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
 from chagent.storage.repositories import RunBusyError
-from chagent.storage.summaries import SummaryRepository
-from chagent.storage.usage import UsageRepository
-from chagent.storage.artifacts import ArtifactRepository
-from chagent.domain.artifacts import artifact_text
-from chagent.domain.messages import ToolResultMessage
-from chagent.storage.memory_jobs import MemoryJobRepository
+from chagent.tools.policy import ApprovalPolicy
+from chagent.tools.sandbox import Sandbox
+from chagent.tools.web import WebAccess
+from chagent.web.auth import HostAuth, HostAuthBoundary
+from chagent.web.context_api import router as context_router
+from chagent.web.file_api import router as file_router
+from chagent.web.info_api import router as info_router
+from chagent.web.memory_api import router as memory_router
 from chagent.web.policy import validate_web_settings
-from chagent.web.deps import Current, MessageLimit, PageLimit, SequenceCursor, WorkspacePath
+from chagent.web.responses import reply
 from chagent.web.runtime import WebRuntime
-from chagent.web.auth import HostAuth, HostAuthBoundary, COOKIE, SESSION_SECONDS
-from chagent.web.schemas import MemoryJobState
-from chagent.sessions.errors import StateConflictError
-from chagent.web.schemas import (ActiveRunPage, AppInfo, ApprovalDecision, ArtifactPage, Cancellation,
-    CancelRequest, ConfigView, ContextView, DailyUsageView, ErrorResponse, HostLogin, MessagePage, RunAccepted, RunCreate, RunView, SessionCreate,
-    SessionDetail, SessionEdit, SessionPage, SessionSources, UsageView)
-from chagent.web.uploads import save as save_upload
-from chagent.boundaries import validate_workspace
-from chagent.domain.sessions import Session
+from chagent.web.runs_api import router as runs_router
+from chagent.web.sessions_api import UPLOAD_PATH
+from chagent.web.sessions_api import router as sessions_router
+from chagent.web.workspace_api import router as workspace_router
 
-
-SSE_POLL_INTERVAL = 1.0
-TERMINAL_EVENTS = {"run_completed", "run_failed", "run_cancelled", "run_interrupted"}
-TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
-#: The one write that is not JSON: the browser sends the file body directly, so
-#: a 20 MiB document never has to become a base64 string inside a JSON envelope.
-UPLOAD_PATH = "/api/uploads"
 logger = logging.getLogger(__name__)
-
-
-def reply(value, status=200, headers=None):
-    return JSONResponse(jsonable_encoder(value), status_code=status,
-                        headers={"Cache-Control": "no-store", **(headers or {})})
-
-
-api = APIRouter(prefix="/api", responses={code: {"model": ErrorResponse} for code in (400, 403, 404, 409, 413, 415, 503)})
-
-
-@api.post("/auth", include_in_schema=False)
-async def host_login(value: HostLogin, request: Request):
-    auth = getattr(request.app.state, "host_auth", None)
-    if auth is None:
-        raise HTTPException(404)
-    session = auth.login(value.token)
-    if session is None:
-        raise HTTPException(401, "Invalid host UI token")
-    response = reply({"authenticated": True})
-    response.set_cookie(COOKIE, session, max_age=SESSION_SECONDS, httponly=True,
-                        samesite="strict", path="/")
-    return response
-
-
-@api.get("/info", response_model=AppInfo, tags=["本地 Agent"])
-async def info(current: Current):
-    axes = current.settings.axes
-    return {"workspace": current.workspace, "provider": current.runner.model.provider,
-            "model": current.runner.model.id,
-            "programmable": current.programmable,
-            "boundary": axes.boundary, "capability": axes.capability, "gate": axes.gate,
-            # Compatibility for the pre-unified page: there is no mode to pick.
-            "code_mode": False}
-
-
-@api.get("/config", response_model=ConfigView, tags=["本地 Agent"])
-async def config(current: Current, workspace_id: UUID | None = None):
-    """The resolved switches, so the browser is not blind to what the CLI prints."""
-    settings = current.settings
-    axes = settings.axes
-    policy = current.compaction or CompactionPolicy.from_env()
-    tokenizer = current.runner.context.counter.name
-    # ``tools`` is the count of the face new sessions actually get: the demo
-    # harness has one face, so the default-mode lookup falls back to it.
-    tools = len(current.runner.tools.registry.definitions())
-    from chagent.tools.builtin import WRITE_TOOLS
-    work_writable = WRITE_TOOLS <= {tool.name for tool in current.runner.tools.registry.definitions()}
-    container = None
-    if workspace_id is not None and settings.execution_profile == "host-controller":
-        root = next((root for root in current.roots if current._workspace_ids.get(root) == workspace_id), None)
-        if root is not None:
-            await current.workspace_id(root)
-            container = await current.runner.sandbox.container_detail(root)
-    return {
-        "provider": current.runner.model.provider, "model": current.runner.model.id,
-        "run_timeout": current.runner.timeout,
-        "run_wall_timeout": current.runner.wall_timeout,
-        "boundary": axes.boundary, "capability": axes.capability, "gate": axes.gate,
-        "controller": settings.execution_profile,
-        "sandbox_network": settings.sandbox_network,
-        "workspace_writable": work_writable,
-        "process_stdin": (settings.execution_profile != "host-controller" and
-                          bool(getattr(current.runner.tools.registry.get("exec_command"), "process_stdin", False))),
-        "approval": settings.approval, "approval_timeout": settings.approval_timeout,
-        "approval_grace": settings.approval_unwatched_grace,
-        "container_idle_seconds": settings.container_idle_seconds,
-        "container_state": container["state"] if container else None,
-        "image_stale": container["image_stale"] if container else None,
-        "host_commands": current.runner.tools.allow_host_commands,
-        "host_execution": current.runner.tools.registry.get("host_exec") is not None,
-        "host_workspace_path": os.environ.get("CHAGENT_HOST_WORKSPACE_PATH", ""),
-        "web_access": settings.web_access,
-        "web_key": "set" if settings.search_api_key.strip() else "missing",
-        "compaction": policy.enabled, "tokenizer": tokenizer,
-        "max_turns": settings.max_turns, "max_tool_concurrency": settings.max_tool_concurrency,
-        "max_processes": 0 if settings.execution_profile == "host-controller" else settings.max_processes,
-        "process_timeout": settings.process_timeout,
-        "code_mode": False, "programmable": current.programmable,
-        "tools": tools,
-        # Describe the actual work face; code capability is a separate field.
-        "behavior": describe_behavior(settings, policy, tokenizer, workspace_writes=work_writable),
-    }
-
-
-@api.get("/sessions", response_model=SessionPage, tags=["会话"])
-async def sessions(current: Current, limit: PageLimit = 50, before: UUID | None = None,
-                   workspace: WorkspacePath = None,
-                   archived: Literal["hide", "include", "only"] = "hide",
-                   q: Annotated[str | None, Query(max_length=200)] = None):
-    """Sessions of one workspace; archived ones are hidden unless asked for.
-
-    ``q`` searches titles only. Message bodies are not searched: that would need
-    an index over every payload and would answer a different question than the
-    one the box in the sidebar asks.
-    """
-    return await current.sessions.list(workspace=current.root(workspace), before=before, limit=limit,
-                                       archived=archived, query=q)
-
-
-@api.get("/legacy/workspaces", tags=["会话"])
-async def legacy_workspaces(current: Current):
-    """Read-only inventory of old container-path workspaces awaiting proof of their host path."""
-    if current.settings.execution_profile != "host-controller":
-        raise HTTPException(404, "Only the host controller has legacy bindings")
-    async with current.runner.conversations.database.connection() as connection:
-        cursor = await connection.execute(
-            "SELECT w.id, w.root_path, b.state, count(s.id) AS sessions "
-            "FROM workspace_bindings b JOIN workspaces w ON w.id=b.workspace_id "
-            "LEFT JOIN sessions s ON s.workspace_id=w.id WHERE b.state='rebind_required' "
-            "GROUP BY w.id,b.state ORDER BY w.root_path")
-        return {"items": await cursor.fetchall()}
-
-
-@api.get("/legacy/sessions/{session_id}/messages", tags=["会话"])
-async def legacy_messages(session_id: UUID, current: Current, limit: MessageLimit = 100,
-                          before: int | None = None):
-    if current.settings.execution_profile != "host-controller":
-        raise HTTPException(404, "Only the host controller has legacy bindings")
-    async with current.runner.conversations.database.connection() as connection:
-        cursor = await connection.execute(
-            "SELECT 1 FROM sessions s JOIN workspace_bindings b ON b.workspace_id=s.workspace_id "
-            "WHERE s.id=%s AND b.state='rebind_required'", (session_id,))
-        if await cursor.fetchone() is None:
-            raise HTTPException(404, "Legacy session not found")
-    return await current.runner.conversations.message_page(session_id, before=before, limit=limit)
-
-
-@api.patch("/sessions/{session_id}", response_model=Session, tags=["会话"])
-async def edit_session(session_id: UUID, value: SessionEdit, current: Current):
-    """Rename or archive a session; the legacy mode is immutable."""
-    session = await current.session(session_id)
-    if value.title is not None:
-        session = await current.sessions.rename(session_id, value.title)
-    if value.archived is not None:
-        session = (await current.sessions.archive(session_id) if value.archived
-                   else await current.sessions.restore(session_id))
-    return session
-
-
-@api.get("/sessions/{session_id}/usage", response_model=UsageView, tags=["用量"])
-async def session_usage(session_id: UUID, current: Current,
-                        limit: Annotated[int, Query(ge=1, le=200)] = 50):
-    await current.session(session_id)
-    return await UsageRepository(current.runner.conversations.database).session(session_id, limit=limit)
-
-
-@api.get("/usage", response_model=DailyUsageView, tags=["用量"])
-async def usage(current: Current, days: Annotated[int, Query(ge=1, le=90)] = 7):
-    """Tokens per day across the workspaces this process has opened."""
-    return await UsageRepository(current.runner.conversations.database).daily(
-        days=days, roots=sorted(str(root) for root in current.roots))
-
-
-@api.post("/sessions", response_model=Session, status_code=201, tags=["会话"])
-async def create_session(value: SessionCreate, current: Current):
-    """Create a session with the unified programmable tool surface."""
-    await current.require_programming(current.root(value.workspace))
-    return await current.sessions.create(current.root(value.workspace), value.title, mode="work")
-
-
-@api.post("/uploads", status_code=201, tags=["会话"])
-async def upload(request: Request, current: Current, response: Response,
-                 request_id: UUID | None = None,
-                 name: Annotated[str, Query(min_length=1, max_length=300)] = "upload",
-                 workspace: WorkspacePath = None):
-    """Store one file under the workspace, where read_file can parse it."""
-    root = current.root(workspace)
-    try:
-        from chagent.outputs import OutputService
-        result = await save_upload(root, name, request.stream(), outputs=OutputService(current.runner.conversations.database),
-                                   workspace_id=await current.workspace_id(root), request_id=request_id)
-        if result['status'] != 'committed':
-            response.status_code = 202
-        return result
-    except PermissionError:
-        raise HTTPException(403, "上传目录不可写，请检查工作区权限后重试") from None
-    except OSError as error:
-        import errno
-        if error.errno == errno.ENOSPC:
-            raise HTTPException(507, "磁盘空间不足，请释放空间后重试上传") from None
-        raise HTTPException(500, "无法保存上传文件，请检查工作区存储后重试") from None
-
-
-@api.get("/sessions/{session_id}", response_model=SessionDetail, tags=["会话"])
-async def session_detail(session_id: UUID, current: Current):
-    session = await current.session(session_id)
-    return {**asdict(session), "latest_run": await current.runner.runs.latest(session_id)}
-
-
-@api.get("/sessions/{session_id}/messages", response_model=MessagePage, tags=["会话"])
-async def history(session_id: UUID, current: Current, limit: MessageLimit = 100,
-                  before: Annotated[int | None, Query(ge=1, le=9_223_372_036_854_775_807)] = None):
-    await current.session(session_id)
-    page = await current.sessions.messages(session_id, before=before, limit=limit)
-    def visible(message):
-        payload = message_to_dict(message)
-        if isinstance(message, ToolResultMessage) and message.artifact:
-            payload["content"] = [{"type": "text", "text": artifact_text(message.artifact)},
-                                  *(block for block in payload["content"] if block["type"] == "image")]
-            payload["details"] = None
-        return payload
-    return {"items": [{"id": item.id, "sequence": item.sequence, "run_id": item.run_id,
-                        "superseded_by": item.superseded_by,
-                        "message": visible(item.message)} for item in page.items], "next_before": page.next_before}
-
-
-@api.get("/sessions/{session_id}/files", tags=["上下文与产物"])
-async def generated_files(session_id: UUID, current: Current):
-    await current.session(session_id)
-    async with current.runner.conversations.database.connection() as connection:
-        outputs = await connection.execute("SELECT id,workspace_id,output_path AS path,size,status FROM file_outputs WHERE session_id=%s AND status='committed' ORDER BY created_at DESC", (session_id,))
-        disk = [{**row, "name": Path(row["path"]).name} for row in await outputs.fetchall()]
-        cursor = await connection.execute(
-            "SELECT id, run_id, name, octet_length(content) AS size, created_at FROM generated_files "
-            "WHERE session_id = %s ORDER BY created_at DESC, id DESC", (session_id,))
-        return {"items": disk + await cursor.fetchall()}
-
-
-@api.get("/sessions/{session_id}/files/{file_id}", tags=["上下文与产物"])
-async def generated_file_download(session_id: UUID, file_id: UUID, current: Current):
-    await current.session(session_id)
-    async with current.runner.conversations.database.connection() as connection:
-        cursor = await connection.execute("SELECT name, content FROM generated_files WHERE session_id = %s AND id = %s", (session_id, file_id))
-        row = await cursor.fetchone()
-    if row is None:
-        raise HTTPException(404, "File does not exist in this session")
-    return Response(content=row["content"].encode("utf-8"), media_type="application/octet-stream",
-                    headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(row["name"], safe=""),
-                             "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
-
-
-@api.post('/sessions/{session_id}/files/{file_id}/export', tags=['上下文与产物'])
-async def export_legacy(session_id: UUID, file_id: UUID, current: Current):
-    from chagent.outputs import OutputService
-    session = await current.session(session_id)
-    async with current.runner.conversations.database.connection() as connection:
-        cursor = await connection.execute('SELECT name,content FROM generated_files WHERE id=%s AND session_id=%s', (file_id,session_id))
-        row = await cursor.fetchone()
-    if row is None:
-        raise HTTPException(404, '历史产物不存在')
-    return await OutputService(current.runner.conversations.database).submit(session.workspace_id, session.workspace,
-        row['name'],row['content'].encode('utf-8'),source='legacy-export',session_id=session_id)
-
-
-@api.get("/sessions/{session_id}/artifacts/{artifact_id}", response_model=ArtifactPage, tags=["上下文与产物"])
-async def artifact_page(session_id: UUID, artifact_id: UUID, current: Current,
-                        offset: Annotated[int, Query(ge=0, le=2_147_483_646)] = 0,
-                        limit: Annotated[int, Query(ge=1, le=1000)] = 1000):
-    await current.session(session_id)
-    try:
-        return await ArtifactRepository(current.runner.conversations.database).read(session_id, artifact_id, offset=offset, limit=limit)
-    except LookupError:
-        raise HTTPException(404, "Artifact does not exist in this session") from None
-
-
-@api.get("/sessions/{session_id}/context", response_model=ContextView, tags=["上下文与产物"])
-async def context_detail(session_id: UUID, current: Current):
-    await current.session(session_id)
-    summaries = await SummaryRepository(current.runner.conversations.database).list(session_id, limit=10)
-    versions = []
-    for summary in summaries:
-        source = await current.runner.runs.get(summary.source_run_id) if summary.source_run_id else None
-        versions.append({**asdict(summary), "source_run_status": source["status"] if source else None,
-                         "replayable": source is None or source["status"] in {"running", "completed"}})
-    return {"summaries": versions, "snapshots": await current.sessions.contexts(session_id, limit=3)}
-
-
-@api.post("/sessions/{session_id}/runs", response_model=RunAccepted, status_code=202, tags=["运行"])
-async def send(session_id: UUID, value: RunCreate, current: Current):
-    session = await current.session(session_id)
-    supersede_from = await _replacement_point(current, session_id, value)
-    return {"run_id": await current.start(session_id, value.text or "", supersede_from=supersede_from),
-            "session_id": session_id}
-
-
-async def _replacement_point(current: WebRuntime, session_id: UUID, value: RunCreate) -> int | None:
-    """Which transcript record a regeneration or an edit starts over from.
-
-    The sequence, not the id: retirement is a suffix, and a message cannot be
-    replaced without the turns that followed it going stale too. Both refusals
-    are 400 rather than 404: the session exists, the message does not belong to
-    the kind of record the request names.
-    """
-    target_id = value.regenerate_from or value.edit_message_id
-    if target_id is None:
-        return None
-    record = await current.sessions.message(session_id, target_id)
-    if record is None:
-        raise HTTPException(404, "消息不属于这个会话")
-    expected = "assistant" if value.regenerate_from is not None else "user"
-    if record.message.role != expected:
-        raise HTTPException(400, "重新生成针对回答，编辑针对你自己的消息")
-    if record.superseded_by is not None:
-        raise HTTPException(409, "这条消息已经被替换过，刷新后再试")
-    return record.sequence
-
-
-@api.get("/sessions/{session_id}/sources", response_model=SessionSources, tags=["上下文与产物"])
-async def session_sources(session_id: UUID, current: Current):
-    """The memories each run of this session was given, for its 依据 section.
-
-    One request per session rather than one per answer: memory is not a message,
-    so the transcript cannot rebuild it from what it already has.
-    """
-    await current.session(session_id)
-    return {"runs": await current.runner.conversations.run_memory_references(session_id)}
-
-
-@api.get("/runs", response_model=ActiveRunPage, tags=["运行"])
-async def active_runs(current: Current, active: bool = True):
-    """Runs that have not converged yet across the opened workspaces.
-
-    Only the active view exists: a list of every run ever would be a different
-    endpoint with pagination, and nothing asks for it.
-    """
-    if not active:
-        raise HTTPException(400, "Only active runs are listed; omit the parameter or pass active=true")
-    rows = await current.runner.runs.active(roots=sorted(str(root) for root in current.roots))
-    return {"items": [{"run_id": row["id"], "session_id": row["session_id"],
-                        "started_at": row["started_at"], "current_tool": row["current_tool"]}
-                       for row in rows]}
-
-
-@api.get("/runs/{run_id}", response_model=RunView, tags=["运行"])
-async def run_detail(run_id: UUID, current: Current):
-    run = await current.run(run_id)
-    return {**run, "file_diff": await current.runner.runs.file_diff(run_id),
-            "network_observation": await current.runner.runs.network_observation(run_id)}
-
-
-@api.get("/runs/{run_id}/approvals", tags=["运行"])
-async def run_approvals(run_id: UUID, current: Current):
-    run = await current.run(run_id)
-    pending = await current.approvals.pending(run_id)
-    return {"waiting_for": "approval" if pending else None,
-            "pending": [{"id": str(item.id), "tool_name": item.tool_name, "subject": item.subject,
-                         "cwd": item.cwd, "expires_at": item.expires_at.isoformat(),
-                         "status": item.status,
-                         # A page shows one card per batch; the ids and the order
-                         # are what let it describe one decision over N calls.
-                         "batch_id": str(item.batch_id) if item.batch_id else None,
-                         "batch_index": item.batch_index} for item in pending]}
-
-
-@api.post("/approvals/{approval_id}/decide", tags=["运行"])
-async def decide_approval(approval_id: UUID, value: ApprovalDecision, current: Current):
-    """The only way to approve: a local UI request bound to this workspace."""
-    approval = await current.approvals.get(approval_id)
-    if approval is None:
-        raise HTTPException(404, "Approval does not exist")
-    run = await current.run(approval.run_id)
-    status = await current.approvals.decide(approval_id, approve=value.approve, note=value.note)
-    if status == "conflict":
-        raise HTTPException(409, "Approval is no longer pending (decided, expired or the run ended)")
-    return {"id": str(approval_id), "status": status, "run_id": str(run["id"])}
-
-
-@api.post("/runs/{run_id}/cancel", response_model=Cancellation, response_model_exclude_none=True,
-          responses={202: {"model": Cancellation}}, tags=["运行"])
-async def cancel(run_id: UUID, current: Current, response: Response, value: CancelRequest | None = None):
-    run = await current.run(run_id)
-    if run["status"] in TERMINAL:
-        return {"accepted": False, "status": run["status"]}
-    accepted = current.runner.cancel(run_id)
-    if not accepted:
-        latest = await current.run(run_id)
-        if latest["status"] in TERMINAL:
-            return {"accepted": False, "status": latest["status"]}
-        raise HTTPException(409, "Run belongs to another process or needs recovery")
-    async with current.runner.conversations.database.connection() as connection:
-        await connection.execute("UPDATE file_outputs SET status='cancelled',payload=NULL WHERE run_id=%s AND status='pending'", (run_id,))
-    response.status_code = 202
-    return {"accepted": accepted}
-
-
-@api.get("/runs/{run_id}/memory-job", response_model=MemoryJobState, tags=["长期记忆"])
-async def memory_job(run_id: UUID, current: Current):
-    await current.run(run_id)  # Same workspace isolation as the run/event endpoints.
-    jobs = MemoryJobRepository(current.runner.runs.database)
-    return {"job": await jobs.for_run(run_id)}
-
-
-@api.get("/runs/{run_id}/events", response_class=StreamingResponse, tags=["运行"],
-         responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}})
-async def events(run_id: UUID, request: Request, current: Current, after: SequenceCursor = 0,
-                 last_event_id: Annotated[int | None, Header(ge=0, le=9_223_372_036_854_775_807)] = None):
-    identity = run_id
-    await current.run(identity)
-    after = last_event_id if last_event_id is not None else after
-
-    async def stream():
-        sequence = after
-        heartbeat = monotonic()
-        runs = current.runner.runs
-        # A viewer is counted for as long as this generator runs. The broker
-        # reads the count to decide whether a waiting command still has a page
-        # to be approved on; ``finally`` is what keeps a dropped connection from
-        # leaving a phantom audience behind.
-        current.watch(identity)
-        try:
-            with runs.notifications.subscribe(identity) as subscription:
-                while True:
-                    # Capture before catchup, so commits between querying and waiting
-                    # change the version and cannot be lost.
-                    version = subscription.version
-                    run = await runs.get(identity)
-                    stop_at = await runs.terminal_sequence(identity) if run["status"] in TERMINAL else None
-                    if stop_at is not None and sequence >= stop_at:
-                        yield "event: end\ndata: {}\n\n"
-                        return
-                    batch = await runs.events(identity, sequence, limit=200)
-                    for event in batch:
-                        sequence = event["sequence"]
-                        payload = json.dumps({"type": event["type"], "payload": event["payload"]}, ensure_ascii=False)
-                        yield f"id: {sequence}\nevent: update\ndata: {payload}\n\n"
-                        if event["type"] in TERMINAL_EVENTS:
-                            yield "event: end\ndata: {}\n\n"
-                            return
-                    if run["status"] in TERMINAL and len(batch) < 200:
-                        yield "event: end\ndata: {}\n\n"
-                        return
-                    if await request.is_disconnected():
-                        return
-                    if monotonic() - heartbeat > 15:
-                        yield ": heartbeat\n\n"
-                        heartbeat = monotonic()
-                    if len(batch) < 200:
-                        await subscription.wait(version, timeout=SSE_POLL_INTERVAL)
-        finally:
-            current.unwatch(identity)
-
-    return StreamingResponse(stream(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
-    })
 
 
 #: The only paths a client may fetch under /static/. A dict literal rather than a
@@ -729,13 +281,11 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                             Exception: application_error},
     )
     app.state.host_auth = host_auth
-    app.include_router(api)
-    from chagent.web.file_api import router as file_router
-    from chagent.web.memory_api import router as memory_router
-    from chagent.web.workspace_api import router as workspace_router
-    app.include_router(file_router)
-    app.include_router(memory_router)
-    app.include_router(workspace_router)
+    # Registration order is the order FastAPI tries a path in; keep the api
+    # routes in the order they were written in when they shared one module.
+    for mounted in (info_router, sessions_router, context_router, runs_router,
+                    file_router, memory_router, workspace_router):
+        app.include_router(mounted)
     app.add_api_route("/", asset, include_in_schema=False)
     app.add_api_route("/health", lambda: {"app": "chagent"}, include_in_schema=False)
     # `path` because the page loads ES modules from subdirectories (`core/…`).

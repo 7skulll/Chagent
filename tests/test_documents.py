@@ -326,7 +326,7 @@ class UploadFailureTests(unittest.IsolatedAsyncioTestCase):
         from types import SimpleNamespace
         from unittest.mock import AsyncMock, patch
         from starlette.exceptions import HTTPException
-        from chagent.web.app import upload
+        from chagent.web.sessions_api import upload
 
         current = SimpleNamespace(root=lambda workspace: Path('/private/tmp/upload-test'),
             runner=SimpleNamespace(conversations=SimpleNamespace(database=object())), workspace_id=AsyncMock(return_value=None))
@@ -337,7 +337,7 @@ class UploadFailureTests(unittest.IsolatedAsyncioTestCase):
             (OSError(errno.EIO, 'secret/path'), 500, '存储'),
         ]:
             with self.subTest(status=status):
-                with patch('chagent.web.app.save_upload', new=AsyncMock(side_effect=error)):
+                with patch('chagent.web.sessions_api.save_upload', new=AsyncMock(side_effect=error)):
                     with self.assertRaises(HTTPException) as caught:
                         await upload(request, current, __import__('starlette.responses', fromlist=['Response']).Response(), name='test.txt', workspace=None)
                 self.assertEqual(caught.exception.status_code, status)

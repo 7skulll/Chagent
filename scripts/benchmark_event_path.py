@@ -21,7 +21,8 @@ from chagent.config import Settings
 from chagent.domain.messages import AssistantMessage, TextContent
 from chagent.models.events import ContentDeltaEvent, DoneEvent, StartEvent
 from chagent.storage.migrate import migrate
-from chagent.web.app import WebRuntime, events
+from chagent.web.app import WebRuntime
+from chagent.web.runs_api import events
 
 
 class FixtureClient:

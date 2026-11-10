@@ -24,7 +24,8 @@ from chagent.models.events import ContentDeltaEvent, DoneEvent, StartEvent
 from chagent.storage.database import Database
 from chagent.storage.memory_jobs import MemoryJobRepository
 from chagent.storage.migrate import migrate
-from chagent.web.app import WebRuntime, create_app, events
+from chagent.web.app import WebRuntime, create_app
+from chagent.web.runs_api import events
 
 
 class WriterTests(unittest.IsolatedAsyncioTestCase):
