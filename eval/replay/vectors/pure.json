@@ -1,0 +1,123 @@
+{
+  "vector_version": 1,
+  "notes": "Hand-written expectations from the module contracts, not generated from a run. A failure means a documented behaviour changed; fix the code or change this file in the same review.",
+  "vectors": [
+    {
+      "id": "projection.path-in-sentence",
+      "target": "outbound.to_model",
+      "input": {"text": "open /srv/chagent-eval/ws/src/app.py now", "workspace": "/srv/chagent-eval/ws"},
+      "expected": "open /workspace/src/app.py now",
+      "notes": "A path followed by a space is the ordinary case."
+    },
+    {
+      "id": "projection.root-only",
+      "target": "outbound.to_model",
+      "input": {"text": "root: /srv/chagent-eval/ws", "workspace": "/srv/chagent-eval/ws"},
+      "expected": "root: /workspace",
+      "notes": "End of string is a path boundary."
+    },
+    {
+      "id": "projection.prefix-is-not-a-path",
+      "target": "outbound.to_model",
+      "input": {"text": "/srv/chagent-eval/wsx/a", "workspace": "/srv/chagent-eval/ws"},
+      "expected": "/srv/chagent-eval/wsx/a",
+      "notes": "A sibling directory that starts with the root name is not the root."
+    },
+    {
+      "id": "projection.sentence-period",
+      "target": "outbound.to_model",
+      "input": {"text": "see /srv/chagent-eval/ws.", "workspace": "/srv/chagent-eval/ws"},
+      "expected": "see /workspace.",
+      "notes": "A period ends a sentence and is not part of the path."
+    },
+    {
+      "id": "projection.json-escaped-newline",
+      "target": "outbound.to_model",
+      "input": {"text": "/srv/chagent-eval/ws\\nnext", "workspace": "/srv/chagent-eval/ws"},
+      "expected": "/workspace\\nnext",
+      "notes": "A compacted transcript escapes newlines, so the path is followed by a backslash."
+    },
+    {
+      "id": "projection.does-not-touch-other-roots",
+      "target": "outbound.to_model",
+      "input": {"text": "/srv/chagent-eval/ws-other/a /srv/chagent-eval/ws/a", "workspace": "/srv/chagent-eval/ws"},
+      "expected": "/srv/chagent-eval/ws-other/a /workspace/a",
+      "notes": "Only the exact root is projected; a longer sibling name is left alone."
+    },
+    {
+      "id": "host.reverse-projection",
+      "target": "outbound.to_host",
+      "input": {"text": "cd /workspace && ls", "workspace": "/srv/chagent-eval/ws"},
+      "expected": "cd /srv/chagent-eval/ws && ls",
+      "notes": "The virtual root becomes the real one before execution."
+    },
+    {
+      "id": "host.needs-a-boundary",
+      "target": "outbound.to_host",
+      "input": {"text": "a/workspace/x", "workspace": "/srv/chagent-eval/ws"},
+      "expected": "a/workspace/x",
+      "notes": "A path segment that merely ends in 'workspace' is not the virtual root."
+    },
+    {
+      "id": "invocation.relative-path",
+      "target": "outbound.invocation_to_host",
+      "input": {"arguments": {"path": "/workspace/data.txt"}, "workspace": "/srv/chagent-eval/ws"},
+      "expected": {"path": "data.txt"},
+      "notes": "File arguments are relative to the workspace, not absolute."
+    },
+    {
+      "id": "invocation.patch-headers",
+      "target": "outbound.invocation_to_host",
+      "input": {
+        "arguments": {"patch": "--- /workspace/a.txt\n+++ /workspace/b.txt\n@@ -1 +1 @@\n-x\n+y\n"},
+        "workspace": "/srv/chagent-eval/ws"
+      },
+      "expected": {"patch": "--- a.txt\n+++ b.txt\n@@ -1 +1 @@\n-x\n+y\n"},
+      "notes": "Only the two header lines are rewritten; hunk bodies are untouched."
+    },
+    {
+      "id": "invocation.command-paths",
+      "target": "outbound.invocation_to_host",
+      "input": {"arguments": {"cmd": "ls /workspace"}, "workspace": "/srv/chagent-eval/ws"},
+      "expected": {"cmd": "ls /srv/chagent-eval/ws"},
+      "notes": "A command sees the host path, not the virtual one."
+    },
+    {
+      "id": "protect.clean-payload",
+      "target": "outbound.protect_payload",
+      "input": {"payload": {"messages": [{"content": "hello"}]}, "workspace": "/srv/chagent-eval/ws"},
+      "expected": {"messages": [{"content": "hello"}]},
+      "notes": "Nothing to project, nothing to refuse."
+    },
+    {
+      "id": "protect.unmapped-path-refused",
+      "target": "outbound.protect_payload",
+      "input": {"payload": {"content": "/srv/chagent-eval/wsx/secret"}, "workspace": "/srv/chagent-eval/ws"},
+      "expect_error": "ProtectedPathError",
+      "notes": "A workspace-shaped path that projection cannot map must stop the request, not be sent."
+    },
+    {
+      "id": "retry.table",
+      "target": "retry.table",
+      "input": {},
+      "expected": {
+        "cancelled": false,
+        "denied": false,
+        "execution_failed": true,
+        "expired": true,
+        "outcome_unknown": false,
+        "stale": false,
+        "unavailable": false,
+        "unwatched": false
+      },
+      "notes": "An unknown outcome is never retryable; an expired approval is, as a new question."
+    },
+    {
+      "id": "echo.returns-input-verbatim",
+      "target": "tool.echo",
+      "input": {"text": "  pass through  "},
+      "expected": "  pass through  ",
+      "notes": "The demo tool's whole contract, executed through the real tool path."
+    }
+  ]
+}

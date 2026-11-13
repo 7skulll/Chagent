@@ -31,3 +31,7 @@ dist/
 
 # Annotation ledger locks are local coordination state.
 /eval/annotations/*.lock
+
+# Recorded cassettes are transcripts of this machine's own model calls: valid
+# only when authorized, and never project content.
+/eval/replay/cassettes/

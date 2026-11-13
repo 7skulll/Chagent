@@ -1,0 +1,26 @@
+{
+  "id": "state/overwrite-existing-file",
+  "notes": "The state half of eval/cases/execution-boundary-approval-gated-write.json: the write itself, replayed in a disposable directory. It does not replay the approval — a recorded decision is evidence, not a grant.",
+  "fixture": {
+    "files": {
+      "data.txt": "before\n"
+    }
+  },
+  "calls": [
+    {
+      "tool": "write_file",
+      "arguments": {
+        "path": "data.txt",
+        "content": "42",
+        "overwrite": true
+      }
+    }
+  ],
+  "expect": {
+    "state": {
+      "data.txt": {
+        "content": "42"
+      }
+    }
+  }
+}

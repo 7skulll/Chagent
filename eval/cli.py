@@ -1,6 +1,6 @@
 """Operator command line for the evaluation contracts.
 
-Seven commands, each answering one question:
+Eight commands, each answering one question:
 
 ``manifest``  which tree, prompts, tools, skills and model produced a result
 ``export``    what one run actually recorded, bounded and redacted
@@ -9,6 +9,7 @@ Seven commands, each answering one question:
 ``annotate``  record a human verdict with its evidence and its dataset
 ``labels``    per-label precision/recall, or why it cannot be estimated
 ``case``      whether a case document still satisfies the published contract
+``replay``    whether a recorded call may be replayed, and what happens if it is
 
 The CLI is an operator tool, not a product entry point: it reads the database
 with a read-only transaction and never runs an agent.
@@ -24,6 +25,10 @@ from pathlib import Path
 import sys
 
 from eval import annotations, casefile
+from eval.replay import cassette as cassettes
+from eval.replay import plan as replay_plan
+from eval.replay import pure as replay_pure
+from eval.replay import sandbox as replay_sandbox
 from eval.attribute import AttributeProjection, format_diagnosis, sample_id
 from eval.evidence import EvalEvidence
 from eval.manifests import VersionManifest
@@ -84,6 +89,20 @@ def main(argv: list[str] | None = None) -> int:
     annotate.add_argument("--run", help="run id this sample refers to")
     annotate.add_argument("--file", type=Path, default=annotations.LEDGER)
 
+    replay = commands.add_parser(
+        "replay", help="decide, execute or verify a replay; exit 3 means the replay ran "
+                       "and reported not ok")
+    replay.add_argument("action", choices=("plan", "pure", "state", "cassette-record",
+                                           "cassette-verify"))
+    replay.add_argument("--run", help="run id (plan, cassette-record, cassette-verify)")
+    replay.add_argument("--case", type=Path, help="case document supplying the fixture")
+    replay.add_argument("--scenario", type=Path, help="stateful scenario JSON")
+    replay.add_argument("--cassette", type=Path, help="cassette file to verify")
+    replay.add_argument("--vectors", type=Path, help="pure vector file (default: bundled)")
+    replay.add_argument("--json", action="store_true", help="emit the whole document as JSON")
+    replay.add_argument("--db", help="database URL (default: CHAGENT_DATABASE_URL)")
+    replay.add_argument("--out", type=Path, help="write JSON here instead of stdout")
+
     labels = commands.add_parser("labels", help="report per-label precision and recall")
     labels.add_argument("--diagnoses", type=Path, required=True,
                         help="file or directory of attribute documents")
@@ -94,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return {"manifest": _manifest, "export": _export, "timeline": _timeline,
                 "attribute": _attribute, "annotate": _annotate, "labels": _labels,
-                "case": _case}[args.command](args)
+                "case": _case, "replay": _replay}[args.command](args)
     except (casefile.CaseInvalid, annotations.AnnotationInvalid) as error:
         print(f"invalid input: {error}", file=sys.stderr)
         return 1
@@ -220,6 +239,79 @@ def _load_diagnoses(path: Path) -> list[dict]:
     if not documents:
         raise ValueError(f"no attribution documents in {path}")
     return documents
+
+
+def _replay(args) -> int:
+    if args.action == "pure":
+        results = replay_pure.run(replay_pure.load_vectors(args.vectors or replay_pure.VECTORS_PATH))
+        document = replay_pure.report(results)
+        if args.out or args.json:
+            _emit(document, args.out)
+        else:
+            sys.stdout.write(replay_pure.format_results(results))
+        return 0 if document["passed"] == document["vectors"] else 3
+
+    if args.action == "plan":
+        if not args.run:
+            raise ValueError("replay plan needs --run")
+        case = replay_plan.load_case(args.case) if args.case else None
+        document = run(_plan_run(args.db, args.run, case))
+        if args.out or args.json:
+            _emit(document, args.out)
+        else:
+            sys.stdout.write(replay_plan.format_plan(document))
+        return 0
+
+    if args.action == "state":
+        if not args.scenario:
+            raise ValueError("replay state needs --scenario")
+        document = replay_sandbox.run_scenario(replay_sandbox.load_scenario(args.scenario))
+        if args.out or args.json:
+            _emit(document, args.out)
+        else:
+            sys.stdout.write(replay_sandbox.format_scenario(document))
+        return 0 if document["ok"] else 3
+
+    if args.action == "cassette-record":
+        if not args.run:
+            raise ValueError("replay cassette-record needs --run")
+        if not args.out:
+            raise ValueError("replay cassette-record needs --out")
+        document = run(_record(args.db, args.run, args.out))
+        print(json.dumps(document, ensure_ascii=False, sort_keys=True))
+        return 0
+
+    if not args.cassette or not args.run:
+        raise ValueError("replay cassette-verify needs --cassette and --run")
+    document = run(_verify(args.db, args.cassette, args.run))
+    if args.out or args.json:
+        _emit(document, args.out)
+    else:
+        sys.stdout.write(cassettes.format_verify(document))
+    return 0 if document["ok"] else 3
+
+
+async def _plan_run(url, run_id, case) -> dict:
+    async with _database(url) as database:
+        return await replay_plan.ReplayPlanning(database).plan(run_id, case=case)
+
+
+async def _record(url, run_id, destination: Path) -> dict:
+    async with _database(url) as database:
+        source = cassettes.CassetteSource(database)
+        rows = await source.rows(run_id)
+        workspace = await source.workspace(run_id)
+    recorded = cassettes.record(rows, workspace=workspace)
+    path = recorded.save(destination)
+    return {"path": str(path), "entries": len(recorded.entries),
+            "warnings": list(recorded.warnings)}
+
+
+async def _verify(url, path: Path, run_id) -> dict:
+    recorded = cassettes.Cassette.load(path)
+    async with _database(url) as database:
+        requests = await cassettes.CassetteSource(database).requests(run_id)
+    return await cassettes.verify(recorded, requests)
 
 
 def _emit(document: dict, destination: Path | None) -> None:
