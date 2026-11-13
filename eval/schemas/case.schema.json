@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chagent.local/eval/case.schema.json",
+  "title": "Chagent evaluation case",
+  "description": "One case is one task, its authority, its budget and the conditions that decide whether it passed. It contains no result: a case is a question, a trial is an answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "title", "capability", "prompt", "authority", "budget", "graders", "cleanup"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9/_-]{2,63}$",
+      "description": "Stable identifier. Renaming it creates a new case; changing the task under the same id requires a version bump."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Bumped whenever the task, fixture, authority or graders change. Results from two versions are not comparable."
+    },
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "capability": {
+      "enum": [
+        "project-work",
+        "website-delivery",
+        "run-diagnostics",
+        "document-synthesis",
+        "change-review",
+        "handoff",
+        "skill-selection",
+        "execution-boundary",
+        "multi-turn-context"
+      ],
+      "description": "Capability under test, taken from the coverage table in the plan. A case reports on exactly one."
+    },
+    "prompt": {"type": "string", "minLength": 1, "description": "The user turn the agent receives, verbatim."},
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["empty", "directory", "tarball", "repository"]},
+        "path": {"type": "string", "description": "Repository-relative path to the fixture source."},
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Content hash of the packed fixture. Required for anything restored from an archive."
+        },
+        "notes": {"type": "string"}
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundary", "execution", "gate"],
+      "description": "The execution axes this case is allowed to run under. A trial that ran under different axes is not this case.",
+      "properties": {
+        "boundary": {"enum": ["container", "host"]},
+        "execution": {"enum": ["full", "read-only"]},
+        "gate": {"enum": ["approval", "none"]},
+        "approvals": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Expected approval decisions, in order. A recorded decision is evidence, never a reusable grant."
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_turns", "wall_seconds"],
+      "properties": {
+        "max_turns": {"type": "integer", "minimum": 1},
+        "wall_seconds": {"type": "integer", "minimum": 1},
+        "max_cost_usd": {"type": ["number", "null"], "minimum": 0},
+        "max_tool_calls": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "graders": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "expects"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$"},
+          "kind": {
+            "enum": ["deterministic", "model_rubric", "human_review"],
+            "description": "Deterministic first. A model rubric is a supplement calibrated against human labels, never the sole gate."
+          },
+          "expects": {"type": "string", "minLength": 1, "description": "The condition, in a form the grader can decide."},
+          "evidence": {"type": "string", "description": "Where the deciding fact comes from: files, HTTP, database, approval records or report text."}
+        }
+      }
+    },
+    "cleanup": {
+      "type": "string",
+      "minLength": 1,
+      "description": "How the fixture and any started service are torn down. An unverified cleanup makes the next trial's baseline unknown."
+    },
+    "notes": {"type": "string"}
+  }
+}

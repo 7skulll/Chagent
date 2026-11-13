@@ -19,6 +19,11 @@ dist/
 # Assistant workspace state (local notes and caches, not project content)
 .workbuddy/
 
+# Trial outputs are local artifacts. Keeping them out of `git ls-files` is also
+# what keeps a version manifest stable: writing a result must not change the
+# version of the tree that produced it.
+/eval/results/
+
 # Documents uploaded from the page land in <workspace>/uploads. When the
 # workspace is this checkout, they are the user's files, never project content.
 /uploads/
