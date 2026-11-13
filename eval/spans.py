@@ -427,7 +427,7 @@ def _tool_span(row, run_id: UUID, parent: str, events: dict) -> Span:
                       lambda p: p.get("tool_call_id") == str(row["id"]))
     if approval:
         links.append({"kind": "waits_for", "type": "approval",
-                      "approval_id": approval[1].get("approval_id")})
+                      "approval_id": approval[2].get("approval_id")})
 
     precision = "commit_lag" if started else "unknown"
     return Span(
@@ -513,7 +513,8 @@ def _compaction_spans(rows, run_id: UUID, parent: str, events: dict) -> list[Spa
             warnings.append("speculative: runs alongside the answer, so it must not be added to wall time")
         if drop and tail is None:
             warnings.append(f"discarded: {(drop[2] or {}).get('reason') or 'reason not recorded'}")
-        status = "discarded" if drop and tail is None else (tail[2].get("status") if tail else rows_for["status"])
+        # A completion event carries no status field: reaching it is the status.
+        status = "discarded" if (drop and tail is None) else ("completed" if tail else rows_for["status"])
         spans.append(Span(
             span_id=f"compaction:{identity}",
             run_id=str(run_id),
@@ -862,6 +863,20 @@ def format_timeline(document: dict, *, limit: int = 200) -> str:
                 f"{gap['start']} → {gap['end']}")
         if all(gap["duration_ms"] < 20 for gap in accounting["gaps"]):
             lines.append("  none above 20 ms")
+    # Work recorded against the run but outside its window would otherwise only
+    # appear as a number, with no way to tell what produced it.
+    window_end = datetime.fromisoformat(window["end"])
+    outside = [
+        span for span in document["spans"]
+        if span["kind"] != "run" and span["started_at"] and span["execution_ended_at"]
+        and (datetime.fromisoformat(span["execution_ended_at"]) <= start
+             or datetime.fromisoformat(span["started_at"]) >= window_end)]
+    if outside:
+        lines.append("outside the run window (excluded from occupancy)")
+        for span in outside:
+            lines.append(
+                f"  {span['kind']:<10} {_clip(span['name'], 26):<26} "
+                f"{span['duration_ms'] / 1000:>7.3f}s  {span['started_at']}  {span['status']}")
     if document["stream"]["first_text_delta_at"]:
         stream = document["stream"]
         lines.append(
