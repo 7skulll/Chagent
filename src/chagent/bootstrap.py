@@ -42,6 +42,7 @@ def _tool_faces(
     native_host_exec: bool = False,
     defer_tools: bool = False,
     history_tools: bool = True,
+    include_skills: bool = True,
 ) -> dict[str, ToolExecutor]:
     """Build a unified executor or diagnostic mode-specific executors.
 
@@ -78,7 +79,7 @@ def _tool_faces(
             allow_workspace_writes=allow_workspace_writes,
             process_stdin=process_stdin, versioned_files=versioned_files,
             artifacts=ArtifactRepository(database), sandbox=sandbox,
-            processes=processes, web=web, include_echo=include_echo,
+            processes=processes, web=web, include_echo=include_echo, include_skills=include_skills,
             host_exec=host_exec, native_host_exec=native_host_exec,
             defer_tools=defer_tools, history_tools=history_tools,
         )
@@ -136,6 +137,9 @@ def create_demo_runner(
         allow_workspace_writes=allow_workspace_writes, versioned_files=versioned_files,
         defer_tools=defer_tools,
         history_tools=False,
+        # Deterministic probes exercise one named tool; workflow catalogs would
+        # change their measured context budget without being used by the client.
+        include_skills=False,
         # ``echo`` is the neutral tool that needs no filesystem: this is the only
         # path that gets it.
         include_echo=True,
@@ -173,6 +177,7 @@ def create_runner(
     native_host_exec: bool = False,
     defer_tools: bool = False,
     history_tools: bool = True,
+    include_skills: bool = True,
 ) -> AgentRunner:
     if single_face and not isinstance(client, FakeModelClient):
         raise ValueError("single_face is reserved for the deterministic diagnostic client")
@@ -185,7 +190,7 @@ def create_runner(
                         process_stdin=process_stdin, versioned_files=versioned_files,
                         unified=unified, containerized=containerized, host_exec=host_exec,
                         native_host_exec=native_host_exec,
-                        defer_tools=defer_tools, history_tools=history_tools)
+                        defer_tools=defer_tools, history_tools=history_tools, include_skills=include_skills)
     # The runner's own executor is the fallback for callers that build a runner
     # without faces; a single-face harness has nothing to resolve.
     default_face = faces.get("work") or next(iter(faces.values()))

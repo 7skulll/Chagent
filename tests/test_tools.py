@@ -75,9 +75,9 @@ class BuiltinSurfaceTests(unittest.TestCase):
         registry = create_builtin_registry(mode="code")
         self.assertIsNone(registry.get("echo"))
         self.assertEqual({tool.name for tool in registry.definitions()},
-                         {"list_dir", "read_file", "write_file", "edit_file", "glob", "grep", "apply_patch", "create_directory"})
+                         {"list_dir", "read_file", "write_file", "edit_file", "glob", "grep", "apply_patch", "create_directory", "read_skill"})
 
     def test_demo_path_opts_in(self):
         registry = create_builtin_registry(mode="code", include_echo=True)
         self.assertIsNotNone(registry.get("echo"))
-        self.assertEqual(len(registry.definitions()), 9)
+        self.assertEqual(len(registry.definitions()), 10)

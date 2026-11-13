@@ -300,7 +300,7 @@ class WebAccessTests(unittest.TestCase):
         registry = create_builtin_registry(mode="work", web=WebAccess("ds-k"))
         names = [item.name for item in registry.definitions()]
         self.assertEqual(names, ["apply_patch", "create_directory", "edit_file", "glob", "grep", "list_dir",
-                                 "read_file", "web_fetch", "web_search", "write_file"])
+                                 "read_file", "read_skill", "web_fetch", "web_search", "write_file"])
         declaration = registry.get("web_search").declaration()
         self.assertEqual(declaration.parameters["required"], ["query"])
         # need_content is not offered in this batch on purpose.

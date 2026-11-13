@@ -34,6 +34,9 @@ from chagent.hostexec.native import NativeHostExecTool, NativeHostProcessTool
 from chagent.tools.site import SiteTool
 from chagent.tools.collect_file import CollectFileTool
 from chagent.tools.task_history import TaskHistoryTool
+from chagent.tools.skills import ReadSkillTool
+from chagent.tools.run_diagnostics import RunDiagnosticsTool
+from chagent.storage.run_diagnostics import RunDiagnosticsRepository
 
 
 #: Tools that change files in the workspace. Shared by both modes; what a
@@ -55,7 +58,7 @@ EXECUTION_TOOLS = frozenset({"exec_command", "run_tests", "process"})
 #: the first three turns of every session use, and one extra `tool_search` turn
 #: costs more than the declaration it saves.
 DEFERRABLE_TOOLS = frozenset({"web_search", "web_fetch", "host_exec", "process", "run_tests", "create_file",
-                              "search_task_history", "read_task_history"})
+                              "search_task_history", "read_task_history", "list_recent_runs", "inspect_run"})
 
 #: Below this many deferrable tools the index and `tool_search` cost about what
 #: they save, so the face is declared whole.
@@ -76,7 +79,8 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
                             host_exec: tuple[str, str] | None = None,
                             native_host_exec: bool = False,
                             defer_tools: bool = False,
-                            history_tools: bool = True) -> ToolRegistry:
+                            history_tools: bool = True,
+                            include_skills: bool = True) -> ToolRegistry:
     """One tool face. ``mode`` is required so no call site gets a face by accident.
 
     The second layer (``ToolExecutor``) is the registry itself: an executor built
@@ -91,6 +95,8 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
     registry = ToolRegistry()
     # Reads exist in both modes: they are what every session is for.
     tools = [ListDirTool(), ReadFileTool(), GlobTool(), GrepTool()]
+    if include_skills:
+        tools.append(ReadSkillTool())
     # Writes do too, unless this caller is one that cannot supervise them.
     readonly_code = mode == "code" and sandbox is not None and not sandbox.settings.writable_workspace
     if allow_workspace_writes and not readonly_code:
@@ -138,6 +144,9 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
     if artifacts is not None:
         registry.register(ReadArtifactTool(artifacts))
         if history_tools:
+            diagnostics = RunDiagnosticsRepository(artifacts.database)
+            registry.register(RunDiagnosticsTool(diagnostics))
+            registry.register(RunDiagnosticsTool(diagnostics, detail=True))
             registry.register(TaskHistoryTool(artifacts.database))
             registry.register(TaskHistoryTool(artifacts.database, detail=True))
         if allow_workspace_writes and not readonly_code:

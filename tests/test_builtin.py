@@ -33,7 +33,7 @@ from chagent.tools.builtin import EXECUTION_TOOLS, WRITE_TOOLS, create_builtin_r
 from chagent.tools.executor import ToolExecutor
 from chagent.tools.web import WebAccess
 
-WORK_TOOLS = frozenset({"list_dir", "read_file", "glob", "grep"})
+WORK_TOOLS = frozenset({"list_dir", "read_file", "glob", "grep", "read_skill"})
 
 
 def names(registry):

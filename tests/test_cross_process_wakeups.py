@@ -37,7 +37,7 @@ from chagent.events.notify import CHANNEL, PostgresWakeups
 from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
 
-LISTENER = Path("/tmp/wakeup_listener.py")
+LISTENER = Path(__file__).parent / "helpers" / "wakeup_listener.py"
 READY_TIMEOUT = 15.0
 WAKE_TIMEOUT = 5.0
 
