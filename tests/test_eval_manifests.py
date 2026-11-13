@@ -8,7 +8,7 @@ stored request shape fails here instead of silently hashing the wrong bytes.
 """
 
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from io import StringIO
 import json
 import os
@@ -18,7 +18,7 @@ import tempfile
 import unittest
 from uuid import uuid4
 
-from chagent.domain.messages import SystemMessage, UserMessage
+from chagent.domain.messages import SystemMessage, TextContent, UserMessage
 from chagent.domain.tools import Tool, ToolReference
 from chagent.models.base import Model, ModelRequest
 from chagent.models.transcript import normalize
@@ -28,7 +28,7 @@ from eval.evidence import _payload
 from eval.manifests import (
     CaseInvalid, VersionManifest, prompt_material, sha256_json, sha256_text,
 )
-from eval.records import GraderResult, TrialInvalid, TrialStore, new_trial
+from eval.records import GraderResult, TrialInvalid, TrialRecord, TrialStore, new_trial
 
 REPOSITORY = Path(__file__).resolve().parent.parent
 MODEL = Model(id="test-model", provider="local-test", api="openai-chat",
@@ -75,6 +75,13 @@ def case_document(**overrides) -> dict:
 
 
 class PromptMaterialTests(unittest.TestCase):
+    def test_multi_block_prompt_matches_adapter_and_does_not_collide_with_flat_text(self):
+        request = ModelRequest(MODEL, [SystemMessage([TextContent("A"), TextContent("B")], 0)])
+        prompt, _ = prompt_material(asdict(request))
+        self.assertEqual(prompt, normalize(request)[0])
+        flat = ModelRequest(MODEL, [SystemMessage("AB", 0)])
+        self.assertNotEqual(sha256_text(prompt), sha256_text(prompt_material(asdict(flat))[0]))
+
     def test_matches_transcript_normalize(self):
         stored, request = stored_request()
         prompt, declarations = prompt_material(stored)
@@ -97,6 +104,26 @@ class PromptMaterialTests(unittest.TestCase):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_skill_hashes_belong_to_selected_checkout_without_executing_it(self):
+        folder = self.root / "src/chagent/skills"
+        folder.mkdir(parents=True)
+        (folder / "__init__.py").write_text('raise RuntimeError("do not execute candidate")\nSKILL_NAMES = ("task-handoff",)\n')
+        skill = folder / "task-handoff/SKILL.md"
+        skill.parent.mkdir()
+        skill.write_text("candidate skill v1")
+        extra = folder / "not-registered/SKILL.md"
+        extra.parent.mkdir()
+        extra.write_text("not enabled")
+        first = VersionManifest.capture(self.root)
+        self.assertEqual(first.skills, {"task-handoff": sha256_text("candidate skill v1")})
+        skill.write_text("candidate skill v2")
+        self.assertNotEqual(first.skills, VersionManifest.capture(self.root).skills)
+
+    def test_missing_skill_catalog_does_not_import_host_skills(self):
+        manifest = VersionManifest.capture(self.root)
+        self.assertEqual(manifest.skills, {})
+        self.assertIn("skills", manifest.missing())
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -155,6 +182,20 @@ class ManifestTests(unittest.TestCase):
 
 
 class CaseTests(unittest.TestCase):
+    def test_tarball_requires_path_and_hash_but_empty_fixture_does_not(self):
+        for fixture in ({"kind": "tarball"}, {"kind": "tarball", "path": "fixture.tar"},
+                        {"kind": "tarball", "sha256": "a" * 64},
+                        {"kind": "directory"}, {"kind": "repository"}):
+            with self.subTest(fixture=fixture), self.assertRaises(CaseInvalid):
+                self.load(case_document(fixture=fixture))
+        self.load(case_document(fixture={"kind": "tarball", "path": "fixtures/project.tar", "sha256": "a" * 64}))
+        self.load(case_document(fixture={"kind": "empty"}))
+
+    def test_fixture_path_cannot_be_absolute_or_traverse_parent(self):
+        for path in ("/tmp/project.tar", "../project.tar", "fixtures/../../project.tar", "C:\\project.tar", "fixtures\\..\\project.tar"):
+            with self.subTest(path=path), self.assertRaises(CaseInvalid):
+                self.load(case_document(fixture={"kind": "tarball", "path": path, "sha256": "a" * 64}))
+
     def load(self, document: dict):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -203,6 +244,46 @@ class CaseTests(unittest.TestCase):
 
 
 class TrialTests(unittest.TestCase):
+    def test_unrelated_extra_and_duplicate_graders_cannot_substitute_required_checks(self):
+        trial = new_trial(self.case, {}, "baseline")
+        for graders in ((GraderResult("other_one", "pass"), GraderResult("other_two", "pass")),
+                        (GraderResult("reads_named_skill", "pass"), GraderResult("other_two", "pass")),
+                        (GraderResult("reads_named_skill", "pass"), GraderResult("reads_named_skill", "pass"))):
+            with self.subTest(graders=graders), self.assertRaises(TrialInvalid):
+                trial.with_graders(graders)
+
+    def test_infra_error_status_cannot_be_overridden_by_grader_passes(self):
+        trial = new_trial(self.case, {}, "baseline", status="infra_error")
+        self.assertEqual(trial.with_graders(tuple(GraderResult(g["id"], "pass") for g in self.case.graders)).verdict, "infra_error")
+
+    def test_legacy_count_only_record_cannot_become_pass(self):
+        trial = new_trial(self.case, {}, "baseline").with_graders(tuple(GraderResult(g["id"], "pass") for g in self.case.graders))
+        document = trial.to_json()
+        document.pop("grader_ids", None)
+        self.assertEqual(TrialRecord.from_json(document).verdict, "inconclusive")
+
+    def test_trial_id_cannot_escape_store_on_create_or_deserialize(self):
+        trial = new_trial(self.case, {}, "baseline")
+        for identity in ("../escape", str(self.root / "outside"), "nested/trial", "a\\b", "a\n", ""):
+            with self.subTest(identity=identity), self.assertRaises(TrialInvalid):
+                replace(trial, trial_id=identity)
+            with self.assertRaises(TrialInvalid):
+                new_trial(self.case, {}, "baseline", trial_id=identity)
+            document = trial.to_json()
+            document["trial_id"] = identity
+            with self.assertRaises(TrialInvalid):
+                TrialRecord.from_json(document)
+        self.assertFalse((self.root / "outside.json").exists())
+
+    def test_symlink_experiment_cannot_escape_store(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        self.store.root.mkdir()
+        (self.store.root / "baseline").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(TrialInvalid):
+            self.store.write(new_trial(self.case, {}, "baseline"))
+        self.assertEqual(list(outside.iterdir()), [])
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -279,7 +360,7 @@ class CliTests(unittest.TestCase):
                 code = cli.main(["manifest", "--repo", str(REPOSITORY), "--out", str(out)])
             self.assertEqual(code, 0)
             document = json.loads(out.read_text(encoding="utf-8"))
-            self.assertEqual(document["schema_version"], 1)
+            self.assertEqual(document["schema_version"], 2)
             self.assertEqual(set(document) >= {"repo", "prompts", "tools", "skills"}, True)
 
     def test_invalid_case_exits_non_zero(self):

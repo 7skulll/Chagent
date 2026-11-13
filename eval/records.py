@@ -18,11 +18,13 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 from uuid import uuid4
 
 OUTCOMES = ("pass", "fail", "inconclusive", "infra_error")
 STATUSES = ("completed", "failed", "cancelled", "interrupted", "infra_error")
 EXPERIMENT = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+TRIAL_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}")
 
 
 class TrialInvalid(ValueError):
@@ -58,6 +60,7 @@ class TrialRecord:
     status: str
     manifest: dict
     graders_declared: int
+    grader_ids: tuple[str, ...] | None = None
     started_at: str | None = None
     ended_at: str | None = None
     run_id: str | None = None
@@ -66,15 +69,25 @@ class TrialRecord:
     notes: str = ""
 
     def __post_init__(self) -> None:
+        if not isinstance(self.trial_id, str) or not TRIAL_ID.fullmatch(self.trial_id):
+            raise TrialInvalid("trial_id must be a bounded filename identifier")
         if self.status not in STATUSES:
             raise TrialInvalid(f"unknown trial status: {self.status}")
-        if not EXPERIMENT.match(self.experiment):
+        if not EXPERIMENT.fullmatch(self.experiment):
             raise TrialInvalid(f"invalid experiment name: {self.experiment!r}")
         if self.graders_declared < 0:
             raise TrialInvalid("graders_declared must not be negative")
         ids = [grader.grader_id for grader in self.graders]
         if len(ids) != len(set(ids)):
             raise TrialInvalid("duplicate grader result")
+        if self.grader_ids is not None:
+            object.__setattr__(self, "grader_ids", tuple(self.grader_ids))
+            if (len(self.grader_ids) != self.graders_declared or
+                    len(set(self.grader_ids)) != len(self.grader_ids) or
+                    any(not isinstance(identity, str) or not identity for identity in self.grader_ids)):
+                raise TrialInvalid("declared grader identities do not match the count")
+            if set(ids) - set(self.grader_ids):
+                raise TrialInvalid("result from undeclared grader")
 
     @property
     def verdict(self) -> str:
@@ -86,9 +99,9 @@ class TrialRecord:
         the candidate's.
         """
         results = [grader.result for grader in self.graders]
-        if "infra_error" in results:
+        if self.status == "infra_error" or "infra_error" in results:
             return "infra_error"
-        if len(self.graders) < self.graders_declared:
+        if self.grader_ids is None or {g.grader_id for g in self.graders} != set(self.grader_ids):
             return "inconclusive"
         if not results:
             return "inconclusive"
@@ -103,6 +116,7 @@ class TrialRecord:
 
     def to_json(self) -> dict:
         return {
+            "record_version": 2,
             "trial_id": self.trial_id,
             "experiment": self.experiment,
             "case": {"id": self.case_id, "version": self.case_version, "sha256": self.case_sha256},
@@ -113,6 +127,7 @@ class TrialRecord:
             "run_id": self.run_id,
             "usage": self.usage,
             "graders_declared": self.graders_declared,
+            "grader_ids": list(self.grader_ids) if self.grader_ids is not None else None,
             "graders": [grader.to_json() for grader in self.graders],
             "manifest": self.manifest,
             "notes": self.notes,
@@ -131,6 +146,7 @@ class TrialRecord:
             status=document["status"],
             manifest=document.get("manifest") or {},
             graders_declared=document.get("graders_declared", len(graders)),
+            grader_ids=document.get("grader_ids"),
             started_at=document.get("started_at"),
             ended_at=document.get("ended_at"),
             run_id=document.get("run_id"),
@@ -147,19 +163,30 @@ class TrialStore:
         self.root = Path(root)
 
     def directory(self, experiment: str) -> Path:
-        if not EXPERIMENT.match(experiment):
+        if not EXPERIMENT.fullmatch(experiment):
             raise TrialInvalid(f"invalid experiment name: {experiment!r}")
-        return self.root / experiment
+        directory = self.root / experiment
+        if not directory.resolve().is_relative_to(self.root.resolve()):
+            raise TrialInvalid("experiment directory escapes the result root")
+        return directory
 
     def write(self, trial: TrialRecord) -> Path:
         directory = self.directory(trial.experiment)
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{trial.trial_id}.json"
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(trial.to_json(), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8")
-        os.replace(temporary, path)
+        # Unique temporary files cannot follow a pre-existing <trial>.tmp link.
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
+                                         suffix=".tmp", delete=False) as handle:
+            temporary = Path(handle.name)
+            try:
+                handle.write(json.dumps(trial.to_json(), ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
         # One append per trial, written with a single syscall so a reader never
         # sees half a line. The record file is authoritative; the index is a
         # convenience that can be rebuilt from the directory.
@@ -167,7 +194,8 @@ class TrialStore:
                            "case_version": trial.case_version, "status": trial.status,
                            "verdict": trial.verdict, "started_at": trial.started_at,
                            "run_id": trial.run_id}, ensure_ascii=False, sort_keys=True) + "\n"
-        with open(directory / "index.jsonl", "a", encoding="utf-8") as handle:
+        descriptor = os.open(directory / "index.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
             handle.write(line)
             handle.flush()
         return path
@@ -185,7 +213,7 @@ def new_trial(case, manifest: dict, experiment: str, *, trial_id: str | None = N
               started_at: str | None = None, ended_at: str | None = None,
               usage: dict | None = None) -> TrialRecord:
     return TrialRecord(
-        trial_id=trial_id or str(uuid4()),
+        trial_id=trial_id if trial_id is not None else str(uuid4()),
         experiment=experiment,
         case_id=case.id,
         case_version=case.version,
@@ -193,6 +221,7 @@ def new_trial(case, manifest: dict, experiment: str, *, trial_id: str | None = N
         status=status,
         manifest=manifest,
         graders_declared=len(case.graders),
+        grader_ids=tuple(grader["id"] for grader in case.graders),
         started_at=started_at,
         ended_at=ended_at,
         run_id=run_id,

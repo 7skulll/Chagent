@@ -39,14 +39,18 @@
       "required": ["kind"],
       "properties": {
         "kind": {"enum": ["empty", "directory", "tarball", "repository"]},
-        "path": {"type": "string", "description": "Repository-relative path to the fixture source."},
+        "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(^|/)\\.\\.(/|$)).+$", "description": "Repository-relative path to the fixture source; no parent traversal or platform-absolute paths."},
         "sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
           "description": "Content hash of the packed fixture. Required for anything restored from an archive."
         },
         "notes": {"type": "string"}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"enum": ["directory", "repository", "tarball"]}}}, "then": {"required": ["path"]}},
+        {"if": {"properties": {"kind": {"const": "tarball"}}}, "then": {"required": ["sha256"]}}
+      ]
     },
     "authority": {
       "type": "object",

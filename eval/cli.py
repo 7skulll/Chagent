@@ -1,9 +1,10 @@
-"""Operator command line for the P0 contracts.
+"""Operator command line for the evaluation contracts.
 
-Three commands, each answering one question:
+Four commands, each answering one question:
 
 ``manifest``  which tree, prompts, tools, skills and model produced a result
 ``export``    what one run actually recorded, bounded and redacted
+``timeline``  when each step ran, how well that is known, and what is missing
 ``case``      whether a case document still satisfies the published contract
 
 The CLI is an operator tool, not a product entry point: it reads the database
@@ -22,6 +23,7 @@ import sys
 from eval import casefile
 from eval.evidence import EvalEvidence
 from eval.manifests import CaseInvalid, VersionManifest
+from eval.spans import SpanProjection, format_timeline
 
 REPOSITORY = Path(__file__).resolve().parent.parent
 
@@ -48,9 +50,17 @@ def main(argv: list[str] | None = None) -> int:
     case = commands.add_parser("case", help="validate case documents")
     case.add_argument("paths", nargs="+", type=Path)
 
+    timeline = commands.add_parser("timeline", help="project one run into spans and timing accounting")
+    timeline.add_argument("run_id")
+    timeline.add_argument("--json", action="store_true", help="emit the whole document as JSON")
+    timeline.add_argument("--limit", type=int, default=200, help="spans to print in text mode")
+    timeline.add_argument("--db", help="database URL (default: CHAGENT_DATABASE_URL)")
+    timeline.add_argument("--out", type=Path, help="write JSON here instead of stdout")
+
     args = parser.parse_args(argv)
     try:
-        return {"manifest": _manifest, "export": _export, "case": _case}[args.command](args)
+        return {"manifest": _manifest, "export": _export, "timeline": _timeline,
+                "case": _case}[args.command](args)
     except CaseInvalid as error:
         print(f"invalid case: {error}", file=sys.stderr)
         return 1
@@ -75,8 +85,8 @@ def _manifest(args) -> int:
 
 
 async def _attach(url, run_id, manifest: VersionManifest) -> VersionManifest:
-    async with _database(url) as evidence:
-        fingerprint = await evidence.request_fingerprint(run_id)
+    async with _database(url) as database:
+        fingerprint = await EvalEvidence(database).request_fingerprint(run_id)
     if manifest.model is None and fingerprint.get("model"):
         manifest = replace(manifest, model=fingerprint["model"])
     return manifest.with_fingerprint(fingerprint)
@@ -89,8 +99,23 @@ def _export(args) -> int:
 
 
 async def _export_run(url, run_id, events, include_payload) -> dict:
-    async with _database(url) as evidence:
-        return await evidence.export_run(run_id, events=events, include_payload=include_payload)
+    async with _database(url) as database:
+        return await EvalEvidence(database).export_run(
+            run_id, events=events, include_payload=include_payload)
+
+
+def _timeline(args) -> int:
+    document = run(_timeline_run(args.db, args.run_id))
+    if args.out or args.json:
+        _emit(document, args.out)
+        return 0
+    sys.stdout.write(format_timeline(document, limit=max(1, args.limit)))
+    return 0
+
+
+async def _timeline_run(url, run_id) -> dict:
+    async with _database(url) as database:
+        return await SpanProjection(database).project(run_id)
 
 
 def _case(args) -> int:
@@ -123,7 +148,7 @@ class _database:
     def __init__(self, url: str | None) -> None:
         self.url = url
 
-    async def __aenter__(self) -> EvalEvidence:
+    async def __aenter__(self):
         from chagent.config import Settings
         from chagent.storage.database import Database
 
@@ -132,7 +157,7 @@ class _database:
             settings = replace(settings, database_url=self.url)
         self.database = Database(settings)
         await self.database.connect()
-        return EvalEvidence(self.database)
+        return self.database
 
     async def __aexit__(self, *exception) -> None:
         await self.database.close()

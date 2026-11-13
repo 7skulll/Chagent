@@ -26,13 +26,16 @@ the manifest records that in ``warnings`` instead of implying more.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import ast
 import hashlib
 import json
 from pathlib import Path
 import platform
 import subprocess
 
-SCHEMA_VERSION = 1
+# v2 binds skills to the selected checkout and preserves system text block
+# separators. Do not compare v1 fingerprints as if they used these semantics.
+SCHEMA_VERSION = 2
 #: Repository-relative paths this manifest knows how to fingerprint.
 PROMPT_SOURCE = Path("src/chagent/context/builder.py")
 TOOLS_SOURCE = Path("src/chagent/tools")
@@ -87,7 +90,7 @@ def prompt_material(request: dict) -> tuple[str, list[dict]]:
         if not isinstance(message, dict) or "sections" not in message:
             continue
         content = message.get("content")
-        text = content if isinstance(content, str) else "".join(
+        text = content if isinstance(content, str) else "\n".join(
             block.get("text", "") for block in content or [] if isinstance(block, dict))
         if text:
             instructions.append(text)
@@ -268,22 +271,33 @@ def _patch_digest(root: Path, warnings: list[str]) -> tuple[str | None, bool]:
 
 
 def _skill_hashes(root: Path) -> tuple[dict, list[str]]:
-    """The bundled skills, by the text the model would actually read."""
+    """Read the selected checkout's literal catalog without executing its code."""
+    folder = root / SKILLS_SOURCE
     try:
-        from chagent.skills import SKILL_NAMES, read_skill
-
-        return ({name: sha256_text(read_skill(name)) for name in SKILL_NAMES}, [])
-    except (ImportError, OSError, ValueError) as error:
-        # An exported tree without ``src`` on the path still needs a fingerprint.
-        warning = f"skill list read from disk, chagent not importable: {type(error).__name__}"
+        tree = ast.parse((folder / "__init__.py").read_text(encoding="utf-8"))
+        catalogs = [node.value for node in tree.body if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == "SKILL_NAMES" for target in node.targets)]
+        if len(catalogs) != 1:
+            raise ValueError("expected one literal SKILL_NAMES assignment")
+        names = ast.literal_eval(catalogs[0])
+        if (not isinstance(names, (tuple, list)) or not names or
+                any(not isinstance(name, str) or not name or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in name) for name in names)
+                or len(set(names)) != len(names)):
+            raise ValueError("invalid literal skill catalog")
+    except (OSError, SyntaxError, ValueError, TypeError):
+        return {}, ["selected checkout skill catalog is missing or not a supported literal: skills are unbound"]
     hashes = {}
-    for path in sorted((root / SKILLS_SOURCE).glob("*/SKILL.md")):
-        digest = file_sha256(path)
-        if digest is not None:
-            hashes[path.parent.name] = digest
-    if not hashes:
-        return {}, [warning, "no bundled skills found: the skill surface is unbound"]
-    return hashes, [warning]
+    warnings = []
+    for name in names:
+        path = folder / name / "SKILL.md"
+        digest = file_sha256(path) if path.resolve().is_relative_to(root.resolve()) else None
+        if digest is None:
+            warnings.append(f"selected checkout skill {name} is unreadable: skills are unbound")
+        else:
+            hashes[name] = digest
+    if warnings:
+        return {}, warnings
+    return hashes, []
 
 
 def _tree_digest(root: Path) -> str | None:
