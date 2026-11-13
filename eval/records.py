@@ -18,7 +18,6 @@ import json
 import os
 from pathlib import Path
 import re
-import tempfile
 from uuid import uuid4
 
 OUTCOMES = ("pass", "fail", "inconclusive", "infra_error")
@@ -99,8 +98,11 @@ class TrialRecord:
         the candidate's.
         """
         results = [grader.result for grader in self.graders]
-        if self.status == "infra_error" or "infra_error" in results:
+        if (self.manifest.get("harness", {}).get("cleanup_verified") is False
+                or self.status == "infra_error" or "infra_error" in results):
             return "infra_error"
+        if self.manifest.get("harness", {}).get("budget_violation"):
+            return "fail"
         if self.grader_ids is None or {g.grader_id for g in self.graders} != set(self.grader_ids):
             return "inconclusive"
         if not results:
@@ -174,19 +176,12 @@ class TrialStore:
         directory = self.directory(trial.experiment)
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{trial.trial_id}.json"
-        # Unique temporary files cannot follow a pre-existing <trial>.tmp link.
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
-                                         suffix=".tmp", delete=False) as handle:
-            temporary = Path(handle.name)
-            try:
-                handle.write(json.dumps(trial.to_json(), ensure_ascii=False, indent=2, sort_keys=True) + "\n")
-            except BaseException:
-                temporary.unlink(missing_ok=True)
-                raise
+        from eval.integrity import publish
+
         try:
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
+            publish(path, trial.to_json())
+        except ValueError as error:
+            raise TrialInvalid(str(error)) from error
         # One append per trial, written with a single syscall so a reader never
         # sees half a line. The record file is authoritative; the index is a
         # convenience that can be rebuilt from the directory.
@@ -200,12 +195,20 @@ class TrialStore:
             handle.flush()
         return path
 
-    def read(self, experiment: str) -> list[TrialRecord]:
+    def read(self, experiment: str, *, ignore: tuple[str, ...] = ()) -> list[TrialRecord]:
+        """Every trial record in the experiment directory.
+
+        ``ignore`` names files that live beside the trials but are not trials —
+        the preregistration, for one. It is a parameter rather than a silent
+        parse failure: a file this store cannot read is either a trial that must
+        be seen or a mistake the caller has to name.
+        """
         directory = self.directory(experiment)
         if not directory.is_dir():
             return []
         return [TrialRecord.from_json(json.loads(path.read_text(encoding="utf-8")))
-                for path in sorted(directory.glob("*.json"))]
+                for path in sorted(directory.glob("*.json"))
+                if path.name not in ignore]
 
 
 def new_trial(case, manifest: dict, experiment: str, *, trial_id: str | None = None,

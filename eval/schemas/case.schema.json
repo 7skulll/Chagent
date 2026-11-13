@@ -93,6 +93,15 @@
             "description": "Deterministic first. A model rubric is a supplement calibrated against human labels, never the sole gate."
           },
           "expects": {"type": "string", "minLength": 1, "description": "The condition, in a form the grader can decide."},
+          "spec": {
+            "type": "object",
+            "description": "Machine-decidable parameters: a check name plus its arguments. Absent means no executable specification exists, and a trial reports this grader as inconclusive rather than guessing from the prose.",
+            "required": ["check"],
+            "properties": {
+              "check": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,63}$"}
+            },
+            "additionalProperties": true
+          },
           "evidence": {"type": "string", "description": "Where the deciding fact comes from: files, HTTP, database, approval records or report text."}
         }
       }

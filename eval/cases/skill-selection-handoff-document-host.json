@@ -1,0 +1,36 @@
+{
+  "id": "skill-selection/handoff-document-host",
+  "version": 1,
+  "title": "An explicitly named skill is read before the document is written, and the document has structure",
+  "capability": "skill-selection",
+  "prompt": "用 task-handoff 技能，把当前任务整理成一份交接说明，写到工作区的 HANDOFF.md。",
+  "fixture": {"kind": "empty", "notes": "An empty disposable workspace; the skill body comes from the checkout, not from the fixture."},
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
+  "budget": {"max_turns": 8, "wall_seconds": 240, "max_cost_usd": null, "max_tool_calls": 16},
+  "graders": [
+    {
+      "id": "skill_was_read",
+      "kind": "deterministic",
+      "expects": "read_skill was called with name=task-handoff",
+      "evidence": "tool_calls arguments for read_skill",
+      "spec": {"check": "tool_called_with", "tool": "read_skill", "argument": "name",
+               "equals": "task-handoff"}
+    },
+    {
+      "id": "document_written",
+      "kind": "deterministic",
+      "expects": "HANDOFF.md exists in the workspace",
+      "evidence": "workspace tree",
+      "spec": {"check": "file_exists", "path": "HANDOFF.md"}
+    },
+    {
+      "id": "document_has_structure",
+      "kind": "deterministic",
+      "expects": "HANDOFF.md has at least three headings, so it is a document rather than one paragraph",
+      "evidence": "lines starting with # in HANDOFF.md",
+      "spec": {"check": "file_has_headings", "path": "HANDOFF.md", "min": 3}
+    }
+  ],
+  "cleanup": "Discard the trial workspace; the skill body is packaged with the checkout and is never modified.",
+  "notes": "This grades only what a deterministic check can decide for a skill case: the library was consulted, a file exists, and it has structure. Whether the content follows the skill's own outline is a semantic judgement and is deliberately not asserted here — an uncalibrated rubric may not gate a trial."
+}

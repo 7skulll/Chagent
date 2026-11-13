@@ -1,6 +1,6 @@
 """Operator command line for the evaluation contracts.
 
-Eight commands, each answering one question:
+Eleven commands, each answering one question:
 
 ``manifest``  which tree, prompts, tools, skills and model produced a result
 ``export``    what one run actually recorded, bounded and redacted
@@ -10,9 +10,15 @@ Eight commands, each answering one question:
 ``labels``    per-label precision/recall, or why it cannot be estimated
 ``case``      whether a case document still satisfies the published contract
 ``replay``    whether a recorded call may be replayed, and what happens if it is
+``prereg``    what an experiment promises before its first trial
+``trial``     run one preregistered slot and grade it
+``report``    what the observed trials do and do not support
 
-The CLI is an operator tool, not a product entry point: it reads the database
-with a read-only transaction and never runs an agent.
+The CLI is an operator tool, not a product entry point. Every command except
+``trial`` only reads: the read paths use a read-only transaction, and nothing
+here writes to the product's own database. ``trial`` is the one command that
+spends model calls and writes rows, so it runs against a separate evaluation
+schema and refuses to start a slot the protocol did not promise.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ import argparse
 import asyncio
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -103,6 +110,33 @@ def main(argv: list[str] | None = None) -> int:
     replay.add_argument("--db", help="database URL (default: CHAGENT_DATABASE_URL)")
     replay.add_argument("--out", type=Path, help="write JSON here instead of stdout")
 
+    prereg = commands.add_parser("prereg", help="freeze an experiment protocol before its first trial")
+    prereg.add_argument("--spec", type=Path, required=True,
+                        help="JSON with the question, hypothesis, arms, repeats, budget and thresholds")
+    prereg.add_argument("--case", type=Path, action="append", required=True,
+                        help="case document or directory; repeat for each")
+    prereg.add_argument("--out", type=Path, help="results directory (default: eval/results/<experiment>)")
+    prereg.add_argument("--json", action="store_true", help="emit the frozen protocol as JSON")
+
+    trial = commands.add_parser("trial", help="run preregistered trials and grade them")
+    trial.add_argument("--protocol", type=Path, required=True,
+                       help="results directory or its protocol.json")
+    trial.add_argument("--cases", type=Path, default=REPOSITORY / "eval" / "cases")
+    trial.add_argument("--arm", help="only this arm (default: every arm)")
+    trial.add_argument("--case", dest="only", action="append", default=[],
+                       help="only this case key, e.g. id@version; repeat for each")
+    trial.add_argument("--all", action="store_true", help="run every slot that is still empty")
+    trial.add_argument("--out", type=Path, help="results root (default: eval/results)")
+    trial.add_argument("--db", help="evaluation database URL (default: CHAGENT_EVAL_DATABASE_URL)")
+    trial.add_argument("--schema", default="chagent_eval", help="evaluation schema name")
+    trial.add_argument("--json", action="store_true", help="emit each trial record as JSON")
+
+    report = commands.add_parser("report", help="compare the arms of one experiment")
+    report.add_argument("--protocol", type=Path, required=True)
+    report.add_argument("--out", type=Path, help="results root (default: eval/results)")
+    report.add_argument("--json", action="store_true")
+    report.add_argument("--out-json", type=Path, help="write the whole report here")
+
     labels = commands.add_parser("labels", help="report per-label precision and recall")
     labels.add_argument("--diagnoses", type=Path, required=True,
                         help="file or directory of attribute documents")
@@ -113,7 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return {"manifest": _manifest, "export": _export, "timeline": _timeline,
                 "attribute": _attribute, "annotate": _annotate, "labels": _labels,
-                "case": _case, "replay": _replay}[args.command](args)
+                "case": _case, "replay": _replay, "prereg": _prereg,
+                "trial": _trial, "report": _report}[args.command](args)
     except (casefile.CaseInvalid, annotations.AnnotationInvalid) as error:
         print(f"invalid input: {error}", file=sys.stderr)
         return 1
@@ -312,6 +347,219 @@ async def _verify(url, path: Path, run_id) -> dict:
     async with _database(url) as database:
         requests = await cassettes.CassetteSource(database).requests(run_id)
     return await cassettes.verify(recorded, requests)
+
+
+RESULTS = REPOSITORY / "eval" / "results"
+
+
+def _protocol_dir(path: Path) -> Path:
+    path = Path(path)
+    return path if path.is_dir() else path.parent
+
+
+def _prereg(args) -> int:
+    from eval import prereg
+
+    spec = json.loads(args.spec.read_text(encoding="utf-8"))
+    cases = []
+    for path in args.case:
+        cases.extend(casefile.load_all(path) if path.is_dir() else [casefile.load(path)])
+    arms = [prereg.Arm(**arm) for arm in spec.pop("arms")]
+    protocol = prereg.build(cases=cases, arms=arms, **spec)
+    directory = args.out or (RESULTS / protocol.experiment)
+    frozen = prereg.freeze(protocol, directory)
+    if args.json:
+        _emit(protocol.to_json(), None)
+    else:
+        sys.stdout.write(prereg.describe(protocol))
+        print(f"frozen at {frozen}")
+    return 0
+
+
+def _trial(args) -> int:
+    from eval import prereg
+    from eval.records import TrialStore
+
+    directory = _protocol_dir(args.protocol)
+    protocol = prereg.load(directory)
+    root = args.out or RESULTS
+    store = TrialStore(root)
+    cases = {f"{case.id}@{case.version}": case
+             for case in casefile.load_all(args.cases)}
+    problems = [f"{key}: not loaded from {args.cases}"
+                for key in (f"{entry['id']}@{entry['version']}" for entry in protocol.cases)
+                if key not in cases]
+    problems += prereg.check(protocol, list(cases.values()), list(protocol.arms))
+    problems = [problem for problem in problems if "not preregistered" not in problem]
+    if problems:
+        raise ValueError("protocol does not describe this checkout: " + "; ".join(problems))
+
+    env = _evaluation_env()
+    trials = store.read(protocol.experiment, ignore=(prereg.PROTOCOL_FILE,))
+    plans = _slots(protocol, cases, args, trials)
+    if not plans:
+        print("nothing to run: every selected slot already has its trial(s)")
+        return 0
+    run(_run_plans(plans, args, root, store, env, trials))
+    return 0
+
+
+def _slots(protocol, cases, args, trials) -> list:
+    """Every slot the protocol promises that has no trial yet, in run order.
+
+    Order is repeat-major when the protocol says ``interleaved``: arm A, arm B,
+    next case, and only then the second repeat. Provider latency drifts across
+    an hour, and running one arm entirely before the other would put that drift
+    on the comparison instead of inside it.
+    """
+    from eval import prereg
+    from eval.runner import TrialPlan
+
+    declared = [f"{entry['id']}@{entry['version']}" for entry in protocol.cases]
+    if args.only:
+        unknown = sorted(set(args.only) - set(declared))
+        if unknown:
+            raise ValueError("not in the protocol: " + ", ".join(unknown))
+        declared = [key for key in declared if key in args.only]
+    arms = [arm for arm in protocol.arms if not args.arm or arm.name == args.arm]
+    if args.arm and not arms:
+        raise ValueError(f"no arm named {args.arm!r}")
+
+    used = prereg.slots_used(protocol, trials)
+    plans = []
+    repeats = range(protocol.repeats)
+    schedule = (((repeat, key, arm) for repeat in repeats for key in declared for arm in arms)
+                if protocol.order == 'interleaved' else
+                ((repeat, key, arm) for arm in arms for key in declared for repeat in repeats))
+    for repeat, key, arm in schedule:
+        if used.get((key, arm.name), 0) > repeat:
+            continue
+        plans.append(TrialPlan(protocol, cases[key], arm, repeat))
+    return plans if args.all else plans[:1]
+
+
+async def _run_plans(plans, args, root, store, env, trials) -> None:
+    from eval import runner, prereg
+
+    from eval.budgets import CostAccount, known_cost
+    from eval.integrity import experiment_lock, execution, identity, publish
+    from eval.manifests import VersionManifest
+    from chagent.config import Settings
+
+    protocol = plans[0].protocol
+    if not protocol.pricing:
+        raise ValueError("real experiments require preregistered pricing; no calls were made")
+    directory = store.directory(protocol.experiment)
+    # Hold the lock across the run. Durable claims survive crashes and cannot be
+    # retried under the same denominator, even if no final record was written.
+    with experiment_lock(directory):
+        prereg.freeze(protocol, directory)
+        existing = store.read(protocol.experiment, ignore=(prereg.PROTOCOL_FILE,))
+        completed_ids = {trial.trial_id for trial in existing}
+        pending_claims = [claim.stem for claim in (directory / '.claims').glob('*.claim')
+                          if claim.stem not in completed_ids]
+        if pending_claims:
+            raise ValueError('unfinished trial claims have unknown spend; no further calls were made')
+        from eval.report import _invalid_trials
+        if _invalid_trials(protocol, existing):
+            raise ValueError('existing trials have invalid bindings; no further calls were made')
+        costs = [(trial.usage.get('cost') or {}).get('usd') for trial in existing]
+        if any(not known_cost(cost) for cost in costs):
+            raise ValueError("prior cost is unknown; experiment stopped without further calls")
+        account = CostAccount(protocol.budget['total_cost_usd'], sum(costs))
+        async with _eval_database(args.db, args.schema) as database:
+            for position, plan in enumerate(plans, start=1):
+                settings = Settings.from_env({**env, **runner.PINNED_ENV,
+                                             'CHAGENT_MODEL': plan.arm.model,
+                                             'CHAGENT_PROVIDER': plan.arm.provider})
+                pinned = execution(identity(VersionManifest.capture(REPOSITORY).to_json(), settings))
+                if any(record.manifest.get('execution', {}).get('identity_sha256') != pinned['identity_sha256']
+                       for record in existing):
+                    raise ValueError('execution version differs from existing trials; no call was made')
+                publish(directory / 'execution.anchor',
+                        {'protocol_sha256': protocol.sha256, **pinned}, identical_ok=True)
+                if any(record.trial_id == plan.trial_id for record in existing):
+                    raise ValueError(f"{plan.trial_id} already has a result; no rerun")
+                publish(directory / '.claims' / (plan.trial_id + '.claim'),
+                        {'protocol_sha256': protocol.sha256, 'case_sha256': plan.case.sha256,
+                         'arm': plan.arm.name, 'repeat': plan.repeat})
+                print(f"[{position}/{len(plans)}] {plan.trial_id}", flush=True)
+                record = await runner.run_trial(plan, database=database, env=env,
+                    cost_account=account, expected_identity=pinned['identity_sha256'])
+                store.write(record)
+                existing.append(record)
+                print(runner.format_trial(record), flush=True)
+                if account.unknown or account.spent >= account.cap:
+                    print("stopped: cost is unknown or budget reached", file=sys.stderr)
+                    return
+
+
+class _eval_database:
+    """A separate schema, so an experiment never looks like the user's own history.
+
+    Trials insert sessions, runs, tool calls and approvals. Doing that in the
+    product's schema would mix 24 synthetic runs into the history a person reads,
+    and the two are cleaned up on different schedules. The schema is created and
+    migrated once, then reused, because a trial's ``run_id`` must keep pointing
+    at its records after the process exits.
+    """
+
+    def __init__(self, url: str | None, schema: str) -> None:
+        self.url = url
+        self.schema = schema
+
+    async def __aenter__(self):
+        from psycopg import AsyncConnection, sql
+        from psycopg.conninfo import make_conninfo
+
+        from chagent.config import Settings
+        from chagent.storage.database import Database
+        from chagent.storage.migrate import migrate
+
+        base = self.url or Settings.from_env().database_url
+        admin = await AsyncConnection.connect(base, autocommit=True)
+        try:
+            await admin.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                sql.Identifier(self.schema)))
+        finally:
+            await admin.close()
+        settings = replace(Settings.from_env(),
+                           database_url=make_conninfo(base, options=f"-c search_path={self.schema}"))
+        database = Database(settings)
+        await database.connect()
+        self.database = database
+        await migrate(database)
+        return database
+
+    async def __aexit__(self, *exception) -> None:
+        await self.database.close()
+
+
+def _report(args) -> int:
+    from eval import prereg, report
+    from eval.records import TrialStore
+
+    directory = _protocol_dir(args.protocol)
+    protocol = prereg.load(directory)
+    trials = TrialStore(args.out or RESULTS).read(protocol.experiment,
+                                                  ignore=(prereg.PROTOCOL_FILE,))
+    document = report.build(protocol, trials)
+    if args.out_json:
+        _emit(document, args.out_json)
+    if args.json:
+        _emit(document, None)
+    else:
+        sys.stdout.write(report.format_report(document))
+    return 0 if document["claim"] in {"improvement_supported", "no_difference_observed",
+                                      "regression_detected"} else 3
+
+
+def _evaluation_env() -> dict:
+    """The environment a trial runs in: the file as a default layer, the shell on top."""
+    from chagent.config import dotenv
+
+    values = dotenv.read(REPOSITORY / ".env") if (REPOSITORY / ".env").exists() else {}
+    return {**values, **os.environ}
 
 
 def _emit(document: dict, destination: Path | None) -> None:

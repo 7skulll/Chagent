@@ -1,0 +1,19 @@
+{
+  "experiment": "p4-model-version-2026-11-13",
+  "question": "在这四份用例上，换成候选模型后任务结果是否不同，差异是否超出 3 次重复能分辨的范围？",
+  "hypothesis": "候选模型在同样的工具面与预算下，至少一份用例的通过次数高于基线；基线不会在另一份用例上更高。",
+  "arms": [
+    {"name": "baseline", "provider": "deepseek", "model": "deepseek-flash",
+     "note": "本机 .env 当前的 CHAGENT_MODEL"},
+    {"name": "candidate", "provider": "deepseek", "model": "deepseek-v4-flash",
+     "note": "同一供应商的另一模型名；两者都可能被解析到移动的后端，报告据此限制结论"}
+  ],
+  "repeats": 3,
+  "min_repeats_for_stability": 3,
+  "order": "interleaved",
+  "budget": {"max_turns": 10, "wall_seconds": 240, "max_tool_calls": 24, "total_cost_usd": 5.0},
+  "thresholds": {"improve_points": 0.3, "regress_points": 0.3},
+  "analysis": "每格 Wilson 95% 区间；差值用 Newcombe hybrid score 区间；差值区间不含 0 且绝对值过阈值才命名方向；同一格内 pass/fail 同时出现即记为不稳定。",
+  "exclusions": "infra_error 退出分母但逐条列出；inconclusive 单独计数，不当作通过；缺记录的槽位使整体结论为 incomplete。",
+  "stopping_rule": "预登记的 24 个槽位各跑一次即停；翻红不重跑，不追跑，不按结果调整阈值或重复次数。"
+}

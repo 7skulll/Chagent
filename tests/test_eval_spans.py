@@ -523,10 +523,14 @@ class CaseFixtureTests(unittest.TestCase):
             {"project-work", "execution-boundary", "multi-turn-context", "skill-selection"}
             <= covered, covered)
         for case in cases:
-            # None of these has been run: P1 ships no runner, and a case that
-            # reads like a result is worse than no case at all.
-            self.assertIn("Unexecuted", case.notes, case.key)
+            # No case may read like a result. Since P4 some of them have been
+            # run; those carry a machine-decidable spec, and the ones that still
+            # cannot be graded by a machine have to say so in their notes.
             self.assertIsNone(getattr(case, "result", None), case.key)
+            executable = [grader for grader in case.graders
+                          if (grader.get("spec") or {}).get("check")]
+            if not executable:
+                self.assertIn("Unexecuted", case.notes, case.key)
 
 
 @unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")
