@@ -1,10 +1,13 @@
 """Operator command line for the evaluation contracts.
 
-Four commands, each answering one question:
+Seven commands, each answering one question:
 
 ``manifest``  which tree, prompts, tools, skills and model produced a result
 ``export``    what one run actually recorded, bounded and redacted
 ``timeline``  when each step ran, how well that is known, and what is missing
+``attribute`` which diagnostic labels the records support, and what they do not
+``annotate``  record a human verdict with its evidence and its dataset
+``labels``    per-label precision/recall, or why it cannot be estimated
 ``case``      whether a case document still satisfies the published contract
 
 The CLI is an operator tool, not a product entry point: it reads the database
@@ -20,9 +23,10 @@ import json
 from pathlib import Path
 import sys
 
-from eval import casefile
+from eval import annotations, casefile
+from eval.attribute import AttributeProjection, format_diagnosis, sample_id
 from eval.evidence import EvalEvidence
-from eval.manifests import CaseInvalid, VersionManifest
+from eval.manifests import VersionManifest
 from eval.spans import SpanProjection, format_timeline
 
 REPOSITORY = Path(__file__).resolve().parent.parent
@@ -57,12 +61,42 @@ def main(argv: list[str] | None = None) -> int:
     timeline.add_argument("--db", help="database URL (default: CHAGENT_DATABASE_URL)")
     timeline.add_argument("--out", type=Path, help="write JSON here instead of stdout")
 
+    attribute = commands.add_parser("attribute", help="label one run from its recorded evidence")
+    attribute.add_argument("run_id")
+    attribute.add_argument("--case", type=Path, help="case document, for expectation-dependent reads")
+    attribute.add_argument("--annotations", type=Path, default=annotations.LEDGER,
+                           help="ledger used to confirm a label; default: eval/annotations/labels.jsonl")
+    attribute.add_argument("--json", action="store_true", help="emit the whole document as JSON")
+    attribute.add_argument("--explain", action="store_true", help="print rule checks and rejections")
+    attribute.add_argument("--db", help="database URL (default: CHAGENT_DATABASE_URL)")
+    attribute.add_argument("--out", type=Path, help="write JSON here instead of stdout")
+
+    annotate = commands.add_parser("annotate", help="record one human verdict")
+    annotate.add_argument("--sample", required=True, help="run:<uuid> or another stable sample id")
+    annotate.add_argument("--label", required=True, choices=sorted(annotations.LABELS))
+    annotate.add_argument("--verdict", required=True, choices=annotations.VERDICTS)
+    annotate.add_argument("--dataset", required=True, choices=annotations.DATASETS)
+    annotate.add_argument("--reviewer", required=True)
+    annotate.add_argument("--certainty", default="observed", choices=("observed", "suspected", "confirmed"))
+    annotate.add_argument("--evidence", action="append", default=[],
+                          help="table:record reference; repeat for each")
+    annotate.add_argument("--note", default="")
+    annotate.add_argument("--run", help="run id this sample refers to")
+    annotate.add_argument("--file", type=Path, default=annotations.LEDGER)
+
+    labels = commands.add_parser("labels", help="report per-label precision and recall")
+    labels.add_argument("--diagnoses", type=Path, required=True,
+                        help="file or directory of attribute documents")
+    labels.add_argument("--annotations", type=Path, default=annotations.LEDGER)
+    labels.add_argument("--json", action="store_true")
+
     args = parser.parse_args(argv)
     try:
         return {"manifest": _manifest, "export": _export, "timeline": _timeline,
+                "attribute": _attribute, "annotate": _annotate, "labels": _labels,
                 "case": _case}[args.command](args)
-    except CaseInvalid as error:
-        print(f"invalid case: {error}", file=sys.stderr)
+    except (casefile.CaseInvalid, annotations.AnnotationInvalid) as error:
+        print(f"invalid input: {error}", file=sys.stderr)
         return 1
     except (LookupError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -126,6 +160,66 @@ def _case(args) -> int:
         print(casefile.describe(case))
     print(f"{len(cases)} case(s) valid")
     return 0
+
+
+def _attribute(args) -> int:
+    case = None
+    if args.case:
+        loaded = casefile.load(args.case)
+        case = {**loaded.to_json(), "sha256": loaded.sha256}
+    confirmations = _confirmations(args.annotations, sample_id(args.run_id))
+    document = run(_diagnose(args.db, args.run_id, case, confirmations))
+    if args.out or args.json:
+        _emit(document, args.out)
+        return 0
+    sys.stdout.write(format_diagnosis(document, explain=args.explain))
+    return 0
+
+
+def _confirmations(path: Path, sample: str) -> list[dict]:
+    """Pass all latest verdicts, including retractions and reviewer conflicts."""
+    return [record.to_json() for record in annotations.latest(annotations.load(path))
+            if record.sample_id == sample]
+
+
+async def _diagnose(url, run_id, case, confirmations) -> dict:
+    async with _database(url) as database:
+        return await AttributeProjection(database).diagnose(
+            run_id, case=case, confirmations=confirmations)
+
+
+def _annotate(args) -> int:
+    record = annotations.append({
+        "sample_id": args.sample, "label": args.label, "verdict": args.verdict,
+        "dataset": args.dataset, "reviewer": args.reviewer, "certainty": args.certainty,
+        "evidence": args.evidence, "note": args.note, "run_id": args.run,
+    }, args.file)
+    print(f"{record.sample_id} {record.label} {record.verdict} "
+          f"({record.dataset}, {record.reviewer} v{record.review_version})")
+    return 0
+
+
+def _labels(args) -> int:
+    diagnoses = _load_diagnoses(args.diagnoses)
+    report = annotations.evaluate(annotations.load(args.annotations), diagnoses)
+    if args.json:
+        _emit(report, None)
+        return 0
+    sys.stdout.write(annotations.format_report(report))
+    return 0
+
+
+def _load_diagnoses(path: Path) -> list[dict]:
+    files = sorted(path.glob("*.json")) if path.is_dir() else [path]
+    documents = []
+    for file in files:
+        document = json.loads(file.read_text(encoding="utf-8"))
+        if "findings" not in document or "sample_id" not in document:
+            raise ValueError(f"{file} is not an attribution document")
+        documents.append(document)
+    if not documents:
+        raise ValueError(f"no attribution documents in {path}")
+    return documents
 
 
 def _emit(document: dict, destination: Path | None) -> None:

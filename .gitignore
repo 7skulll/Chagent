@@ -28,3 +28,6 @@ dist/
 # workspace is this checkout, they are the user's files, never project content.
 /uploads/
 /.backups/
+
+# Annotation ledger locks are local coordination state.
+/eval/annotations/*.lock
