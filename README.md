@@ -80,7 +80,7 @@ uv run --env-file .env ./scripts/start.command --demo
 
 ## 已有能力
 
-- 内置五个按需加载的工作流技能：`project-explorer`（项目阅读）、`debug-and-fix`（问题定位与修复）、`website-builder`（建站与本机交付）、`project-verifier`（逐项验收）、`run-diagnostician`（运行诊断）。模型从 `read_skill` 声明看到简介，匹配任务后读取正文；也可明确要求“使用 run-diagnostician 检查上一轮为什么失败”。正文与 SHA-256 随普通工具结果记录，技能不增加执行权限。数据库支持的正常工具面提供 `list_recent_runs`、`inspect_run`，只读当前会话的其他运行，按分区分页返回过滤后的证据，不改变审批或重试执行。详见[运行查询契约](docs/运行与工具调度.md#7-只读运行诊断2026-11-13)。现有主控需重启后加载；仅支持打包技能，没有自定义目录扫描、斜杠命令或热重载；确定性 demo 不装配技能与历史诊断工具。
+- 内置八个按需加载的工作流技能：`project-explorer`（项目阅读）、`debug-and-fix`（问题定位与修复）、`website-builder`（建站与本机交付）、`project-verifier`（逐项验收）、`run-diagnostician`（运行诊断）、`document-synthesizer`（多文档综合）、`change-reviewer`（本地变更审查）、`task-handoff`（交接与续办）。模型从 `read_skill` 声明看到简介，匹配任务后读取正文；也可明确要求“使用 task-handoff 整理当前任务交接”。正文与 SHA-256 随普通工具结果记录，技能不增加执行权限。数据库支持的正常工具面提供 `list_recent_runs`、`inspect_run`，只读当前会话的其他运行，按分区分页返回过滤后的证据，不改变审批或重试执行。详见[运行查询契约](docs/运行与工具调度.md#7-只读运行诊断2026-11-13)。文档综合沿用实际解析范围；交接中的同工作区任务摘要不等于可跨会话读取完整运行。现有主控需重启后加载；仅支持打包技能，没有自定义目录扫描、斜杠命令或热重载；确定性 demo 不装配技能与历史诊断工具。
 - 会话创建/搜索/重命名/归档、流式回答与停止、刷新恢复、上下文和用量查看。
 - Markdown、代码复制、来源卡片；重新生成/编辑重发/重试，旧记录折叠而正文不改写。
 - 点选/拖拽/粘贴的多文件上传队列；文本、PDF、Word、Excel 读取，保留页码/标题/工作表位置（2026-11-05 在真实浏览器里验过 Word/Excel 上传与模型读取）。

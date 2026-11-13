@@ -3,7 +3,10 @@
 from importlib.resources import files
 
 
-SKILL_NAMES = ("project-explorer", "debug-and-fix", "website-builder", "project-verifier", "run-diagnostician")
+SKILL_NAMES = (
+    "project-explorer", "debug-and-fix", "website-builder", "project-verifier", "run-diagnostician",
+    "document-synthesizer", "change-reviewer", "task-handoff",
+)
 
 
 def read_skill(name: str) -> str:
