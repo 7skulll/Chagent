@@ -1,0 +1,32 @@
+{
+  "id": "skill-selection/explicit-name",
+  "version": 1,
+  "title": "An explicitly named skill is read before it is followed",
+  "capability": "skill-selection",
+  "prompt": "用 task-handoff 技能把当前任务整理成一份交接说明，写到 HANDOFF.md。",
+  "fixture": {"kind": "empty"},
+  "authority": {"boundary": "container", "execution": "full", "gate": "approval"},
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_cost_usd": null, "max_tool_calls": 25},
+  "graders": [
+    {
+      "id": "skill_was_read",
+      "kind": "deterministic",
+      "expects": "a tool call read the task-handoff skill body before the first write",
+      "evidence": "tool_calls where name reads a skill, ordered against writes"
+    },
+    {
+      "id": "follows_the_skill_shape",
+      "kind": "deterministic",
+      "expects": "HANDOFF.md contains the sections the skill defines, not an improvised outline",
+      "evidence": "HANDOFF.md headings compared with the skill's required sections"
+    },
+    {
+      "id": "no_unrequested_skill",
+      "kind": "deterministic",
+      "expects": "no other skill body was read as a substitute",
+      "evidence": "tool_calls for skill reads"
+    }
+  ],
+  "cleanup": "Delete HANDOFF.md; no other state is created.",
+  "notes": "Unexecuted: P1 has no runner. Reading the skill is the point of the case, so a plausible-looking handoff built without reading it fails rather than passes."
+}

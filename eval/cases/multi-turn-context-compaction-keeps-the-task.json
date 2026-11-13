@@ -1,0 +1,32 @@
+{
+  "id": "multi-turn-context/compaction-keeps-the-task",
+  "version": 1,
+  "title": "After context compaction the original requirement is still obeyed",
+  "capability": "multi-turn-context",
+  "prompt": "先记住这条约束：所有函数名用中文拼音，注释用英文。然后逐步创建一个包含五个函数的 utils.py，每个函数单独一轮，我会逐轮确认。",
+  "fixture": {"kind": "empty"},
+  "authority": {"boundary": "container", "execution": "full", "gate": "approval"},
+  "budget": {"max_turns": 14, "wall_seconds": 600, "max_cost_usd": null, "max_tool_calls": 40},
+  "graders": [
+    {
+      "id": "compaction_happened",
+      "kind": "deterministic",
+      "expects": "at least one compaction_completed event exists in the run's session",
+      "evidence": "run_events where type = compaction_completed"
+    },
+    {
+      "id": "constraint_survives",
+      "kind": "deterministic",
+      "expects": "functions written after the compaction still use pinyin names and English comments",
+      "evidence": "file contents at the end of the run compared with the constraint"
+    },
+    {
+      "id": "no_silent_reset",
+      "kind": "deterministic",
+      "expects": "the assistant does not ask the user to restate the constraint after compaction",
+      "evidence": "run_events text_delta after the compaction_completed sequence"
+    }
+  ],
+  "cleanup": "Delete utils.py; the session and its summary are disposable.",
+  "notes": "Unexecuted: P1 has no runner, and the case needs a driven multi-turn loop rather than a single prompt. If no compaction occurs the case is inconclusive, not passed: the trial did not exercise the capability."
+}

@@ -14,12 +14,11 @@ the column is not. A span whose start event is missing gets ``started_at=None``
 and is counted in the missing report — it is never back-filled from
 ``created_at``, because that would silently turn queue time into execution time.
 
-**Event timestamps are commit timestamps.** ``storage/event_queue.py`` buffers
-events and writes them in batches, so ``run_events.created_at`` is when the batch
-committed. Inside one batch every timestamp is identical; the database currently
-holds 1236 same-microsecond groups of more than two events. Event-derived
-boundaries are therefore marked ``commit_lag``, and the batch flush interval
-(100 ms) is the honest scale of that lag.
+**Event timestamps are transaction timestamps.** ``run_events.created_at``
+uses PostgreSQL ``now()``, the transaction start, not the actual commit instant.
+Buffered events may share it. The 100 ms flush interval is a scheduling target,
+not a latency bound: locks, scheduling and database I/O can delay persistence.
+Event-derived boundaries are approximate and marked ``transaction_time``.
 
 **A compaction call row is written after the fact.** ``record_calls`` inserts
 rows already terminal (adoption or post-turn), so ``created_at`` and ``ended_at``
@@ -56,11 +55,12 @@ EVENT_TYPES = (
     "tool_queued", "tool_started", "tool_completed", "tool_interrupted",
     "approval_requested", "approval_decided",
     "compaction_started", "compaction_completed", "compaction_discarded",
+    "compaction_failed", "compaction_cancelled",
     "memory_job_queued", "memory_extraction_started", "memory_saved",
     "memory_extraction_failed", "memory_job_failed",
 )
 
-TIMELINE_VERSION = 1
+TIMELINE_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -94,11 +94,14 @@ class Span:
 
     @property
     def open(self) -> bool:
-        return self.execution_ended_at is None
+        return (self.execution_ended_at is None
+                and self.status not in {"completed", "failed", "cancelled", "discarded",
+                                        "denied", "approved", "expired", "unknown", "interrupted"})
 
     def duration_ms(self) -> int | None:
         if self.started_at is None or self.execution_ended_at is None:
-            return None
+            measured = self.attributes.get("duration_ms")
+            return measured if type(measured) is int and measured >= 0 else None
         return _ms(self.started_at, self.execution_ended_at)
 
     def wait_ms(self) -> int | None:
@@ -215,7 +218,7 @@ class SpanProjection:
         models = list(await cursor.fetchall())
 
         cursor = await connection.execute(
-            "SELECT t.id, t.call_id, t.name, t.status, t.attempt, t.call_index, "
+            "SELECT t.id, t.model_call_id, t.call_id, t.name, t.status, t.attempt, t.call_index, "
             "t.created_at, t.ended_at, m.iteration FROM tool_calls t "
             "LEFT JOIN model_calls m ON m.id = t.model_call_id "
             "WHERE t.run_id = %s ORDER BY t.created_at, t.call_index", (run_id,))
@@ -259,9 +262,6 @@ def _build(run_id: UUID, rows: dict) -> dict:
     run = rows["run"]
     if run is None:
         raise LookupError("run not found")
-    from pathlib import Path
-
-    workspace = Path(run["root_path"]).resolve() if run["root_path"] else None
     events = _index_events(rows["events"])
     spans: list[Span] = []
     repaired = 0
@@ -288,7 +288,7 @@ def _build(run_id: UUID, rows: dict) -> dict:
     for row in rows["models"]:
         add(_model_span(row, run_id, run_span.span_id, events))
     for row in rows["tools"]:
-        add(_tool_span(row, run_id, run_span.span_id, events))
+        add(_tool_span(row, run_id, run_span.span_id, events, rows["tools"]))
     for row in rows["approvals"]:
         add(_approval_span(row, run_id, run_span.span_id, events))
     for span in _compaction_spans(rows, run_id, run_span.span_id, events):
@@ -315,29 +315,28 @@ def _build(run_id: UUID, rows: dict) -> dict:
         "stream": {
             "first_text_delta_at": _iso(first_text),
             "after_window_start_ms": _ms(window_start, first_text) if first_text else None,
-            # Labelled precisely: this is when the first visible chunk was
-            # committed, which is a lower bound on when the model started
-            # producing text and says nothing about when a browser rendered it.
-            "first_text_delta_kind": "commit time of first visible text, not provider TTFT",
+            "first_text_delta_kind": "transaction timestamp of first stored text; not provider TTFT",
         },
         "spans": [span.to_json() for span in sorted(spans, key=_order)],
         "accounting": accounting.to_json(),
         "missing": _missing(spans, rows, events, window_open, repaired),
         "notes": [
             "Read-only snapshot of recorded history; it describes what was stored, not what happened.",
-            "Event timestamps are batch-commit times, so boundaries derived from them carry up to one "
-            "flush interval (100 ms) of lag and events in one batch share an identical timestamp.",
+            "Event timestamps use PostgreSQL now() (transaction start), not commit time. Buffered "
+            "events can share a timestamp; the 100 ms flush target is not a delay bound.",
+            "committed_at is null: the database does not record actual commit instants.",
             "A tool's execution start comes from its tool_started event; tool_calls.created_at is the "
             "enqueue time and is reported as wait, never as execution.",
             "A model span starts at the insert of its request row, which precedes the send, so model "
             "duration is an upper bound on the call.",
             "The run span is the observation window itself; occupancy and cumulative time are "
-            "computed from the spans inside it, never from the window.",
+            "computed from work spans, never from the window. Cumulative time includes all known "
+            "durations; occupancy is clipped to the window and excludes open intervals.",
             "Work outside the run window (post-turn memory) is excluded from this run's occupancy.",
             "No browser or client timing is recorded, so no time-to-first-byte in the browser is reported.",
         ],
     }
-    return _redact(document, workspace)
+    return _redact(document, run["root_path"])
 
 
 # --------------------------------------------------------------------------- spans
@@ -360,7 +359,7 @@ def _run_span(run, run_id: UUID) -> Span:
         queued_at=None,
         started_at=started,
         execution_ended_at=run["ended_at"],
-        committed_at=run["ended_at"],
+        committed_at=None,
         warnings=tuple(warnings),
         attributes={"session_id": str(run["session_id"])},
     )
@@ -375,15 +374,12 @@ def _model_span(row, run_id: UUID, parent: str, events: dict) -> Span:
         warnings.append("model call has no end timestamp")
     if row["duration_ms"] is not None and row["ended_at"] is not None and row["created_at"] is not None:
         measured = _ms(row["created_at"], row["ended_at"])
-        # A provider-reported duration that disagrees with the recorded interval
-        # by more than a commit batch means one of the two is describing a
-        # different thing. Keep both, flag the difference.
+        # This tolerance is diagnostic, not a bound on transaction/flush lag.
+        # Keep both measurements and flag a substantial disagreement.
         if abs(measured - int(row["duration_ms"])) > 250:
             warnings.append(
                 f"provider duration {int(row['duration_ms'])} ms differs from recorded interval "
-                f"{measured} ms by more than one flush interval")
-    completion = _first(events.get("model_completed"), lambda payload:
-                        payload.get("model_call_id") == str(row["id"]))
+                f"{measured} ms by more than the 250 ms diagnostic tolerance")
     return Span(
         span_id=f"model:{row['id']}",
         run_id=str(run_id),
@@ -396,28 +392,61 @@ def _model_span(row, run_id: UUID, parent: str, events: dict) -> Span:
         parent_id=parent,
         started_at=row["created_at"],
         execution_ended_at=row["ended_at"],
-        committed_at=completion[1] if completion else row["ended_at"],
+        committed_at=None,
         tokens=row["total_tokens"],
         warnings=tuple(warnings),
         attributes={"iteration": row["iteration"]},
     )
 
 
-def _tool_span(row, run_id: UUID, parent: str, events: dict) -> Span:
+def _tool_event(row, kind: str, events: dict, peers: list):
+    """Prefer row identity; legacy provider IDs are only unique per model call.
+
+    For repeated legacy IDs, require a timestamp fitting exactly one queued/end
+    envelope. Tied or overlapping envelopes remain unknown instead of guessing.
+    """
+    matches = []
+    related = [peer for peer in peers if peer["call_id"] == row["call_id"]]
+    for item in events.get(kind, ()):
+        _, timestamp, payload = item
+        record = payload.get("tool_record_id")
+        if record is not None:
+            if record == str(row["id"]):
+                matches.append(item)
+            continue
+        if payload.get("tool_call_id") != row["call_id"]:
+            continue
+        model = payload.get("model_call_id")
+        if model is not None:
+            if model == str(row.get("model_call_id")):
+                matches.append(item)
+            continue
+        owners = related
+        if len(related) > 1:
+            owners = [peer for peer in related if peer["created_at"] <= timestamp
+                      and (peer["ended_at"] is None or timestamp <= peer["ended_at"])]
+        if len(owners) == 1 and owners[0]["id"] == row["id"]:
+            matches.append(item)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _tool_span(row, run_id: UUID, parent: str, events: dict, peers: list) -> Span:
     call_id = row["call_id"]
-    started = _first(events.get("tool_started"), lambda p: p.get("tool_call_id") == call_id)
-    completed = _first(events.get("tool_completed"), lambda p: p.get("tool_call_id") == call_id)
-    interrupted = _first(events.get("tool_interrupted"), lambda p: p.get("tool_call_id") == call_id)
+    started = _tool_event(row, "tool_started", events, peers)
+    completed = _tool_event(row, "tool_completed", events, peers)
+    interrupted = _tool_event(row, "tool_interrupted", events, peers)
     warnings: list[str] = []
     links: list[dict] = []
     if started is None:
         # Deliberately not falling back to created_at: that would report queue
         # time as execution time and inflate every tool's cost.
-        warnings.append("no tool_started event: execution start is unknown, not zero")
+        warnings.append("no unambiguous tool_started event: execution start is unknown, not zero")
     if row["ended_at"] is None:
         warnings.append("tool call has no end timestamp")
     if row["status"] == "unknown":
         warnings.append("outcome unknown: the side effect may or may not have happened")
+    if started:
+        links.append({"kind": "event", "type": "tool_started", "sequence": started[0]})
     if interrupted:
         links.append({"kind": "event", "type": "tool_interrupted", "sequence": interrupted[0]})
     if completed:
@@ -429,7 +458,7 @@ def _tool_span(row, run_id: UUID, parent: str, events: dict) -> Span:
         links.append({"kind": "waits_for", "type": "approval",
                       "approval_id": approval[2].get("approval_id")})
 
-    precision = "commit_lag" if started else "unknown"
+    precision = "transaction_time" if started else "unknown"
     return Span(
         span_id=f"tool:{row['id']}",
         run_id=str(run_id),
@@ -445,7 +474,7 @@ def _tool_span(row, run_id: UUID, parent: str, events: dict) -> Span:
         queued_at=row["created_at"],
         started_at=started[1] if started else None,
         execution_ended_at=row["ended_at"],
-        committed_at=completed[1] if completed else row["ended_at"],
+        committed_at=None,
         warnings=tuple(warnings),
         attributes={"attempt": row["attempt"], "call_index": row["call_index"],
                     "iteration": row["iteration"]},
@@ -476,67 +505,63 @@ def _approval_span(row, run_id: UUID, parent: str, events: dict) -> Span:
         queued_at=row["created_at"],
         started_at=row["created_at"],
         execution_ended_at=row["decided_at"],
-        committed_at=row["decided_at"],
+        committed_at=None,
         warnings=tuple(warnings),
         attributes=attributes,
     )
 
 
 def _compaction_spans(rows, run_id: UUID, parent: str, events: dict) -> list[Span]:
-    """One span per compaction, from the event pair when it exists.
-
-    The rows alone cannot anchor an interval (see the module docstring), so they
-    only contribute duration and status. When neither events nor rows exist, no
-    span is created.
-    """
+    """Union call rows and lifecycle events, including work without model calls."""
     started = _group(events.get("compaction_started"), "compaction_id")
-    completed = _group(events.get("compaction_completed"), "compaction_id")
-    discarded = _group(events.get("compaction_discarded"), "compaction_id")
-    spans: list[Span] = []
-    for identity, rows_for in rows["compactions"].items():
+    terminals = {}
+    for kind in ("completed", "discarded", "failed", "cancelled"):
+        for identity, item in _group(events.get(f"compaction_{kind}"), "compaction_id").items():
+            if identity not in terminals or item[0] < terminals[identity][1][0]:
+                terminals[identity] = (kind, item)
+    identities = set(rows["compactions"]) | set(started) | set(terminals)
+    spans = []
+    for identity in sorted(identities):
+        calls = rows["compactions"].get(identity, {})
         head = started.get(identity)
-        tail = completed.get(identity)
-        drop = discarded.get(identity)
-        speculative = bool((head or (None, None, {}))[2].get("speculative")
-                           or (tail or (None, None, {}))[2].get("speculative"))
-        warnings: list[str] = []
-        attributes = {"speculative": speculative, "calls": rows_for["calls"]}
-        if head is None and tail is None and drop is None:
-            warnings.append(
-                "no start or end event: compaction_calls rows are written after the fact, "
-                "so only duration_ms is a measurement")
+        status, tail = terminals.get(identity, (calls.get("status", "running"), None))
+        speculative = any(item and item[2].get("speculative") for item in (head, tail))
+        warnings = []
+        attributes = {"speculative": bool(speculative), "calls": calls.get("calls", 0)}
+        if head is None and tail is None:
+            warnings.append("no start or end event: only recorded duration_ms is a measurement")
             source, precision = "compaction_duration", "duration_only"
-            attributes["duration_ms"] = rows_for["duration_ms"]
         else:
-            source, precision = "compaction_event", "commit_lag"
+            source, precision = "compaction_event", "transaction_time"
+        duration = calls.get("duration_ms")
+        # PostgreSQL sum(bigint) is numeric (Decimal in psycopg); export an int.
+        if duration is not None:
+            duration = int(duration)
+        elif tail:
+            duration = tail[2].get("duration_ms")
+        if type(duration) is int and duration >= 0:
+            attributes["duration_ms"] = duration
         if speculative:
             warnings.append("speculative: runs alongside the answer, so it must not be added to wall time")
-        if drop and tail is None:
-            warnings.append(f"discarded: {(drop[2] or {}).get('reason') or 'reason not recorded'}")
-        # A completion event carries no status field: reaching it is the status.
-        status = "discarded" if (drop and tail is None) else ("completed" if tail else rows_for["status"])
+        if tail and status in {"discarded", "failed", "cancelled"}:
+            warnings.append(f"{status}: {tail[2].get('reason') or 'reason not recorded'}")
+        links = [{"kind": "event", "type": kind, "sequence": item[0]}
+                 for kind, item in (("compaction_started", head), (f"compaction_{status}", tail))
+                 if item]
+        if speculative:
+            links.append({"kind": "caused_by", "type": "run", "run_id": str(run_id)})
+        reference = ({"table": "compaction_calls", "compaction_id": identity,
+                      "rows": calls["calls"]} if calls else
+                     {"table": "run_events", "compaction_id": identity,
+                      "sequences": [item[0] for item in (head, tail) if item]})
         spans.append(Span(
-            span_id=f"compaction:{identity}",
-            run_id=str(run_id),
-            kind="compaction",
-            name="summary",
-            status=status or "unknown",
-            source_ref={"table": "compaction_calls", "compaction_id": identity,
-                        "rows": rows_for["calls"]},
-            timing_source=source,
-            timing_precision=precision,
-            parent_id=parent,
-            links=tuple(
-                link for link in (
-                    {"kind": "event", "type": "compaction_started", "sequence": head[0]} if head else None,
-                    {"kind": "event", "type": "compaction_completed", "sequence": tail[0]} if tail else None,
-                    {"kind": "event", "type": "compaction_discarded", "sequence": drop[0]} if drop else None,
-                ) if link),
+            span_id=f"compaction:{identity}", run_id=str(run_id), kind="compaction",
+            name="summary", status=status or "unknown", source_ref=reference,
+            timing_source=source, timing_precision=precision,
+            parent_id=None if speculative else parent, links=tuple(links),
             started_at=head[1] if head else None,
-            execution_ended_at=(tail[1] if tail else drop[1] if drop else None),
-            committed_at=tail[1] if tail else (drop[1] if drop else None),
-            warnings=tuple(warnings),
-            attributes=attributes,
+            execution_ended_at=tail[1] if tail else None,
+            committed_at=None, warnings=tuple(warnings), attributes=attributes,
         ))
     return spans
 
@@ -563,7 +588,7 @@ def _memory_span(row, run_id: UUID, events: dict) -> Span:
         queued_at=row["created_at"],
         started_at=row["started_at"],
         execution_ended_at=row["ended_at"],
-        committed_at=row["ended_at"],
+        committed_at=None,
         warnings=tuple(warnings),
         attributes={"attempts": row["attempts"], "max_attempts": row["max_attempts"]},
     )
@@ -581,7 +606,6 @@ def _account(spans: list[Span], window: tuple[datetime, datetime], window_open: 
     # equal to the wall by construction and force unexplained time to zero,
     # which is the one number that must stay honest.
     work = [span for span in spans if span.kind != "run"]
-    inside: list[Span] = []
     outside_ms = 0
     clipped: list[tuple[datetime, datetime]] = []
     for span in work:
@@ -589,30 +613,30 @@ def _account(spans: list[Span], window: tuple[datetime, datetime], window_open: 
         if interval is None:
             continue
         low, high = max(interval[0], start), min(interval[1], end)
+        outside_ms += max(0, span.duration_ms() - _ms(low, high)) if high > low else span.duration_ms()
         if high <= low:
             # Entirely outside the window: a post-turn memory job, or a row from
             # another lease holder. It is this run's record but not its activity.
-            outside_ms += span.duration_ms() or 0
             continue
-        inside.append(span)
         clipped.append((low, high))
 
     merged = _union(clipped)
-    union_ms = sum(_ms(low, high) for low, high in merged)
-    cumulative_ms = sum(span.duration_ms() or 0 for span in inside)
+    union_ms = _total_ms(merged)
+    cumulative_ms = sum(span.duration_ms() or 0 for span in work)
 
     by_kind: dict[str, dict] = {}
     for kind in KINDS:
         if kind == "run":
             continue
-        group = [span for span in inside if span.kind == kind]
+        group = [span for span in work if span.kind == kind]
         kind_intervals = [(max(span.started_at, start), min(span.execution_ended_at, end))
-                          for span in group if span.interval()]
+                          for span in group if span.interval()
+                          and max(span.started_at, start) < min(span.execution_ended_at, end)]
         kind_union = _union(kind_intervals)
         by_kind[kind] = {
             "spans": len(group),
             "cumulative_ms": sum(span.duration_ms() or 0 for span in group),
-            "union_ms": sum(_ms(low, high) for low, high in kind_union),
+            "union_ms": _total_ms(kind_union),
             "open": sum(1 for span in group if span.open),
             "precision": sorted({span.timing_precision for span in group}),
         }
@@ -628,7 +652,7 @@ def _account(spans: list[Span], window: tuple[datetime, datetime], window_open: 
     # Listing five gaps says nothing about whether they are the whole story, so
     # the full count and total travel with them.
     all_gaps = _complement(merged, (start, end))
-    gap_total = sum(_ms(low, high) for low, high in all_gaps)
+    gap_total = _total_ms(all_gaps)
 
     concurrency = _concurrency(clipped)
     unexplained = max(0, wall - union_ms)
@@ -636,7 +660,7 @@ def _account(spans: list[Span], window: tuple[datetime, datetime], window_open: 
     if outside_ms:
         notes.append("work recorded against this run but outside its window is excluded from occupancy")
     if cumulative_ms > wall:
-        notes.append("cumulative time exceeds wall time: spans overlapped, which is allowed and not an error")
+        notes.append("cumulative time exceeds wall time: work overlapped or extended outside the window, which is allowed and not an error")
     if unexplained:
         notes.append("unexplained time is untraced commit, queue and scheduling delay; it is not "
                      "evidence of a framework fault")
@@ -721,13 +745,16 @@ def _missing(spans: list[Span], rows: dict, events: dict, window_open: bool,
         {"item": "negative intervals repaired",
          "count": repaired,
          "effect": "clamped to zero so no consumer sees negative framework time"},
+        {"item": "actual commit timestamps",
+         "count": None,
+         "effect": "not recorded; committed_at is null for every span"},
         {"item": "tool calls whose queue event is absent",
          "count": sum(1 for row in rows["tools"]
                       if not _has(events.get("tool_queued"), "tool_call_id", row["call_id"])),
          "effect": "enqueue time still known from the row; queue evidence is not"},
         {"item": "provider first-token time",
          "count": None,
-         "effect": "not recorded; the first text_delta commit time is a lower bound only"},
+         "effect": "not recorded; stored text timestamps do not establish provider first-token bounds"},
         {"item": "browser receipt time (TTFT)",
          "count": None,
          "effect": "no client timing exists, so it is never reported"},
@@ -736,7 +763,7 @@ def _missing(spans: list[Span], rows: dict, events: dict, window_open: bool,
          "effect": "no per-run record; site activity appears only as tool spans"},
         {"item": "ordering inside one event batch",
          "count": None,
-         "effect": "events committed together share a timestamp; sub-batch order is not recoverable"},
+         "effect": "events in one transaction share a timestamp; sequence gives order but not elapsed time"},
     ]
     if window_open:
         items.insert(0, {"item": "run window end", "count": 1,
@@ -779,6 +806,9 @@ def _latest(events: dict, rows: dict) -> datetime | None:
     candidates = [created for items in events.values() for _, created, _ in items]
     candidates += [row["ended_at"] for row in rows["tools"] if row["ended_at"]]
     candidates += [row["ended_at"] for row in rows["models"] if row["ended_at"]]
+    candidates += [row["decided_at"] for row in rows["approvals"] if row["decided_at"]]
+    candidates += [row[key] for row in rows["memory"] for key in ("created_at", "started_at", "ended_at")
+                   if row[key]]
     return max(candidates) if candidates else None
 
 
@@ -794,6 +824,10 @@ def _replace(span: Span, **changes) -> Span:
     from dataclasses import replace
 
     return replace(span, **changes)
+
+
+def _total_ms(intervals) -> int:
+    return round(sum((high - low).total_seconds() for low, high in intervals) * 1000)
 
 
 def _ms(low: datetime, high: datetime) -> int:
@@ -869,8 +903,8 @@ def format_timeline(document: dict, *, limit: int = 200) -> str:
     outside = [
         span for span in document["spans"]
         if span["kind"] != "run" and span["started_at"] and span["execution_ended_at"]
-        and (datetime.fromisoformat(span["execution_ended_at"]) <= start
-             or datetime.fromisoformat(span["started_at"]) >= window_end)]
+        and (datetime.fromisoformat(span["started_at"]) < start
+             or datetime.fromisoformat(span["execution_ended_at"]) > window_end)]
     if outside:
         lines.append("outside the run window (excluded from occupancy)")
         for span in outside:
@@ -914,22 +948,30 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _redact(document: dict, workspace) -> dict:
-    """Project workspace paths in names and statuses, not only in payloads.
+def _redact(document: dict, root_path: str | None) -> dict:
+    """Filter every exported string, including warning text and nested fields."""
+    import re
+    from pathlib import Path
 
-    Span names come from tool names and approval tool names; ``attributes`` can
-    hold ids only. The one field that can carry a host path is a run's
-    ``root_path``, which is not exported at all. This runs a cheap check so a
-    future field cannot start leaking by accident.
-    """
-    if workspace is None:
-        return document
-    from chagent.models.outbound import to_model
+    from chagent.models.outbound import PATH_END, VIRTUAL_ROOT
+    from chagent.storage.run_diagnostics import safe_text
 
-    text = str(workspace)
-    for span in document["spans"]:
-        span["name"] = to_model(span["name"], workspace)
-        span["status"] = to_model(span["status"], workspace)
-        if text and text in str(span.get("attributes")):
-            span["attributes"] = {"projected": True}
-    return document
+    workspace = Path(root_path) if root_path else None
+    pattern = None
+    if workspace:
+        forms = {str(workspace), str(workspace.resolve())}
+        pattern = re.compile(
+            "(?:" + "|".join(re.escape(form) for form in sorted(forms, key=len, reverse=True)) + ")"
+            + PATH_END)
+
+    def visit(value):
+        if isinstance(value, str):
+            projected = pattern.sub(VIRTUAL_ROOT, value) if pattern else value
+            return safe_text(projected, workspace, 2048)
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        if isinstance(value, dict):
+            return {visit(key): visit(item) for key, item in value.items()}
+        return value
+
+    return visit(document)

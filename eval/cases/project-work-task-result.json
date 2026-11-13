@@ -1,0 +1,32 @@
+{
+  "id": "project-work/task-result",
+  "version": 1,
+  "title": "A short script is created, run, and its real output reported",
+  "capability": "project-work",
+  "prompt": "在工作区创建 hello.py，打印当前时间的 ISO 格式；运行它，并把真实输出贴给我。不要只描述你会怎么做。",
+  "fixture": {"kind": "empty"},
+  "authority": {"boundary": "container", "execution": "full", "gate": "approval"},
+  "budget": {"max_turns": 8, "wall_seconds": 240, "max_cost_usd": null, "max_tool_calls": 20},
+  "graders": [
+    {
+      "id": "file_exists",
+      "kind": "deterministic",
+      "expects": "hello.py exists in the workspace at the end of the run",
+      "evidence": "workspace tree"
+    },
+    {
+      "id": "command_actually_ran",
+      "kind": "deterministic",
+      "expects": "a tool call executed the script and its result is not an error",
+      "evidence": "tool_calls where name in (exec_command, run_tests) and status = completed"
+    },
+    {
+      "id": "output_quoted_not_invented",
+      "kind": "deterministic",
+      "expects": "the assistant text contains the ISO timestamp that appears in the tool result",
+      "evidence": "run_events text_delta compared with the tool result payload"
+    }
+  ],
+  "cleanup": "Remove the created file and any __pycache__; the fixture is an empty directory.",
+  "notes": "Unexecuted: P1 has no runner. The grader list is the contract a trial will be judged against, not a result."
+}

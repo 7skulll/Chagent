@@ -48,6 +48,37 @@ class EventBatchTests(unittest.IsolatedAsyncioTestCase):
         return [task for task in asyncio.all_tasks()
                 if not task.done() and task.get_name().startswith("run-event-flush-")]
 
+    async def test_tool_lifecycle_events_bind_to_stable_record_identity(self):
+        from psycopg.types.json import Jsonb
+        from chagent.domain.messages import TextContent, ToolCall, ToolResultMessage
+        from chagent.tools.base import AgentToolResult
+
+        model_id = uuid4()
+        async with self.database.transaction() as connection:
+            await connection.execute(
+                'INSERT INTO model_calls (id, run_id, iteration, request, context_snapshot) '
+                'VALUES (%s, %s, 0, %s, %s)',
+                (model_id, self.run_id, Jsonb({}), Jsonb({})))
+        calls = [ToolCall('done', 'echo', {}), ToolCall('interrupted', 'echo', {}),
+                 ToolCall('cancelled', 'echo', {})]
+        identities = await self.runs.queue_tool_calls(self.run_id, model_id, calls)
+        await self.runs.start_tool_call(self.run_id, model_id, calls[0], record_id=identities[0])
+        content = [TextContent('ok')]
+        await self.runs.save_tool_result(
+            self.run_id, self.session, identities[0], AgentToolResult(content),
+            ToolResultMessage('done', 'echo', content, False, 0))
+        await self.runs.start_tool_call(self.run_id, model_id, calls[1], record_id=identities[1])
+        await self.runs.finish(self.run_id, 'cancelled')
+        lifecycle = [e for e in await self.runs.events(self.run_id)
+                     if e['type'] in {'tool_started', 'tool_completed', 'tool_interrupted', 'tool_cancelled'}]
+        expected = {'done': identities[0], 'interrupted': identities[1], 'cancelled': identities[2]}
+        self.assertEqual(len(lifecycle), 5)
+        for record in lifecycle:
+            payload = record['payload']
+            self.assertEqual(payload['tool_record_id'], str(expected[payload['tool_call_id']]))
+            if record['type'] == 'tool_started':
+                self.assertEqual(payload['model_call_id'], str(model_id))
+
     async def test_emitted_events_stay_buffered_until_a_flush(self):
         await self.runs.emit(self.run_id, "text_delta", {"delta": "一", "count": 1})
         await self.runs.emit(self.run_id, "text_delta", {"delta": "二", "count": 1})

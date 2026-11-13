@@ -112,18 +112,19 @@ class RunRepository:
                 )
                 cursor = await connection.execute(
                     "UPDATE tool_calls SET status = 'unknown', ended_at = now() "
-                    "WHERE run_id = %s AND status = 'running' RETURNING call_id, name", (run_id,),
+                    "WHERE run_id = %s AND status = 'running' RETURNING id, call_id, name", (run_id,),
                 )
                 unknown = await cursor.fetchall()
                 cursor = await connection.execute(
                     "UPDATE tool_calls SET status = 'cancelled', ended_at = now() "
-                    "WHERE run_id = %s AND status = 'queued' RETURNING call_id, name", (run_id,),
+                    "WHERE run_id = %s AND status = 'queued' RETURNING id, call_id, name", (run_id,),
                 )
                 queued = await cursor.fetchall()
                 for kind, rows in (("tool_interrupted", unknown), ("tool_cancelled", queued)):
                     for row in rows:
                         await self._event(connection, run_id, kind,
-                                          {"tool_call_id": row["call_id"], "name": row["name"]}, locked=True)
+                                          {"tool_call_id": row["call_id"], "name": row["name"],
+                                       "tool_record_id": str(row["id"])}, locked=True)
                 for table in ("model_calls", "compaction_calls"):
                     await connection.execute(
                         f"UPDATE {table} SET status = 'interrupted', ended_at = now() "
@@ -403,6 +404,7 @@ class RunRepository:
                 raise StateConflictError("Tool call is no longer queued")
             await self._event(connection, run_id, "tool_started", {
                 "tool_call_id": call.id, "name": call.name,
+                "tool_record_id": str(record_id), "model_call_id": str(model_call_id),
             }, locked=True)
         self.notifications.notify(run_id)
         return record_id
@@ -429,7 +431,8 @@ class RunRepository:
             )
             record = await self._message(connection, session_id, run_id, message)
             await self._event(connection, run_id, "tool_completed", {
-                "tool_call_id": message.tool_call_id, "is_error": message.is_error,
+                "tool_call_id": message.tool_call_id, "tool_record_id": str(record_id),
+                "is_error": message.is_error,
                 "outcome_unknown": result.outcome_unknown,
                 "artifact_id": message.artifact.id if message.artifact else None,
             }, locked=True)
@@ -455,17 +458,18 @@ class RunRepository:
                 await self._reject_terminal_write(connection, run_id)
             cursor = await connection.execute(
                 "UPDATE tool_calls SET status = 'unknown', ended_at = now() "
-                "WHERE run_id = %s AND status = 'running' RETURNING call_id, name", (run_id,),
+                "WHERE run_id = %s AND status = 'running' RETURNING id, call_id, name", (run_id,),
             )
             unknown = await cursor.fetchall()
             cursor = await connection.execute(
                 "UPDATE tool_calls SET status = 'cancelled', ended_at = now() "
-                "WHERE run_id = %s AND status = 'queued' RETURNING call_id, name", (run_id,))
+                "WHERE run_id = %s AND status = 'queued' RETURNING id, call_id, name", (run_id,))
             cancelled = await cursor.fetchall()
             for kind, rows in (("tool_interrupted", unknown), ("tool_cancelled", cancelled)):
                 for row in rows:
                     await self._event(connection, run_id, kind,
-                                      {"tool_call_id": row["call_id"], "name": row["name"]}, locked=True)
+                                      {"tool_call_id": row["call_id"], "name": row["name"],
+                                       "tool_record_id": str(row["id"])}, locked=True)
             await connection.execute(
                 "UPDATE model_calls SET status = %s, ended_at = now() "
                 "WHERE run_id = %s AND status = 'running'",
