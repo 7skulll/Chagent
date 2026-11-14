@@ -19,6 +19,11 @@ dist/
 # Assistant workspace state (local notes and caches, not project content)
 .workbuddy/
 
+# Editor conflict copies: some editors drop `<doc>-<timestamp>.md` siblings into
+# a `.miaoyan-conflicts` directory next to the file being edited. They are
+# duplicates of text that is already in git history, never project content.
+.miaoyan-conflicts/
+
 # Trial outputs are local artifacts. Keeping them out of `git ls-files` is also
 # what keeps a version manifest stable: writing a result must not change the
 # version of the tree that produced it.
