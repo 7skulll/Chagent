@@ -477,9 +477,17 @@ async def _run_plans(plans, args, root, store, env, trials) -> None:
                 model_settings = replace(ModelSettings.from_env(resolved_env), retry_attempts=0)
                 pinned = execution(identity(VersionManifest.capture(REPOSITORY).to_json(),
                                             settings, model_settings))
-                if any(record.manifest.get('execution', {}).get('identity_sha256') != pinned['identity_sha256']
-                       for record in existing):
-                    raise ValueError('execution version differs from existing trials; no call was made')
+                mismatched = [record for record in existing
+                              if record.manifest.get('execution', {}).get('identity_sha256')
+                              != pinned['identity_sha256']]
+                if mismatched:
+                    from eval.integrity import identity_difference
+                    recorded = (mismatched[0].manifest.get('execution') or {}).get('identity')
+                    changed = identity_difference(recorded, pinned['identity'])
+                    raise ValueError(
+                        'execution version differs from existing trials'
+                        + (f" in {', '.join(changed[:6])}" if changed else '')
+                        + '; no call was made')
                 publish(directory / 'execution.anchor',
                         {'protocol_sha256': protocol.sha256, **pinned}, identical_ok=True)
                 if any(record.trial_id == plan.trial_id for record in existing):

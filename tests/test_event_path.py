@@ -460,7 +460,7 @@ class EventPathTests(unittest.IsolatedAsyncioTestCase):
             await jobs.enqueue(connection, session_id=self.session, run_id=result.run_id,
                                source_message_id=source.id, prompt_version="test")
         self.runner.memory_worker = None  # Keep this queued job pending while SSE ends.
-        app = create_app(workspace=self.workspace, injected_runtime=self.runtime)
+        app = create_app(workspace=self.workspace, injected_runtime=self.runtime, _test_without_accounts=True)
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
                 response = await client.get(f"/api/runs/{result.run_id}/memory-job")

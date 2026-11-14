@@ -21,7 +21,7 @@ def validate_web_settings(settings: Settings) -> None:
         raise ValueError("网页执行要求实际容器，或在宿主启用 host-controller 与 Docker 执行后端")
 
 
-def validate_web_runner(settings: Settings, runner) -> None:
+def validate_web_runner(settings: Settings, runner, *, native_allowed=True) -> None:
     validate_web_settings(settings)
     sandbox = runner.sandbox
     if sandbox is None or not sandbox.settings.allows_execution or not sandbox.settings.network:
@@ -46,6 +46,6 @@ def validate_web_runner(settings: Settings, runner) -> None:
     if (command is None or tests is None or command.sandbox is not sandbox
             or tests.sandbox is not sandbox or (not managed and not command.process_stdin)):
         raise ValueError("网页命令工具必须共用实际沙箱并支持交互输入")
-    if managed and (face.registry.get("host_exec") is None or face.registry.get("host_process") is None
-                    or face.registry.get("site") is None):
+    if managed and (face.registry.get("site") is None or (native_allowed and
+                    (face.registry.get("host_exec") is None or face.registry.get("host_process") is None))):
         raise ValueError("宿主主控必须提供网页审批宿主执行、宿主进程管理与持续网站服务")

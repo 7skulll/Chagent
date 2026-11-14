@@ -11,14 +11,14 @@ from pathlib import Path
 
 ALLOWED = (
     ast.Module, ast.FunctionDef, ast.arguments, ast.arg, ast.Return, ast.Assign,
-    ast.AugAssign, ast.For, ast.If, ast.Expr, ast.Pass, ast.Break, ast.Continue,
+    ast.AugAssign, ast.Raise, ast.For, ast.If, ast.Expr, ast.Pass, ast.Break, ast.Continue,
     ast.Name, ast.Load, ast.Store, ast.Constant, ast.List, ast.Tuple,
     ast.Subscript, ast.Slice, ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare,
     ast.Call, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
     ast.UAdd, ast.USub, ast.Not, ast.And, ast.Or, ast.Eq, ast.NotEq,
     ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is, ast.IsNot, ast.IfExp,
 )
-BUILTINS = {'len': len, 'sum': sum, 'max': max, 'min': min, 'abs': abs, 'range': range}
+BUILTINS = {'len': len, 'sum': sum, 'max': max, 'min': min, 'abs': abs, 'range': range, 'ValueError': ValueError}
 
 
 def validate(source):
@@ -47,6 +47,10 @@ def validate(source):
         if isinstance(node, ast.Call) and (not isinstance(node.func, ast.Name)
                 or node.func.id not in BUILTINS or node.keywords):
             raise ValueError('only fixed pure builtins may be called')
+        if isinstance(node, ast.Raise) and (node.cause is not None
+                or not isinstance(node.exc, ast.Call) or not isinstance(node.exc.func, ast.Name)
+                or node.exc.func.id != 'ValueError'):
+            raise ValueError('only explicit ValueError guards are supported')
         if isinstance(node, ast.Constant) and type(node.value) not in (int, float, str, bool, type(None)):
             raise ValueError('unsupported literal')
     return tree
@@ -65,7 +69,7 @@ def main():
         actual = scope[function](arguments)
         if type(actual) not in (int, float, type(None)) or actual != expected:
             raise ValueError('functional contract failed')
-    print('stats-contract-v1:6/6')
+    print('stats-contract-v2:6/6')
 
 
 if __name__ == '__main__':

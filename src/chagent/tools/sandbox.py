@@ -70,6 +70,7 @@ class Sandbox:
         self._site_uses: dict[str, int] = {}
         self._run_containers: dict[str, str] = {}
         self.database = None
+        self.owner_guard = None
 
     def _lease_lock(self, name: str) -> asyncio.Lock:
         return self._lease_locks.setdefault(name, asyncio.Lock())
@@ -77,6 +78,8 @@ class Sandbox:
     @asynccontextmanager
     async def use(self, workspace: Path):
         """Keep GC away from a site operation, including its startup window."""
+        if self.owner_guard is not None:
+            self.owner_guard(Path(workspace))
         name = self.container_name(workspace)
         async with self._lease_lock(name):
             self._site_uses[name] = self._site_uses.get(name, 0) + 1
@@ -114,6 +117,8 @@ class Sandbox:
 
     async def container_detail(self, workspace: Path) -> dict:
         root = validate_workspace(Path(workspace))
+        if self.owner_guard is not None:
+            self.owner_guard(root)
         name = self.container_name(root)
         code, raw = await self._docker("inspect", name, "--format", "{{json .}}")
         if code:
@@ -130,6 +135,8 @@ class Sandbox:
     async def rebuild_container(self, workspace: Path, workspace_id, database) -> str:
         """Explicit replacement; refuse all active work and retain the cache volume."""
         root = validate_workspace(Path(workspace))
+        if self.owner_guard is not None:
+            self.owner_guard(root)
         name = self.container_name(root)
         async with self._lease_lock(name):
             if self._site_uses.get(name) or name in self._run_containers.values():
@@ -219,6 +226,8 @@ class Sandbox:
         if not self.settings.host_controller:
             raise RuntimeError("Per-workspace containers require host-controller mode")
         root = validate_workspace(Path(workspace))
+        if self.owner_guard is not None:
+            self.owner_guard(root)
         name = self.container_name(root)
         lock = self._locks.setdefault(name, asyncio.Lock())
         async with lock:
@@ -350,6 +359,24 @@ class Sandbox:
             await asyncio.sleep(0.2)
         raise RuntimeError(failure + output[-200:])
 
+    async def _scoped_container_names(self, database, output):
+        names = output.splitlines()
+        if self.owner_guard is None:
+            return names
+        async with database.connection() as connection:
+            cursor = await connection.execute("SELECT host_path FROM workspace_bindings")
+            rows = await cursor.fetchall()
+        allowed = set()
+        for row in rows:
+            try:
+                self.owner_guard(Path(row['host_path']))
+            except (PermissionError, ValueError, OSError):
+                continue
+            allowed.add('chagent-ws-' + sha256(os.fsencode(row['host_path'])).hexdigest()[:20])
+        # Missing from this tenant's DB is *not* evidence that another user's
+        # Docker container is an orphan. Do not inspect or execute in it either.
+        return [name for name in names if name in allowed]
+
     async def reap_terminal_scratch(self, database) -> int:
         """Remove only scratch directories belonging to terminal database runs.
 
@@ -362,7 +389,7 @@ class Sandbox:
         if code:
             raise RuntimeError("Could not list workspace containers: " + output[-200:])
         removed = 0
-        for name in output.splitlines():
+        for name in await self._scoped_container_names(database, output):
             if not re.fullmatch(r"chagent-ws-[0-9a-f]{20}", name):
                 continue
             code, listing = await self._docker("exec", "--workdir", "/tmp", name, "ls", "-1", "/tmp")
@@ -407,6 +434,11 @@ class Sandbox:
         reaped = 0
         for row in candidates:
             name, root = row["container_name"], Path(row["host_path"])
+            if self.owner_guard is not None:
+                try:
+                    self.owner_guard(root)
+                except (PermissionError, ValueError, OSError):
+                    continue
             if not re.fullmatch(r"chagent-ws-[0-9a-f]{20}", name):
                 continue
             async with self._lease_lock(name):
@@ -489,7 +521,7 @@ class Sandbox:
         if code:
             raise RuntimeError("Could not list workspace containers: " + output[-200:])
         removed = 0
-        for name in output.splitlines():
+        for name in await self._scoped_container_names(database, output):
             if not re.fullmatch(r"chagent-ws-[0-9a-f]{20}", name):
                 continue
             async with self._lease_lock(name):
@@ -558,7 +590,7 @@ class Sandbox:
         if code:
             raise RuntimeError("Could not list workspace containers: " + output[-200:])
         items = []
-        for name in output.splitlines():
+        for name in await self._scoped_container_names(database, output):
             if not re.fullmatch(r"chagent-ws-[0-9a-f]{20}", name):
                 continue
             code, raw = await self._docker("inspect", name, "--format", "{{json .}}")

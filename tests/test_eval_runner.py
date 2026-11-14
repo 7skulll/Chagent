@@ -9,8 +9,10 @@ grading, and a cleanup that is verified rather than assumed.
 
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from eval.casefile import Case
@@ -128,6 +130,15 @@ class ControllerCheckTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         (self.root / "tests").mkdir()
+        # What these tests classify is unittest output, not confinement: a host
+        # whose sandbox cannot start has its own test (IsolationStartupRegressions).
+        # Substituting the launcher keeps the classification under test everywhere;
+        # the confined path is exercised where a sandbox can actually run.
+        launcher = patch('eval.isolation.command',
+                         side_effect=lambda workspace, scratch, bootstrap:
+                         [sys.executable, '-I', '-S', '-B', '-c', bootstrap])
+        launcher.start()
+        self.addCleanup(launcher.stop)
 
     def write(self, name, body):
         (self.root / name).write_text(body, encoding="utf-8")

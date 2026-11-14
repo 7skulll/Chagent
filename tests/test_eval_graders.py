@@ -79,6 +79,19 @@ class GraderDispatchTests(unittest.TestCase):
         self.assertEqual(result.result, "infra_error")
         self.assertEqual(result.evidence, ("GraderUnavailable",))
 
+    def test_a_controller_that_could_not_run_is_infra_error_not_fail(self):
+        # A sandbox that never starts yields verdict ``unavailable``. Calling that
+        # a failure would charge an un-runnable check to the candidate, and two
+        # arms measured on a host that cannot isolate would both look broken.
+        case = case_with(grader("c", "controller_check", name="stats_contract_v1",
+                                expect="pass"))
+        facts_note = ("stats_contract_v1: the sandbox never started the controller: "
+                      "exit 71, no handshake on stdout")
+        result = grade_all(case, facts(verdicts={"stats_contract_v1": "unavailable"},
+                                       notes=(facts_note,)))[0]
+        self.assertEqual(result.result, "infra_error")
+        self.assertIn("exit 71", result.notes)
+
     def test_every_declared_grader_returns_one_result(self):
         case = case_with(grader("a", "file_exists", path="x"),
                          {"id": "b", "kind": "human_review", "expects": "…"},

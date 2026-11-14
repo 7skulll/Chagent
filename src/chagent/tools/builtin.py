@@ -139,6 +139,7 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
             # container exec is one-shot and the container `process` tool is absent.
             registry.register(NativeHostExecTool(artifacts.database, processes))
             registry.register(NativeHostProcessTool(artifacts.database, processes))
+        if sandbox is not None and sandbox.settings.host_controller and artifacts is not None:
             registry.register(SiteTool(sandbox, artifacts.database))
             registry.register(CollectFileTool(sandbox, artifacts.database))
     if artifacts is not None:

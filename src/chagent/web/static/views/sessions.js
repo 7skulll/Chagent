@@ -6,6 +6,7 @@
  * refresh does not produce a different-looking conversation.
  */
 
+import { storage } from "../core/account-storage.js";
 import { $, el, on, textNode } from "../core/dom.js";
 import { api, patch, post } from "../core/api.js";
 import { ARCHIVED_HINT, isTerminal, workspaceName } from "../core/format.js";
@@ -181,7 +182,7 @@ export function createSessionsView(ui) {
     $("artifacts-list").replaceChildren(textNode("p", "正在加载…", "artifacts-empty"));
     $("artifacts-count").textContent = "0";
     state.sources = new Map(); state.runMemories = new Map();
-    localStorage.setItem("chagent.session", id);
+    storage.setItem("chagent.session", id);
     for (const row of $("sessions").querySelectorAll(".session-row")) {
       row.classList.toggle("active", row.dataset.id === id);
     }

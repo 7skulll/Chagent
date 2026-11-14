@@ -393,7 +393,12 @@ def check_controller_check(facts: Facts, spec: Mapping) -> Finding:
     if actual is None:
         return _undecided(f"{name}: the controller recorded no verdict")
     if actual in {"unavailable", "error", "unverified"}:
-        raise GraderUnavailable(f"{name}: isolated controller could not run")
+        # Carry the controller's own reading, not just the verdict word: "exit 71,
+        # no handshake on stdout" tells a reader this host cannot isolate, while
+        # "could not run" sends them looking at the candidate.
+        detail = next((line.split(": ", 1)[1] for line in facts.notes
+                       if line.startswith(f"{name}: ")), "")
+        raise GraderUnavailable(f"{name} is {actual}" + (f": {detail}" if detail else ""))
     if actual != expected:
         return _fail(f"{name}: {actual}", notes=f"expected {expected}")
     return _pass(f"{name}: {actual}")

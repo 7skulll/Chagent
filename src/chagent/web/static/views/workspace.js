@@ -6,6 +6,7 @@
  * the file panel gets a chance to veto it while drafts are unsaved.
  */
 
+import { storage } from "../core/account-storage.js";
 import { $, el, on, textNode } from "../core/dom.js";
 import { api, post } from "../core/api.js";
 import { workspaceName, workspaceParent } from "../core/format.js";
@@ -19,7 +20,7 @@ export function createWorkspaceView(ui) {
     if (!await ui.beforeWorkspaceFiles(path)) throw new Error("已取消切换工作区；草稿保留。");
     const opened = await post("/api/workspaces", {path});
     state.workspace = opened.path;
-    localStorage.setItem("chagent.workspace", opened.path);
+    storage.setItem("chagent.workspace", opened.path);
     $("workspace").textContent = workspaceName(opened.path);
     $("workspace-parent").textContent = workspaceParent(opened.path);
     $("workspace").title = opened.path;
@@ -76,7 +77,7 @@ export function createWorkspaceView(ui) {
   async function switchWorkspace(path) {
     if (!await ensureWorkspace(path)) return;
     state.session = null; ui.loadGeneratedFiles();
-    localStorage.removeItem("chagent.session");
+    storage.removeItem("chagent.session");
     ui.showArchived(false); state.query = ""; $("session-search").value = "";
     ui.resetStream(); state.loading = false; state.readonly = false; ui.setBusy(false);
     // An upload belongs to the workspace it landed in; carrying the queue across
@@ -215,13 +216,13 @@ export function createWorkspaceView(ui) {
     syncDrawers();
     ui.panelsChanged();
     if ((name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches)) return;
-    localStorage.setItem(`chagent.${name}.collapsed`, collapsed ? "1" : "0");
+    storage.setItem(`chagent.${name}.collapsed`, collapsed ? "1" : "0");
   }
 
   function restorePanels() {
     for (const name of ["sidebar", "tools"]) {
       const overlay = (name === "sidebar" && narrow.matches) || (name === "tools" && narrowTools.matches);
-      const saved = localStorage.getItem(`chagent.${name}.collapsed`);
+      const saved = storage.getItem(`chagent.${name}.collapsed`);
       applyCollapsed(name, overlay || (saved === null ? false : saved === "1"));
     }
   }

@@ -1,0 +1,50 @@
+{
+  "analysis": "Boundary calibration only; not model capability comparison. Inspect every run usage.model_calls<=1, usage.tool_calls==0, cleanup_verified true, known cost and no passed repair. Deliberately budget-limited slots do not enter formal experiment denominator.",
+  "arms": [
+    {
+      "model": "deepseek-flash",
+      "name": "baseline",
+      "note": "official documented backend DeepSeek-V4.1-Flash-1017; moving API name",
+      "provider": "deepseek"
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "name": "candidate",
+      "note": "official documented backend DeepSeek-V4-Pro-0813; moving API name",
+      "provider": "deepseek"
+    }
+  ],
+  "budget": {
+    "max_tool_calls": 0,
+    "max_turns": 1,
+    "total_cost_usd": 0.25,
+    "wall_seconds": 30
+  },
+  "cases": [
+    {
+      "id": "project-work/fix-off-by-one",
+      "sha256": "43ad6f466d8dcf5ba65471c4c8cb2959af45321696c1053de42627c2b19bf4b5",
+      "version": 2
+    }
+  ],
+  "created_at": "2026-11-14T01:25:08+00:00",
+  "exclusions": "All 24 slots retained. Infra and undecidable cases explicit, never converted into passes. Missing slots incomplete. No retrial of failed slots.",
+  "experiment": "p4-budget-calibration-20261114",
+  "hypothesis": "六个尝试均只允许一次模型请求，禁止任何工具执行，出现预算失败或无交付失败；不得判任务通过。",
+  "min_repeats_for_stability": 3,
+  "order": "interleaved",
+  "pricing": {
+    "input_usd_per_mtok": 1.32,
+    "output_usd_per_mtok": 3.96,
+    "source": "DeepSeek official https://api-docs.deepseek.com/quick_start/pricing/ checked 2026-11-14; common conservative ceiling = Pro peak cache-miss input 1.32 and output 3.96 USD/M; covers both arms and cached input. Upper-bound estimates, not actual invoices."
+  },
+  "protocol_version": 1,
+  "question": "真实模型在预先固定的一轮/零工具预算上能否在执行工具之前停下，并完整记录费用和清理？",
+  "repeats": 3,
+  "sha256": "ac5fcb9578ae23008ebce896ef4bfb4907089e171b9a816ee359ac282cdf5c52",
+  "stopping_rule": "Six slots once; stop on unknown cost or capUSD0.25. No reruns. Work package caps totalUSD5.",
+  "thresholds": {
+    "improve_points": 0.3,
+    "regress_points": 0.3
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "analysis": "Separate corrected-contract experiment, 10 slots. Earlier formal case@2 had two false negatives caused by rejecting pure ValueError guards. Do not regrade or pool any previous denominator. Wilson/Newcombe95% and threshold0.3; five repeats are not stability or equivalence proof.",
+  "arms": [
+    {
+      "model": "deepseek-flash",
+      "name": "baseline",
+      "note": "official documented backend DeepSeek-V4.1-Flash-1017; moving API name",
+      "provider": "deepseek"
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "name": "candidate",
+      "note": "official documented backend DeepSeek-V4-Pro-0813; moving API name",
+      "provider": "deepseek"
+    }
+  ],
+  "budget": {
+    "max_tool_calls": 24,
+    "max_turns": 10,
+    "total_cost_usd": 1.5,
+    "wall_seconds": 240
+  },
+  "cases": [
+    {
+      "id": "project-work/fix-off-by-one",
+      "sha256": "32652e6cbf811a5bfe5983f6309a969ccb8cc53ca07bf563dcc3e4bf58ba8a0e",
+      "version": 3
+    }
+  ],
+  "created_at": "2026-11-14T01:32:27+00:00",
+  "exclusions": "All 24 slots retained. Infra and undecidable cases explicit, never converted into passes. Missing slots incomplete. No retrial of failed slots.",
+  "experiment": "p4-fix-contract-v2-20261114",
+  "hypothesis": "固定双臂各5次；支持空输入 ValueError 不应成为假阴性；模型差值仍须超过0.3且95%区间不含0才命名方向。",
+  "min_repeats_for_stability": 3,
+  "order": "interleaved",
+  "pricing": {
+    "input_usd_per_mtok": 1.32,
+    "output_usd_per_mtok": 3.96,
+    "source": "DeepSeek official https://api-docs.deepseek.com/quick_start/pricing/ checked 2026-11-14; common conservative ceiling = Pro peak cache-miss input 1.32 and output 3.96 USD/M; covers both arms and cached input. Upper-bound estimates, not actual invoices."
+  },
+  "protocol_version": 1,
+  "question": "在公开语法限制并支持纯 ValueError 检查的 case@3 / stats_contract_v2 下，独立复验修复任务的 Flash/Pro 结果。",
+  "repeats": 5,
+  "sha256": "2f53876a0857379c7e1232ec1bfec08c56f6e5ce89a1d7846d07f5cef114595d",
+  "stopping_rule": "Each of10 slots once; stop on unknown cost, version drift or USD1.50 cap. Prior completed work-package upper-bound spend 1.202876400 plus this cap1.50 plus future semantic reserve0.50 is below USD5. Unused ceilings of completed experiments are retired, not spent twice.",
+  "thresholds": {
+    "improve_points": 0.3,
+    "regress_points": 0.3
+  }
+}

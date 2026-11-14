@@ -10,6 +10,10 @@ experiment promises before that happens, and ``report`` says what the resulting
 counts support. Nothing here merges anything, and nothing here decides that a
 candidate may ship — that is P5's gate, which does not exist yet.
 
+``web`` / ``platform`` / ``platform_worker`` provide the independent local
+operator UI and leased execution workflow; they reuse the same runner and never
+auto-retry a paid slot after a crash.
+
 The projections (``spans``, ``attribute``, ``replay``) remain read-only. A module
 that pretended to more than it does would be the "declaration without
 implementation" this project keeps fixing.

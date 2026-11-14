@@ -136,11 +136,7 @@ def main():
         except (httpx.HTTPError, ValueError):
             print("请在网页配置中核对现有服务的实际模式。", flush=True)
         if not args.no_open:
-            if args.host_controller:
-                from chagent.web.auth import HostAuth
-                webbrowser.open(url + "/#auth=" + HostAuth().token)
-            else:
-                webbrowser.open(url)
+            webbrowser.open(url)
         return
 
     if args.workspace is None:
@@ -170,9 +166,9 @@ def main():
     print(f"Behavior: {describe_behavior(settings, compaction, workspace_writes=True)}", flush=True)
     for warning in describe_warnings(settings):
         print(f"Warning: {warning}", flush=True)
-    print(f"Chagent 网页：{url}（工作区 {Path(args.workspace).expanduser().resolve()}）", flush=True)
+    print(f"Chagent 网页：{url}（登录后使用本机个人工作区；旧工作区保留，不自动共享）", flush=True)
     if not args.no_open:
-        open_later(url + "/#auth=" + app.state.host_auth.token if args.host_controller else url)
+        open_later(url)
     # Bound the wait for open SSE responses before lifespan cancels agent tasks.
     uvicorn.run(app, host=args.host, port=port, workers=1, timeout_graceful_shutdown=3)
 

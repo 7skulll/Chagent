@@ -3,6 +3,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,6 +13,7 @@ import test_eval_runner as runner_fixtures
 from eval import prereg, report
 from eval.budgets import BudgetClient, BudgetExceeded, CostAccount
 from eval.integrity import experiment_lock, publish
+from eval.isolation import available as isolation_available
 from eval.records import TrialInvalid, TrialStore
 from eval.replay.sandbox import Workspace
 from eval.runner import TrialPlan, run_trial, _unit_tests
@@ -286,6 +288,7 @@ class OrchestrationRegressions(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([p.arm.name for p in _slots(p, {'demo/case@1': c}, args, [])], expected)
 
 
+@unittest.skipUnless(isolation_available(), 'this host cannot confine a process')
 class IsolationRegressions(unittest.TestCase):
     def test_env_reads_writes_network_and_process_launch_are_denied(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -324,11 +327,75 @@ class T(unittest.TestCase):
             self.assertFalse(escaped.exists())
             self.assertFalse((workspace / 'modified.txt').exists())
 
+
+class IsolationStartupRegressions(unittest.TestCase):
+    """A sandbox that exists but never starts is an outage, not a bad candidate.
+
+    macOS ships ``sandbox-exec`` and still refuses to apply the profile when the
+    evaluator itself runs inside another sandbox: exit 71, ``sandbox_apply:
+    Operation not permitted``.  Python then never runs, no test output appears,
+    and the controller used to report ``empty`` ("the suite collected no tests")
+    and ``fail`` ("candidate uses unsupported Python") -- blaming the candidate
+    for the host, and counting an un-runnable check against it.
+    """
+
+    @staticmethod
+    def never_starts(*args, **kwargs):
+        return ['/bin/sh', '-c',
+                'echo "sandbox-exec: sandbox_apply: Operation not permitted" >&2; exit 71']
+
     def test_missing_backend_is_unavailable_not_unsandboxed_fallback(self):
         from eval.isolation import IsolationUnavailable
         with patch('eval.isolation.command', side_effect=IsolationUnavailable('no backend')):
             verdict, _ = _unit_tests(Path('/tmp'))
         self.assertEqual(verdict, 'unavailable')
+
+    def test_a_sandbox_that_never_starts_is_unavailable(self):
+        from eval.runner import _stats_contract
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch('eval.isolation.command', side_effect=self.never_starts):
+            for verdict, detail in (_unit_tests(Path(tmp)), _stats_contract(Path(tmp))):
+                self.assertEqual(verdict, 'unavailable', detail)
+                self.assertIn('exit 71', detail)
+                self.assertIn('Operation not permitted', detail)
+
+    def test_a_sandbox_that_hangs_before_python_is_unavailable(self):
+        from eval.isolation import IsolationUnavailable, run_script
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch('eval.isolation.command',
+                      side_effect=lambda *args, **kwargs: ['/bin/sh', '-c', 'sleep 30']):
+            with self.assertRaises(IsolationUnavailable) as caught:
+                run_script(Path(tmp), timeout=0.3)
+        self.assertIn('did not start', str(caught.exception))
+
+    def test_a_workspace_printing_sandbox_errors_is_still_judged(self):
+        # The handshake is written by the controller before any candidate file is
+        # read, so a candidate can echo the sandbox's own failure text without
+        # converting its own failure into an outage.
+        workspace_tests = (
+            'import sys,unittest\n'
+            'class T(unittest.TestCase):\n'
+            ' def test_noise(self):\n'
+            "  sys.stderr.write('sandbox-exec: sandbox_apply: Operation not permitted\\n')\n"
+            "  self.fail('genuine failure')\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / 'tests').mkdir()
+            (workspace / 'tests' / 'test_noise.py').write_text(workspace_tests)
+            with patch('eval.isolation.command',
+                       side_effect=lambda workspace, scratch, bootstrap:
+                       [sys.executable, '-I', '-S', '-B', '-c', bootstrap]):
+                verdict, detail = _unit_tests(workspace)
+        self.assertEqual(verdict, 'fail', detail)
+
+    def test_the_handshake_does_not_reach_the_caller(self):
+        from eval.isolation import run_script
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch('eval.isolation.command',
+                      side_effect=lambda workspace, scratch, bootstrap:
+                      [sys.executable, '-I', '-S', '-B', '-c', bootstrap]):
+            completed = run_script(Path(tmp), "print('stats-contract-v1:6/6')")
+        self.assertEqual(completed.stdout, 'stats-contract-v1:6/6\n')
 
 
 @unittest.skipUnless(os.environ.get('CHAGENT_TEST_DATABASE_URL'), 'Set CHAGENT_TEST_DATABASE_URL')
@@ -381,3 +448,109 @@ class TrialGuardRegressions(unittest.IsolatedAsyncioTestCase):
         trial = await self.execute(drift=True)
         self.assertEqual(trial.verdict, 'infra_error')
         self.assertIn('identity changed', trial.manifest['harness']['error'])
+
+
+class CheckoutLockRegressions(unittest.IsolatedAsyncioTestCase):
+    """A half-finished experiment cannot be resumed on a different checkout.
+
+    Acceptance section 51 ended with five different uncommitted patch hashes inside
+    one experiment: the tree was edited between trials and nothing stopped it.  The
+    guard is the execution anchor; this drives the real CLI orchestration twice and
+    changes the reported checkout between the two calls.
+    """
+
+    async def test_a_changed_checkout_cannot_resume_an_experiment(self):
+        from contextlib import asynccontextmanager, redirect_stdout
+        import io
+        from types import SimpleNamespace
+        from eval.cli import _run_plans
+        from eval.manifests import VersionManifest
+        from eval.records import GraderResult, new_trial
+
+        @asynccontextmanager
+        async def database(*args):
+            yield object()
+
+        class Manifest:
+            def __init__(self, document):
+                self._document = document
+
+            def to_json(self):
+                return self._document
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TrialStore(root)
+            case = replace(runner_fixtures.case(), id='demo/case', sha256='a' * 64)
+            protocol = report_fixtures.protocol(cases=[case], pricing={
+                'input_usd_per_mtok': 1., 'output_usd_per_mtok': 1., 'source': 'fixture'})
+            calls = []
+
+            async def run(plan, **kwargs):
+                calls.append(plan.trial_id)
+                anchor = json.loads((store.directory(protocol.experiment)
+                                     / 'execution.anchor').read_text())
+                anchor['end_identity_sha256'] = anchor['identity_sha256']
+                manifest = {'arm': plan.arm.name, 'protocol_sha256': protocol.sha256,
+                            'case': protocol.cases[0], 'repeat': plan.repeat,
+                            'execution': anchor,
+                            'model': {'provider': plan.arm.provider,
+                                      'requested_id': plan.arm.model},
+                            'harness': {'cleanup_verified': True, 'client_kind': 'live'}}
+                return new_trial(case, manifest, protocol.experiment, trial_id=plan.trial_id,
+                                 status='completed',
+                                 usage={'model_calls': 0, 'tool_calls': 0, 'wall_seconds': 0,
+                                        'cost': {'usd': 0.}}).with_graders(
+                    tuple(GraderResult(grader['id'], 'pass') for grader in case.graders))
+
+            original = VersionManifest.capture
+            state = {'edited': False}
+
+            def capture(*args, **kwargs):
+                document = original(*args, **kwargs).to_json()
+                if state['edited']:
+                    document = {**document, 'repo': {'commit': 'b' * 40, 'dirty': True,
+                                                     'patch_sha256': 'c' * 64}}
+                return Manifest(document)
+
+            args = SimpleNamespace(db=None, schema='chagent_eval_fixture')
+            env = {'DEEPSEEK_API_KEY': 'synthetic-test'}
+            baseline = TrialPlan(protocol, case, protocol.baseline, 0)
+            candidate = TrialPlan(protocol, case, protocol.candidate, 0)
+            second = TrialPlan(protocol, case, protocol.baseline, 1)
+            with patch('eval.cli._eval_database', database), \
+                 patch('eval.runner.run_trial', run), \
+                 patch.object(VersionManifest, 'capture', capture), \
+                 redirect_stdout(io.StringIO()):
+                await _run_plans([baseline], args, root, store, env, [])
+                # An unchanged checkout resumes: this is what proves the refusal
+                # below is caused by the edit and not by resuming at all.
+                await _run_plans([candidate], args, root, store, env, [])
+                state['edited'] = True
+                with self.assertRaises(ValueError) as caught:
+                    await _run_plans([second], args, root, store, env, [])
+        self.assertIn('execution version differs', str(caught.exception))
+        # Naming the component is the difference between "try again" and knowing
+        # whether to revert an edit, commit it, or start a new experiment.
+        self.assertIn('repo.patch_sha256', str(caught.exception))
+        self.assertEqual([baseline.trial_id, candidate.trial_id], calls)
+
+    def test_the_report_names_every_differing_component(self):
+        from eval.integrity import identity_difference
+
+        recorded = {'repo': {'commit': 'a' * 40, 'dirty': True, 'patch_sha256': 'b' * 64},
+                    'skills': {'task-handoff': 'c' * 64},
+                    'config': {'settings_sha256': 'd' * 64, 'ambient_sha256': 'e' * 64},
+                    'prompt_source_sha256': 'f' * 64}
+        self.assertEqual([], identity_difference(recorded, dict(recorded)))
+        changed = {'repo': {'commit': 'a' * 40, 'dirty': True, 'patch_sha256': '9' * 64},
+                   'skills': {'task-handoff': 'c' * 64},
+                   'config': {'settings_sha256': '8' * 64, 'ambient_sha256': 'e' * 64},
+                   'prompt_source_sha256': 'f' * 64}
+        self.assertEqual(['config.settings_sha256', 'repo.patch_sha256'],
+                         identity_difference(recorded, changed))
+        self.assertEqual(['tool_source_sha256'],
+                         identity_difference(recorded, {**recorded, 'tool_source_sha256': '7' * 64}))
+        self.assertEqual(['identity'], identity_difference(None, recorded))
+        self.assertEqual(['config', 'prompt_source_sha256', 'repo', 'skills'],
+                         identity_difference({}, recorded))

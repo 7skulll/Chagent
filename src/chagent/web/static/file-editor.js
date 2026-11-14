@@ -10,6 +10,7 @@
  * of leaving a button silently dead.
  */
 
+import { storage } from "./core/account-storage.js";
 import { $ } from "./core/dom.js";
 import { renderMarkdown } from "./core/markdown.js";
 import { createLayout } from "./views/layout.js";
@@ -36,7 +37,7 @@ export function initFileEditor(ui) {
   const active = () => current && current.tabs.get(current.active);
   // Drafts are per workspace id + path, so switching workspaces cannot mix them
   // and a reload can find them again. Storage failures are silent by design.
-  const drafts = createDraftStore(globalThis.localStorage);
+  const drafts = createDraftStore(storage);
   let draftTimer = 0;
   function rememberDraft(space, tab) {
     if (!space || !tab || tab.kind !== "text" || tab.readonly) return;

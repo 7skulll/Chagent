@@ -6,6 +6,7 @@
  * rules out a style element or an inline style attribute.
  */
 
+import { storage } from "../core/account-storage.js";
 import { $ } from "../core/dom.js";
 
 const DEFAULTS = {sidebar: 216, files: 320, tree: 190};
@@ -45,14 +46,14 @@ export function createLayout() {
     handle.setAttribute("aria-valuenow", String(value));
     handle.setAttribute("aria-orientation", kind === "tree" ? "horizontal" : "vertical");
     vars.setProperty(property, value + "px");
-    localStorage.setItem("chagent.layout." + kind, String(value));
+    storage.setItem("chagent.layout." + kind, String(value));
     return value;
   }
 
   const handles = {};
   for (const [kind, id] of Object.entries(HANDLES)) {
     const handle = $(id);
-    const saved = Number(localStorage.getItem("chagent.layout." + kind));
+    const saved = Number(storage.getItem("chagent.layout." + kind));
     const initial = saved || DEFAULTS[kind];
     let value = dimension(kind, initial);
     handles[kind] = () => value;
@@ -85,7 +86,7 @@ export function createLayout() {
   /* Re-clamp after a viewport change: a saved 400px column is not a width, it is
    * a width on the screen it was chosen on. */
   function clampAll() {
-    for (const kind of Object.keys(HANDLES)) dimension(kind, Number(localStorage.getItem("chagent.layout." + kind)));
+    for (const kind of Object.keys(HANDLES)) dimension(kind, Number(storage.getItem("chagent.layout." + kind)));
   }
   window.addEventListener("resize", clampAll);
 

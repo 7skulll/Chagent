@@ -19,11 +19,13 @@ from eval.budgets import BudgetClient, BudgetExceeded
 from eval.casefile import load
 from eval.graders import Facts, grade_all
 from eval.integrity import execution, identity, valid_identity
+from eval.isolation import available as isolation_available
 from eval.manifests import VersionManifest
 from eval.report import build
 from eval.runner import ROOT, _stats_contract, _unit_tests, snapshot_files
 
 
+@unittest.skipUnless(isolation_available(), 'this host cannot confine a process')
 class TrustedContractTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -37,6 +39,18 @@ class TrustedContractTests(unittest.TestCase):
         self.source.write_text(self.source.read_text().replace('(len(values) - 1)', 'len(values)'))
         self.assertEqual(_stats_contract(self.workspace)[0], 'pass')
 
+    def test_correct_fix_with_value_error_guard_is_not_a_false_failure(self):
+        source = self.source.read_text().replace('(len(values) - 1)', 'len(values)')
+        source = source.replace('    total = 0',
+            '    if not values:\n        raise ValueError("empty input")\n    total = 0')
+        self.source.write_text(source)
+        self.assertEqual(_stats_contract(self.workspace)[0], 'pass')
+
+    def test_a_value_error_guard_cannot_restore_imports_or_stdout_access(self):
+        self.source.write_text('def mean(values):\n    raise ValueError(print("fake"))\n'
+                              'def largest(values): return None\n')
+        self.assertEqual(_stats_contract(self.workspace)[0], 'fail')
+
     def test_fake_unittest_success_cannot_pass_the_case(self):
         before = (self.workspace / 'tests/test_stats.py').read_bytes()
         self.source.write_text('import os\nos.write(2,b"Ran 6 tests in 0.001s\\n\\nOK\\n")\nos._exit(0)\n')
@@ -45,7 +59,7 @@ class TrustedContractTests(unittest.TestCase):
         self.assertEqual(verdict, 'fail')
         case = load(ROOT / 'eval/cases/project-work-fix-off-by-one.json')
         facts = Facts(self.workspace, 'completed', 'model_stop', '', (), (), {},
-                      snapshot_files(self.workspace), {}, {'stats_contract_v1': verdict}, {})
+                      snapshot_files(self.workspace), {}, {'stats_contract_v2': verdict}, {})
         results = {g.grader_id: g.result for g in grade_all(case, facts)}
         self.assertEqual(results['suite_passes'], 'fail')
         self.assertEqual(results['tests_unmodified'], 'pass')
@@ -71,10 +85,18 @@ class TrustedContractTests(unittest.TestCase):
         self.source.write_text('def mean(values): return 0\ndef largest(values): return None\n')
         self.assertEqual(_stats_contract(self.workspace)[0], 'fail')
 
+
+class DiagnosticVerdictTests(unittest.TestCase):
+    """Facts-level: a candidate-reported success cannot grade as a pass.
+
+    Separate from the confined tests because it needs no sandbox: the verdict it
+    grades is already decided, and the point is what the grader does with it.
+    """
+
     def test_diagnostic_success_cannot_grade_as_authoritative_success(self):
         case = runner_fixtures.case(graders=({'id': 'g', 'kind': 'deterministic', 'expects': 'e',
             'spec': {'check': 'controller_check', 'name': 'unit_tests', 'expect': 'unverified'}},))
-        facts = Facts(self.workspace, 'completed', 'model_stop', '', (), (), {}, {}, {},
+        facts = Facts(None, 'completed', 'model_stop', '', (), (), {}, {}, {},
                       {'unit_tests': 'unverified'}, {})
         self.assertEqual(grade_all(case, facts)[0].result, 'infra_error')
 
@@ -165,6 +187,7 @@ class SingleAttemptTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(os.environ.get('CHAGENT_TEST_DATABASE_URL'),
                      'Set CHAGENT_TEST_DATABASE_URL')
+@unittest.skipUnless(isolation_available(), 'this host cannot confine a process')
 class ContractTrialTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = runner_fixtures.TrialRoundTripTests.asyncSetUp
     drop_schema = runner_fixtures.TrialRoundTripTests.drop_schema

@@ -26,15 +26,16 @@ logger = logging.getLogger(__name__)
 
 class WebRuntime:
     def __init__(self, runner: AgentRunner, workspace: Path, settings: Settings | None = None,
-                 compaction: CompactionPolicy | None = None, *, programmable: bool | None = None):
+                 compaction: CompactionPolicy | None = None, *, programmable: bool | None = None, native_allowed: bool = True):
         self.runner = runner
+        self.native_allowed = native_allowed
         self.workspace = validate_workspace(workspace)
         # Resolved once: the mode gate below is a policy decision, and reading it
         # per request could let the environment change under a running server.
         self.settings = settings or Settings()
         self.programmable = (settings is not None) if programmable is None else programmable
         if self.programmable:
-            validate_web_runner(self.settings, runner)
+            validate_web_runner(self.settings, runner, native_allowed=self.native_allowed)
         self.compaction = compaction
         self.sessions = SessionManager(runner.conversations)
         self.approvals = ApprovalRepository(runner.runs.database, runner.runs)
@@ -75,6 +76,8 @@ class WebRuntime:
 
     def open_workspace(self, raw: str) -> Path:
         """Resolve one directory and add it to the open set."""
+        if getattr(self, 'account_id', None) and self.auth_guard is not None:
+            self.auth_guard(Path(raw).expanduser())
         try:
             target = validate_workspace(Path(raw))
         except (OSError, RuntimeError):
@@ -87,11 +90,17 @@ class WebRuntime:
     def root(self, raw: str | None) -> Path:
         """The workspace a request is about; ``None`` means the startup one."""
         if raw is None or not raw.strip():
-            return validate_workspace(self.workspace)
+            target = validate_workspace(self.workspace)
+            if self.auth_guard is not None:
+                self.auth_guard(target)
+            return target
         target = Path(raw).expanduser().resolve(strict=False)
         if target not in self.roots:
             raise ValueError("该工作区尚未打开")
-        return validate_workspace(target)
+        target = validate_workspace(target)
+        if self.auth_guard is not None:
+            self.auth_guard(target)
+        return target
 
     async def workspace_id(self, workspace: Path | None = None):
         root = self.workspace if workspace is None else workspace
@@ -141,7 +150,7 @@ class WebRuntime:
     async def require_programming(self, workspace: Path) -> None:
         if not self.programmable:
             return
-        validate_web_runner(self.settings, self.runner)
+        validate_web_runner(self.settings, self.runner, native_allowed=self.native_allowed)
         if self.settings.execution_profile == "host-controller":
             await self.workspace_id(workspace)
         # Explicit preflight owner, separate from all conversation runs.

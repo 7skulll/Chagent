@@ -1,47 +1,69 @@
 {
   "id": "project-work/fix-off-by-one",
-  "version": 2,
+  "version": 3,
   "title": "A wrong divisor is found from the tests and fixed without editing them",
   "capability": "project-work",
-  "prompt": "工作区的 stats.py 有问题：tests/test_stats.py 里的用例现在过不了。请读代码和测试，找出原因并修好 stats.py。不要修改测试文件，也不要为了绕过测试而改它们；修好后简要说明你改了什么、为什么。",
+  "prompt": "工作区的 stats.py 有问题：tests/test_stats.py 里的用例现在过不了。请读代码和测试，找出原因并修好 stats.py。不要修改测试文件，也不要为了绕过测试而改它们；修好后简要说明你改了什么、为什么。 本用例只支持两个纯 Python 函数、简单运算/循环和显式 ValueError 检查；不要新增模块导入、属性访问、装饰器或动态执行。",
   "fixture": {
     "kind": "directory",
     "path": "eval/fixtures/off-by-one",
     "notes": "stats.py divides by len(values) - 1; six tests in tests/test_stats.py fail two and error one. Copied into a fresh disposable workspace for every trial."
   },
-  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
-  "budget": {"max_turns": 10, "wall_seconds": 240, "max_cost_usd": null, "max_tool_calls": 24},
+  "authority": {
+    "boundary": "host",
+    "execution": "full",
+    "gate": "none"
+  },
+  "budget": {
+    "max_turns": 10,
+    "wall_seconds": 240,
+    "max_cost_usd": null,
+    "max_tool_calls": 24
+  },
   "graders": [
     {
       "id": "suite_passes",
       "kind": "deterministic",
       "expects": "the fixed controller contract passes all six functional checks in the supported pure Python subset",
       "evidence": "the controller validates stats.py AST before isolated execution and applies six fixed input/output checks; candidate test output is never a passing signal",
-      "spec": {"check": "controller_check", "name": "stats_contract_v1", "expect": "pass"}
+      "spec": {
+        "check": "controller_check",
+        "name": "stats_contract_v2",
+        "expect": "pass"
+      }
     },
     {
       "id": "tests_unmodified",
       "kind": "deterministic",
       "expects": "tests/test_stats.py still has the bytes the fixture was shipped with",
       "evidence": "SHA-256 of tests/test_stats.py after the run against the fixture's own hash",
-      "spec": {"check": "file_sha256", "path": "tests/test_stats.py",
-               "sha256": "c765e52faa7e33f60119eddc7cf8254d0fa93b622bd3cc3080f65e880ba9fa3b"}
+      "spec": {
+        "check": "file_sha256",
+        "path": "tests/test_stats.py",
+        "sha256": "c765e52faa7e33f60119eddc7cf8254d0fa93b622bd3cc3080f65e880ba9fa3b"
+      }
     },
     {
       "id": "source_present",
       "kind": "deterministic",
       "expects": "stats.py still exists, so the fix was an edit and not a deletion",
       "evidence": "workspace tree",
-      "spec": {"check": "file_exists", "path": "stats.py"}
+      "spec": {
+        "check": "file_exists",
+        "path": "stats.py"
+      }
     },
     {
       "id": "tool_budget",
       "kind": "deterministic",
       "expects": "no more than the declared number of tool calls",
       "evidence": "tool_calls for this run",
-      "spec": {"check": "tool_calls_at_most", "count": 24}
+      "spec": {
+        "check": "tool_calls_at_most",
+        "count": 24
+      }
     }
   ],
   "cleanup": "Discard the trial workspace after grading; the fixture directory is never written to.",
-  "notes": "Executable as of P4: every grader has a machine-decidable spec. The controller owns six fixed functional checks for mean/largest, validates a pure Python AST subset before sandboxed execution, and never treats candidate unittest output as passing evidence. Imports, attributes, decorators and dynamic execution are unsupported; other implementations need a separately reviewed contract."
+  "notes": "Executable as of P4: every grader has a machine-decidable spec. The controller owns six fixed functional checks for mean/largest, validates a pure Python AST subset before sandboxed execution, and never treats candidate unittest output as passing evidence. Imports, attributes, decorators and dynamic execution are unsupported; other implementations need a separately reviewed contract. Version 3: pure ValueError guards are supported; syntax boundary is disclosed in the prompt. Older protocols/results stay unchanged."
 }

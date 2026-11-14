@@ -68,6 +68,29 @@ def execution(identity_document: dict) -> dict:
             'identity_sha256': sha256_json(identity_document)}
 
 
+def identity_difference(recorded, current) -> list[str]:
+    """Which components of two execution identities differ, as dotted paths.
+
+    The guard already refuses to continue; naming the component is what tells an
+    operator whether to revert an edit, commit it, or start a new experiment.  Only
+    one level is walked because that is the whole shape of an identity: five groups
+    of flat hashes.  A missing component is reported, not skipped -- "absent" and
+    "unchanged" are different facts.
+    """
+    if not isinstance(recorded, dict) or not isinstance(current, dict):
+        return ["identity"]
+    paths = []
+    for key in sorted(set(recorded) | set(current)):
+        left, right = recorded.get(key), current.get(key)
+        if isinstance(left, dict) and isinstance(right, dict):
+            for inner in sorted(set(left) | set(right)):
+                if left.get(inner) != right.get(inner):
+                    paths.append(f"{key}.{inner}")
+        elif left != right:
+            paths.append(key)
+    return paths
+
+
 def valid_identity(document):
     import re
     def digest(value, size=64):

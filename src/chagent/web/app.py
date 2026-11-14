@@ -57,7 +57,7 @@ ASSETS = {
     "main.js": "text/javascript", "app.js": "text/javascript",
     "file-editor.js": "text/javascript", "markdown.js": "text/javascript",
     "api-docs.js": "text/javascript",
-    "core/api.js": "text/javascript", "core/clipboard.js": "text/javascript",
+    "core/account-storage.js": "text/javascript", "core/api.js": "text/javascript", "core/clipboard.js": "text/javascript",
     "core/dom.js": "text/javascript", "core/format.js": "text/javascript",
     "core/markdown.js": "text/javascript", "core/store.js": "text/javascript",
     "run/run-reducer.js": "text/javascript", "run/run-render.js": "text/javascript",
@@ -100,6 +100,8 @@ async def validation_error(request: Request, error: RequestValidationError):
 
 
 async def application_error(request, error):
+    if isinstance(error, PermissionError):
+        return reply({"error": str(error)}, 403)
     if isinstance(error, LookupError):
         return reply({"error": str(error)}, 404)
     if isinstance(error, SessionNotFoundError):
@@ -176,16 +178,36 @@ class LocalBoundary:
 
 def create_app(*, workspace: Path, settings: Settings | None = None,
                model_settings: ModelSettings | None = None, demo: bool = False,
-               injected_runtime: WebRuntime | None = None) -> FastAPI:
+               injected_runtime: WebRuntime | None = None, accounts=None,
+               _tenant: bool = False, _native_allowed: bool = True,
+               _test_without_accounts: bool = False, _workspace_guard=None) -> FastAPI:
     """Injected runtime is caller-owned; production resources belong to lifespan."""
     workspace = validate_workspace(workspace)
     effective_settings = settings or (injected_runtime.settings if injected_runtime is not None else Settings.from_env())
-    host_auth = HostAuth() if effective_settings.execution_profile == "host-controller" else None
+    from chagent.users.store import AccountStore
+    if _test_without_accounts and injected_runtime is None:
+        raise ValueError('The authentication test seam requires an injected runtime')
+    account_store = accounts or (AccountStore() if not _tenant and not _test_without_accounts else None)
+    if account_store is not None and injected_runtime is not None:
+        raise ValueError('Authenticated applications require separate account runtimes')
+    host_auth = (HostAuth() if effective_settings.execution_profile == "host-controller"
+                 and account_store is None and not _tenant else None)
     if host_auth is not None:
         host_auth.guard_workspace(workspace)
 
     @asynccontextmanager
     async def lifespan(app):
+        if account_store is not None:
+            from chagent.web.tenants import TenantRuntimes, runtime_factory
+            manager = TenantRuntimes(account_store, runtime_factory(account_store,
+                settings or Settings.from_env(), model_settings, demo))
+            app.state.tenants = manager
+            manager.start()
+            try:
+                yield
+            finally:
+                await manager.close()
+            return
         if injected_runtime is not None:
             app.state.runtime = injected_runtime
             injected_runtime.start_worker()
@@ -207,6 +229,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                     from chagent.hostexec.native import mark_interrupted_native_executions
                     await mark_interrupted_native_executions(database)
                 sandbox = Sandbox.from_settings(configured)
+                sandbox.owner_guard = _workspace_guard
                 web = WebAccess(configured.search_api_key) if configured.web_access != "off" else None
                 if selected is None:
                     runner = create_demo_runner(database, work_only=True, allow_host_commands=False, max_turns=configured.max_turns,
@@ -221,7 +244,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                                 allow_workspace_writes=True, versioned_files=True)
                 else:
                     host_exec = None
-                    if configured.execution_profile != "host-controller" and os.environ.get("CHAGENT_HOST_EXEC", "off") == "approval":
+                    if _native_allowed and configured.execution_profile != "host-controller" and os.environ.get("CHAGENT_HOST_EXEC", "off") == "approval":
                         endpoint = os.environ.get("CHAGENT_HOST_ENDPOINT", "")
                         token = os.environ.get("CHAGENT_HOST_TOKEN", "")
                         if not endpoint or len(token) < 32:
@@ -252,10 +275,10 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                                            process_wall_timeout=configured.process_timeout,
                                            max_processes=configured.max_processes, web=web,
                                            host_exec=host_exec,
-                                           native_host_exec=configured.execution_profile == "host-controller",
+                                           native_host_exec=_native_allowed and configured.execution_profile == "host-controller",
                                            defer_tools=configured.deferred_tools)
                 app.state.runtime = WebRuntime(runner, workspace, configured, CompactionPolicy.from_env(),
-                                               programmable=not demo)
+                                               programmable=not demo, native_allowed=_native_allowed)
                 if host_auth is not None:
                     app.state.runtime.auth_guard = host_auth.guard_workspace
                 try:
@@ -271,14 +294,14 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
 
     app = FastAPI(
         title="Chagent 本地 Agent API", version="0.1.0",
-        description="本机单用户 Agent。会话、工具、上下文与记忆由本地进程和 PostgreSQL 托管；模型密钥仅在服务端配置。",
+        description="本机账户 Agent。用户工作区、会话和记忆按账户隔离；模型密钥仅在服务端配置。",
         lifespan=lifespan, docs_url=None, redoc_url=None,
         exception_handlers={HTTPException: http_error, RequestValidationError: validation_error,
                             SessionNotFoundError: application_error, RunBusyError: application_error,
                             SessionBusyError: application_error,
                             SessionArchivedError: application_error, ValueError: application_error,
                             LookupError: application_error, StateConflictError: application_error,
-                            Exception: application_error},
+                            PermissionError: application_error, Exception: application_error},
     )
     app.state.host_auth = host_auth
     # Registration order is the order FastAPI tries a path in; keep the api
@@ -286,7 +309,18 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
     for mounted in (info_router, sessions_router, context_router, runs_router,
                     file_router, memory_router, workspace_router):
         app.include_router(mounted)
-    app.add_api_route("/", asset, include_in_schema=False)
+    async def home(request: Request):
+        if account_store is not None and request.scope.get('account') is None:
+            from chagent.web.accounts import account_page
+            return account_page()
+        response = await asset()
+        if account_store is not None:
+            uid = request.scope['account']['id']
+            return Response(response.body.replace(b'<head>',
+                ('<head><meta name="chagent-account" content="' + uid + '">').encode()),
+                media_type='text/html', headers={'Cache-Control': 'no-store'})
+        return response
+    app.add_api_route("/", home, include_in_schema=False)
     app.add_api_route("/health", lambda: {"app": "chagent"}, include_in_schema=False)
     # `path` because the page loads ES modules from subdirectories (`core/…`).
     # The allow-list below is still the only thing that decides what exists.
@@ -306,6 +340,13 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
             app.openapi_schema = result
         return app.openapi_schema
     app.openapi = schema
+    if account_store is not None:
+        from chagent.web.accounts import mount_accounts
+        async def account_changed(user):
+            manager = getattr(app.state, 'tenants', None)
+            if manager:
+                await manager.invalidate(user)
+        mount_accounts(app, account_store, account_changed)
     app.add_middleware(LocalBoundary)
     if host_auth is not None:
         app.add_middleware(HostAuthBoundary, auth=host_auth)

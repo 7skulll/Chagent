@@ -10,6 +10,7 @@
  * Everything else lives in core/, render/, run/ or views/.
  */
 
+import { storage } from "./core/account-storage.js";
 import { $, on } from "./core/dom.js";
 import { copyText } from "./core/clipboard.js";
 import { api, post } from "./core/api.js";
@@ -219,7 +220,7 @@ async function init() {
   const info = await api("/api/info");
   state.config = await api("/api/config");
   $("model").textContent = `${info.provider} / ${info.model}`;
-  const stored = localStorage.getItem("chagent.workspace");
+  const stored = storage.getItem("chagent.workspace");
   if (stored && stored !== info.workspace) {
     try { await ui.ensureWorkspace(stored); }
     catch {
@@ -236,7 +237,7 @@ async function init() {
   }
   await ui.listSessions();
   ui.refreshActive();
-  const previous = localStorage.getItem("chagent.session");
+  const previous = storage.getItem("chagent.session");
   if (previous) {
     try {
       const groups = await api("/api/workspaces");
@@ -245,7 +246,7 @@ async function init() {
       }
       await openSession(previous);
     } catch (error) {
-      localStorage.removeItem("chagent.session");
+      storage.removeItem("chagent.session");
       state.session = null;
       ui.loadGeneratedFiles();
       showError(error);

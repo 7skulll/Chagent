@@ -45,7 +45,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         await migrate(self.database)
         self.runner = create_demo_runner(self.database)
         self.runtime = WebRuntime(self.runner, self.workspace)
-        self.app = create_app(workspace=self.workspace, injected_runtime=self.runtime)
+        self.app = create_app(workspace=self.workspace, injected_runtime=self.runtime, _test_without_accounts=True)
         self.lifespan = self.app.router.lifespan_context(self.app)
         await self.lifespan.__aenter__()
         self.addAsyncCleanup(self.lifespan.__aexit__, None, None, None)
@@ -1277,7 +1277,7 @@ class ApprovalApiTests(unittest.IsolatedAsyncioTestCase):
         await migrate(self.database)
         self.runner = create_demo_runner(self.database)
         self.runtime = WebRuntime(self.runner, self.workspace)
-        self.app = create_app(workspace=self.workspace, injected_runtime=self.runtime)
+        self.app = create_app(workspace=self.workspace, injected_runtime=self.runtime, _test_without_accounts=True)
         self.lifespan = self.app.router.lifespan_context(self.app)
         await self.lifespan.__aenter__()
         self.addAsyncCleanup(self.lifespan.__aexit__, None, None, None)
@@ -1324,7 +1324,7 @@ class ApprovalApiTests(unittest.IsolatedAsyncioTestCase):
         other = Path(self.directory.name, "elsewhere")
         other.mkdir()
         other_runtime = WebRuntime(self.runner, other)
-        app = create_app(workspace=other, injected_runtime=other_runtime)
+        app = create_app(workspace=other, injected_runtime=other_runtime, _test_without_accounts=True)
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1", trust_env=False) as client:
                 self.assertEqual((await client.get(f"/api/runs/{self.run_id}")).status_code, 404)

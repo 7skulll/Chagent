@@ -79,7 +79,8 @@ async def config(current: Current, workspace_id: UUID | None = None):
         "image_stale": container["image_stale"] if container else None,
         "host_commands": current.runner.tools.allow_host_commands,
         "host_execution": current.runner.tools.registry.get("host_exec") is not None,
-        "host_workspace_path": os.environ.get("CHAGENT_HOST_WORKSPACE_PATH", ""),
+        "host_workspace_path": (str(current.workspace) if getattr(current, "account_id", None)
+                                else os.environ.get("CHAGENT_HOST_WORKSPACE_PATH", "")),
         "web_access": settings.web_access,
         "web_key": "set" if settings.search_api_key.strip() else "missing",
         "compaction": policy.enabled, "tokenizer": tokenizer,

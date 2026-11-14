@@ -15,7 +15,14 @@ from chagent.web.runtime import WebRuntime
 from chagent.web.schemas import WorkspaceCreate
 
 
-def runtime(request: Request) -> WebRuntime:
+async def runtime(request: Request) -> WebRuntime:
+    manager = getattr(request.app.state, 'tenants', None)
+    if manager is not None:
+        from fastapi import HTTPException
+        user = request.scope.get('account')
+        if user is None:
+            raise HTTPException(401, '请先登录')
+        return await manager.get(user)
     return request.app.state.runtime
 
 

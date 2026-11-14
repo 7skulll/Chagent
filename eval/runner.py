@@ -201,7 +201,7 @@ def controller_verdicts(names, workspace: Path, *, timeout=120) -> tuple[dict, d
     for name in sorted(set(names)):
         if name == "unit_tests":
             verdict, detail = _unit_tests(workspace, timeout=timeout)
-        elif name == "stats_contract_v1":
+        elif name == "stats_contract_v2":
             verdict, detail = _stats_contract(workspace, timeout=timeout)
         elif name == "hosts_unchanged":
             verdict, detail = _hosts_unchanged(workspace)
@@ -248,7 +248,7 @@ def _stats_contract(workspace: Path, *, timeout=120) -> tuple[str, str]:
         return 'timeout', 'fixed stats contract exceeded its wall budget'
     # Candidate code is AST-restricted before execution: it has no I/O,
     # introspection, imports, decorators, or access to this result channel.
-    if completed.returncode == 0 and completed.stdout == 'stats-contract-v1:6/6\n':
+    if completed.returncode == 0 and completed.stdout == 'stats-contract-v2:6/6\n':
         return 'pass', 'fixed controller contract: 6/6'
     return 'fail', 'fixed controller contract failed or candidate uses unsupported Python'
 
