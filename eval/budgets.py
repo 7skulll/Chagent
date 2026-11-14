@@ -1,5 +1,5 @@
 """Before-call limits and conservative, preregistered-price cost reservations."""
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import math
 
 
@@ -33,6 +33,11 @@ class CostAccount:
 
 class BudgetClient:
     def __init__(self, client, protocol, case, *, synthetic=False, account=None):
+        # A reservation covers exactly one HTTP attempt. Product retry policy
+        # remains unchanged; evaluation clients must expose every failed call.
+        from chagent.models.http import HTTPModelClient
+        if isinstance(client, HTTPModelClient):
+            client.settings = replace(client.settings, retry_attempts=0)
         self.client, self.synthetic = client, synthetic
         self.max_turns = min(protocol.budget['max_turns'], case.budget['max_turns'])
         self.max_tools = min(protocol.budget['max_tool_calls'],

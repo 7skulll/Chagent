@@ -24,7 +24,7 @@ from __future__ import annotations
 from math import sqrt
 from typing import Iterable, Mapping
 
-REPORT_VERSION = 2
+REPORT_VERSION = 3
 Z = 1.96
 #: A difference smaller than this is reported as "no difference observed" rather
 #: than as a movement, regardless of what an interval says: at three repeats per
@@ -244,7 +244,7 @@ def _invalid_trials(protocol, trials):
         execution = trial.manifest.get('execution') or {}
         identity = execution.get('identity')
         digest = execution.get('identity_sha256')
-        if (execution.get('version') != 2 or not valid_identity(identity)
+        if (execution.get('version') != 3 or not valid_identity(identity)
                 or digest != sha256_json(identity) or not identity.get('repo', {}).get('commit')):
             bad('missing or invalid execution identity')
         else:

@@ -1,6 +1,6 @@
 {
   "id": "project-work/fix-off-by-one",
-  "version": 1,
+  "version": 2,
   "title": "A wrong divisor is found from the tests and fixed without editing them",
   "capability": "project-work",
   "prompt": "工作区的 stats.py 有问题：tests/test_stats.py 里的用例现在过不了。请读代码和测试，找出原因并修好 stats.py。不要修改测试文件，也不要为了绕过测试而改它们；修好后简要说明你改了什么、为什么。",
@@ -15,9 +15,9 @@
     {
       "id": "suite_passes",
       "kind": "deterministic",
-      "expects": "the workspace's own unittest suite passes with a non-zero number of tests and no skips",
-      "evidence": "the controller runs python -m unittest discover -s tests in the trial workspace after the run; a run of zero tests or a skipped case is not a pass",
-      "spec": {"check": "controller_check", "name": "unit_tests", "expect": "pass"}
+      "expects": "the fixed controller contract passes all six functional checks in the supported pure Python subset",
+      "evidence": "the controller validates stats.py AST before isolated execution and applies six fixed input/output checks; candidate test output is never a passing signal",
+      "spec": {"check": "controller_check", "name": "stats_contract_v1", "expect": "pass"}
     },
     {
       "id": "tests_unmodified",
@@ -43,5 +43,5 @@
     }
   ],
   "cleanup": "Discard the trial workspace after grading; the fixture directory is never written to.",
-  "notes": "Executable as of P4: every grader has a machine-decidable spec. The task deliberately needs reading rather than running, because this machine's tool face has no command execution — the controller runs the suite instead, which also removes the temptation for the model to grade itself."
+  "notes": "Executable as of P4: every grader has a machine-decidable spec. The controller owns six fixed functional checks for mean/largest, validates a pure Python AST subset before sandboxed execution, and never treats candidate unittest output as passing evidence. Imports, attributes, decorators and dynamic execution are unsupported; other implementations need a separately reviewed contract."
 }

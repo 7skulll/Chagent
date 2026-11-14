@@ -263,15 +263,15 @@ class OrchestrationRegressions(unittest.IsolatedAsyncioTestCase):
                      redirect_stdout(io.StringIO()):
                     if crash:
                         with self.assertRaises(RuntimeError):
-                            await _run_plans([plan], args, root, store, {}, [])
+                            await _run_plans([plan], args, root, store, {'DEEPSEEK_API_KEY': 'synthetic-test'}, [])
                     else:
-                        await _run_plans([plan], args, root, store, {}, [])
+                        await _run_plans([plan], args, root, store, {'DEEPSEEK_API_KEY': 'synthetic-test'}, [])
                     with self.assertRaises(ValueError):
-                        await _run_plans([plan], args, root, store, {}, [])
+                        await _run_plans([plan], args, root, store, {'DEEPSEEK_API_KEY': 'synthetic-test'}, [])
                     if crash:
                         other_arm = TrialPlan(p, c, p.candidate, 0)
                         with self.assertRaises(ValueError):
-                            await _run_plans([other_arm], args, root, store, {}, [])
+                            await _run_plans([other_arm], args, root, store, {'DEEPSEEK_API_KEY': 'synthetic-test'}, [])
                 self.assertEqual(len(calls), 1)
                 self.assertTrue((store.directory(p.experiment) / '.claims' / (plan.trial_id + '.claim')).is_file())
 
@@ -320,7 +320,7 @@ class T(unittest.TestCase):
             (workspace / 'tests' / 'test_limits.py').write_text(code)
             with patch.dict(os.environ, {'P4_SECRET_MARKER': 'synthetic, not a credential'}):
                 verdict, detail = _unit_tests(workspace)
-            self.assertEqual(verdict, 'pass', detail)
+            self.assertEqual(verdict, 'unverified', detail)
             self.assertFalse(escaped.exists())
             self.assertFalse((workspace / 'modified.txt').exists())
 

@@ -201,6 +201,8 @@ def controller_verdicts(names, workspace: Path, *, timeout=120) -> tuple[dict, d
     for name in sorted(set(names)):
         if name == "unit_tests":
             verdict, detail = _unit_tests(workspace, timeout=timeout)
+        elif name == "stats_contract_v1":
+            verdict, detail = _stats_contract(workspace, timeout=timeout)
         elif name == "hosts_unchanged":
             verdict, detail = _hosts_unchanged(workspace)
         else:
@@ -231,8 +233,24 @@ def _unit_tests(workspace: Path, *, timeout=120) -> tuple[str, str]:
     if skipped:
         return "skipped", f"{skipped.group(0)}: {count} test(s), {skipped.group(1)} skipped"
     if "OK" in output and completed.returncode == 0:
-        return "pass", f"Ran {count} test(s): OK"
+        return "unverified", "candidate-reported unittest success is diagnostic only"
     return "error", _tail(output)
+
+
+def _stats_contract(workspace: Path, *, timeout=120) -> tuple[str, str]:
+    from eval.isolation import run_script, IsolationUnavailable
+    script = (Path(__file__).parent / 'graders' / 'stats_worker.py').read_text()
+    try:
+        completed = run_script(workspace, script, timeout=timeout)
+    except IsolationUnavailable as error:
+        return 'unavailable', str(error)
+    except subprocess.TimeoutExpired:
+        return 'timeout', 'fixed stats contract exceeded its wall budget'
+    # Candidate code is AST-restricted before execution: it has no I/O,
+    # introspection, imports, decorators, or access to this result channel.
+    if completed.returncode == 0 and completed.stdout == 'stats-contract-v1:6/6\n':
+        return 'pass', 'fixed controller contract: 6/6'
+    return 'fail', 'fixed controller contract failed or candidate uses unsupported Python'
 
 
 def _tail(text: str, limit: int = 400) -> str:
@@ -388,9 +406,9 @@ async def run_trial(plan: TrialPlan, *, database, env: Mapping[str, str],
                     "CHAGENT_PROVIDER": plan.arm.provider}
     settings = Settings.from_env(settings_env)
     assert_axes(plan.case, settings)
-    model_settings = ModelSettings.from_env(settings_env)
+    model_settings = replace(ModelSettings.from_env(settings_env), retry_attempts=0)
     before_manifest = VersionManifest.capture(ROOT)
-    before_identity = identity(before_manifest.to_json(), settings)
+    before_identity = identity(before_manifest.to_json(), settings, model_settings)
     from eval.manifests import sha256_json
     if expected_identity is not None and sha256_json(before_identity) != expected_identity:
         raise TrialError("execution identity changed before the trial; no model call was made")
@@ -522,7 +540,7 @@ async def run_trial(plan: TrialPlan, *, database, env: Mapping[str, str],
 
     manifest = _manifest(plan, rows, settings, approval_mode, verified_cleanup, error)
     from eval.integrity import execution
-    after_identity = identity(manifest, settings)
+    after_identity = identity(manifest, settings, model_settings)
     manifest['execution'] = execution(before_identity)
     manifest['execution']['end_identity_sha256'] = sha256_json(after_identity)
     manifest['repeat'] = plan.repeat

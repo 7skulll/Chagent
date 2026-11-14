@@ -387,10 +387,12 @@ def check_controller_check(facts: Facts, spec: Mapping) -> Finding:
     if not name:
         raise SpecInvalid("name is required")
     expected = str(spec.get("expect", "pass"))
+    if name == "unit_tests":
+        raise GraderUnavailable("candidate-controlled unittest output is diagnostic only")
     actual = facts.verdicts.get(name)
     if actual is None:
         return _undecided(f"{name}: the controller recorded no verdict")
-    if actual in {"unavailable", "error"}:
+    if actual in {"unavailable", "error", "unverified"}:
         raise GraderUnavailable(f"{name}: isolated controller could not run")
     if actual != expected:
         return _fail(f"{name}: {actual}", notes=f"expected {expected}")

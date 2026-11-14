@@ -13,10 +13,10 @@ class IsolationUnavailable(RuntimeError):
     pass
 
 
-def command(workspace: Path, scratch: Path) -> list[str]:
+def command(workspace: Path, scratch: Path, bootstrap=None) -> list[str]:
     workspace, scratch = workspace.resolve(), scratch.resolve()
     python = str(Path(sys.executable).resolve())
-    bootstrap = ('import os,sys,unittest;sys.path.insert(0,os.getcwd());'
+    bootstrap = bootstrap or ('import os,sys,unittest;sys.path.insert(0,os.getcwd());'
                  'unittest.main(module=None,argv=["unittest","discover","-s","tests"])')
     check = [python, '-I', '-S', '-B', '-c', bootstrap]
     if sys.platform == 'darwin' and shutil.which('sandbox-exec'):
@@ -55,10 +55,15 @@ def command(workspace: Path, scratch: Path) -> list[str]:
 
 
 def unit_tests(workspace: Path, timeout: float = 120):
-    """Workspace is read-only, scratch is disposable, env/network are denied."""
+    """Diagnostic only: candidate stdout cannot authorize a passing verdict."""
+    return run_script(workspace, timeout=timeout)
+
+
+def run_script(workspace: Path, script=None, *, timeout: float = 120):
+    """Run controller-owned code with a read-only workspace and clean env."""
     with tempfile.TemporaryDirectory(prefix='chagent-eval-check-') as temporary:
         scratch = Path(temporary).resolve()
-        cmd = command(workspace, scratch)
+        cmd = command(workspace, scratch, script)
         env = {'PATH': '/usr/bin:/bin', 'HOME': str(scratch), 'TMPDIR': str(scratch),
                'LANG': 'en_US.UTF-8', 'TZ': 'UTC', 'PYTHONDONTWRITEBYTECODE': '1'}
         process = subprocess.Popen(cmd, cwd=workspace, env=env, stdout=subprocess.PIPE,

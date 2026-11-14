@@ -445,6 +445,8 @@ async def _run_plans(plans, args, root, store, env, trials) -> None:
     from eval.integrity import experiment_lock, execution, identity, publish
     from eval.manifests import VersionManifest
     from chagent.config import Settings
+    from chagent.models.settings import ModelSettings
+    from dataclasses import replace
 
     protocol = plans[0].protocol
     if not protocol.pricing:
@@ -469,10 +471,12 @@ async def _run_plans(plans, args, root, store, env, trials) -> None:
         account = CostAccount(protocol.budget['total_cost_usd'], sum(costs))
         async with _eval_database(args.db, args.schema) as database:
             for position, plan in enumerate(plans, start=1):
-                settings = Settings.from_env({**env, **runner.PINNED_ENV,
-                                             'CHAGENT_MODEL': plan.arm.model,
-                                             'CHAGENT_PROVIDER': plan.arm.provider})
-                pinned = execution(identity(VersionManifest.capture(REPOSITORY).to_json(), settings))
+                resolved_env = {**env, **runner.PINNED_ENV,
+                                'CHAGENT_MODEL': plan.arm.model, 'CHAGENT_PROVIDER': plan.arm.provider}
+                settings = Settings.from_env(resolved_env)
+                model_settings = replace(ModelSettings.from_env(resolved_env), retry_attempts=0)
+                pinned = execution(identity(VersionManifest.capture(REPOSITORY).to_json(),
+                                            settings, model_settings))
                 if any(record.manifest.get('execution', {}).get('identity_sha256') != pinned['identity_sha256']
                        for record in existing):
                     raise ValueError('execution version differs from existing trials; no call was made')

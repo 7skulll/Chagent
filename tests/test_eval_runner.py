@@ -132,13 +132,13 @@ class ControllerCheckTests(unittest.TestCase):
     def write(self, name, body):
         (self.root / name).write_text(body, encoding="utf-8")
 
-    def test_a_passing_suite_passes(self):
+    def test_a_passing_suite_is_diagnostic_only(self):
         self.write("tests/test_ok.py", "import unittest\n"
                                        "class T(unittest.TestCase):\n"
                                        "    def test_one(self):\n"
                                        "        self.assertTrue(True)\n")
         verdict, detail = _unit_tests(self.root)
-        self.assertEqual(verdict, "pass", detail)
+        self.assertEqual(verdict, "unverified", detail)
 
     def test_a_failing_suite_fails(self):
         self.write("tests/test_bad.py", "import unittest\n"

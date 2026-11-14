@@ -54,7 +54,8 @@ def trial(verdict, *, arm, case=("demo/case", 1), experiment="demo-2026-11-13",
                           'dependencies': {'lock_sha256': 'b' * 64, 'python': '3.13'},
                           'runtime': {'platform': 'test'}, 'skills': {'s': 'c' * 64},
                           'prompt_source_sha256': 'd' * 64, 'tool_source_sha256': 'e' * 64,
-                          'config': {}})
+                          'config': {'settings_sha256': 'f' * 64, 'ambient_sha256': '1' * 64,
+                                     'model_settings_sha256': '2' * 64}})
     identity['end_identity_sha256'] = identity['identity_sha256']
     number = next(_COUNTER)
     return TrialRecord(

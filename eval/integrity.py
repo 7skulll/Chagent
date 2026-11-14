@@ -47,9 +47,14 @@ def experiment_lock(directory: Path):
             fcntl.flock(file.fileno(), fcntl.LOCK_UN)
 
 
-def identity(manifest: dict, settings) -> dict:
+def identity(manifest: dict, settings, model_settings=None) -> dict:
     """Model-independent code/runtime identity; model choice belongs to the arm."""
-    config = {'settings_sha256': sha256_json(asdict(settings)),
+    model_config = (None if model_settings is None else
+                    {key: value for key, value in asdict(model_settings).items()
+                     if key not in {'api_key', 'key_source', 'thinking_source',
+                                    'model_id', 'provider', 'base_url'}})
+    config = {'model_settings_sha256': sha256_json(model_config) if model_config is not None else None,
+              'settings_sha256': sha256_json(asdict(settings)),
               'ambient_sha256': sha256_json({key: value for key, value in os.environ.items()
                   if key.startswith('CHAGENT_') and key not in {'CHAGENT_MODEL', 'CHAGENT_PROVIDER'}})}
     return {'repo': manifest['repo'], 'dependencies': manifest['dependencies'],
@@ -59,7 +64,7 @@ def identity(manifest: dict, settings) -> dict:
 
 
 def execution(identity_document: dict) -> dict:
-    return {'version': 2, 'identity': identity_document,
+    return {'version': 3, 'identity': identity_document,
             'identity_sha256': sha256_json(identity_document)}
 
 
@@ -80,4 +85,6 @@ def valid_identity(document):
             and isinstance(runtime, dict) and bool(runtime.get('platform'))
             and isinstance(skills, dict) and bool(skills) and all(digest(value) for value in skills.values())
             and digest(document['prompt_source_sha256']) and digest(document['tool_source_sha256'])
-            and isinstance(document['config'], dict))
+            and isinstance(document['config'], dict)
+            and all(digest(document['config'].get(key)) for key in
+                    ('settings_sha256', 'ambient_sha256', 'model_settings_sha256')))
