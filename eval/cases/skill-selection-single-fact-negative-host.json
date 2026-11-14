@@ -1,0 +1,39 @@
+{
+  "id": "skill-selection/single-fact-negative-host",
+  "version": 1,
+  "title": "A question about one constant in a small project loads no workflow",
+  "capability": "skill-selection",
+  "prompt": "工作区里 config.py 定义的 TIMEOUT_SECONDS 是多少？只回答数字，不要修改任何文件。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/single-fact",
+    "notes": "Two small Python files, so the workspace looks like a project while the question stays a single lookup."
+  },
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
+  "budget": {"max_turns": 5, "wall_seconds": 150, "max_cost_usd": null, "max_tool_calls": 8},
+  "graders": [
+    {
+      "id": "answer_states_the_value",
+      "kind": "deterministic",
+      "expects": "the final answer contains 7200, the value config.py defines",
+      "evidence": "final assistant message text",
+      "spec": {"check": "answer_contains", "text": "7200"}
+    },
+    {
+      "id": "no_skill_loaded",
+      "kind": "deterministic",
+      "expects": "read_skill was never called, under any name",
+      "evidence": "tool_calls whose name is read_skill",
+      "spec": {"check": "tool_not_called", "names": ["read_skill"]}
+    },
+    {
+      "id": "workspace_untouched",
+      "kind": "deterministic",
+      "expects": "no file was created, changed or removed; the prompt asked for an answer only",
+      "evidence": "workspace snapshot before and after the run",
+      "spec": {"check": "workspace_unchanged"}
+    }
+  ],
+  "cleanup": "Discard the trial workspace after grading; the fixture directory is never written to.",
+  "notes": "Negative case aimed at the closest miss: the workspace looks like a project, so project-explorer is one step from looking applicable — but its own description excludes single-question lookups, and the answer fits in one read. This case decides whether that negative clause in a skill description is actually read, or whether the model loads a 700-token body to answer one grep. answer_states_the_value keeps a silent run from passing the negative by default."
+}

@@ -1,0 +1,32 @@
+{
+  "id": "skill-selection/line-count-negative-host",
+  "version": 1,
+  "title": "A one-line counting task loads no workflow at all",
+  "capability": "skill-selection",
+  "prompt": "工作区里 logs/app.log 有多少行？把数字写进工作区根目录的 count.txt，文件里只写这个数字。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/line-count",
+    "notes": "One five-line log file. Nothing in this fixture belongs to any workflow the bundle ships."
+  },
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
+  "budget": {"max_turns": 6, "wall_seconds": 180, "max_cost_usd": null, "max_tool_calls": 10},
+  "graders": [
+    {
+      "id": "count_written",
+      "kind": "deterministic",
+      "expects": "count.txt holds exactly the number 5 (whitespace around it is tolerated, prose is not)",
+      "evidence": "content of count.txt in the trial workspace",
+      "spec": {"check": "file_matches", "path": "count.txt", "pattern": "^\\s*5\\s*$"}
+    },
+    {
+      "id": "no_skill_loaded",
+      "kind": "deterministic",
+      "expects": "read_skill was never called, under any name",
+      "evidence": "tool_calls whose name is read_skill",
+      "spec": {"check": "tool_not_called", "names": ["read_skill"]}
+    }
+  ],
+  "cleanup": "Discard the trial workspace after grading; the fixture directory is never written to.",
+  "notes": "Negative case for skill selection: counting lines is not project exploration, not debugging and not delivery, so no bundled workflow applies. Loading a body here costs 700-1500 tokens and buys nothing. The positive half is deliberate — a model that does nothing at all would satisfy no_skill_loaded, so count_written decides whether the task was actually done. A failure here means the model reached for a workflow it did not need; it does not mean the task itself is hard."
+}

@@ -1,0 +1,5 @@
+2026-11-14T09:00:01 INFO  service started
+2026-11-14T09:00:02 INFO  listening on 127.0.0.1:8080
+2026-11-14T09:02:11 WARN  slow query took 812ms
+2026-11-14T09:05:40 INFO  request GET /health 200
+2026-11-14T09:06:02 INFO  service stopped
