@@ -1,0 +1,60 @@
+{
+  "analysis": "18 个槽位，每格 3 次观测，恰好达到协议允许的最小稳定性观测数，这不是有功效的等价性检验：3 次全通过只说明这三格没有出现失败，不说明误加载率低于某个上限。每格 Wilson 95% 区间，差值用 Newcombe 区间，阈值 0.3。两份负例的判据是任务产出 +「未调用 read_skill」两条同时成立，因此「什么都不做」的 run 不会因为没读技能而通过。正例 handoff-document-host 只作本次运行内的可达性对照：它证明 read_skill 这条路径在本次 harness 与本次供应商状态下确实可用，负例的「没读」才不是「读不了」。正例的 3 次观测属新分母，不与 p4-flash-pro-formal-20261114 的 5 次合并。本实验不改变提示词、不改变技能描述、不改变工具面：两臂之间唯一的变量是模型版本，所以它无法回答「技能描述里的否定子句是否有效」，只能回答「两个模型版本在这三份用例上是否有差异」。",
+  "arms": [
+    {
+      "model": "deepseek-flash",
+      "name": "baseline",
+      "note": "official documented backend DeepSeek-V4.1-Flash-1017; moving API name",
+      "provider": "deepseek"
+    },
+    {
+      "model": "deepseek-v4-pro",
+      "name": "candidate",
+      "note": "official documented backend DeepSeek-V4-Pro-0813; moving API name",
+      "provider": "deepseek"
+    }
+  ],
+  "budget": {
+    "max_tool_calls": 24,
+    "max_turns": 10,
+    "total_cost_usd": 1.5,
+    "wall_seconds": 240
+  },
+  "cases": [
+    {
+      "id": "skill-selection/line-count-negative-host",
+      "sha256": "9a8ff58b3cb0021422ab750c526c0a3e691cac88c79383e1ac817ede2c8192eb",
+      "version": 1
+    },
+    {
+      "id": "skill-selection/single-fact-negative-host",
+      "sha256": "9be4ae242274aed47e1224efcd046382c2e13a527b9ea79179998f8a25dd5849",
+      "version": 1
+    },
+    {
+      "id": "skill-selection/handoff-document-host",
+      "sha256": "6af184b518d7f81ed5411dc4084cc4ba2641a7f089d6035d6695cea293c63a09",
+      "version": 1
+    }
+  ],
+  "created_at": "2026-11-14T07:46:53+00:00",
+  "exclusions": "infra_error 退出分母但逐条列出；inconclusive 单独计数，不折算成通过。三个用例全部保留，不因结果剔除。缺失槽位记为未完成，不补齐、不重跑。",
+  "experiment": "skill-selection-negative-2026-11-14",
+  "hypothesis": "两份负例在两臂上都通过、且都不调用 read_skill：这些任务不属于任何内置工作流的适用范围。正例在两臂上都读取 task-handoff 并写出有结构的文件。若负例出现失败，失败原因是模型加载了不需要的工作流，不是任务本身难。",
+  "min_repeats_for_stability": 3,
+  "order": "interleaved",
+  "pricing": {
+    "input_usd_per_mtok": 1.32,
+    "output_usd_per_mtok": 3.96,
+    "source": "DeepSeek official https://api-docs.deepseek.com/quick_start/pricing/ checked 2026-11-14; common conservative ceiling = Pro peak cache-miss input 1.32 and output 3.96 USD/M; covers both arms and cached input. Upper-bound estimates, not actual invoices."
+  },
+  "protocol_version": 1,
+  "question": "在两份技能选择负例（数行数、查单个常量）与一份正例对照上，Flash 与 Pro 的任务通过率与误加载技能的比例是否不同？",
+  "repeats": 3,
+  "sha256": "a30aff22e73e67f7e092c045073fe12e86b427e7ddded7d9d6ab863e8420ae57",
+  "stopping_rule": "18 个槽位各跑一次即停。遇到未知花费、超出 cap USD1.50 或执行身份漂移即停，不重跑、不追加槽位。预计实测花费：历史 40 个槽位实测 USD0.74（均值 0.0185，最大 0.036），本实验 18 个槽位预期在 USD0.5 以内，cap 取其约 3 倍。",
+  "thresholds": {
+    "improve_points": 0.3,
+    "regress_points": 0.3
+  }
+}

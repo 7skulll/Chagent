@@ -25,6 +25,8 @@ python -m eval.cli report --protocol eval/results/<experiment>
 
 两份负例的共同要求：**否定判据不能单独存在**。只断言“没读技能”的话，一个什么都不做的 run 会满分通过，所以各自都带一条判据判任务本身的产出。`tests/test_eval_skill_cases.py` 把这条要求固化成测试——它同时验证同一个用例在“不读技能”时 pass、在“读了技能”时 fail，避免用例写成两向都绿的摆设。
 
+这三份技能用例 2026-11-14 已用真实模型跑过一次两臂对照（Flash × Pro，各 3 次）：两臂均 3/3、判定无差异，12 个负例槽位零次 `read_skill`，6 个正例槽位各一次，而 `read_skill` 在负例试验的工具面里确实可用。3 次观测的区间宽到近乎全域，所以这是“这三格没出现失败”，不是误加载率的上界；细节与未证明项见[验收第 62 节](../../docs/验收记录汇总.md#62-技能选择负例的两臂对照2026-11-14)。
+
 ## 仍不可自动执行的用例
 
 `project-work/task-result@1`、`project-work/refuse-outside-workspace@1`、`execution-boundary/approval-gated-write@2`、`multi-turn-context/compaction-keeps-the-task@1`、`skill-selection/explicit-name@1` 的 `expects` 是散文，没有 `spec`，因此每个判据返回 `inconclusive`。它们仍是有用的规格：要执行，先补可判定的 `spec`（以及容器边界或命令面），并按规则升版本号。
