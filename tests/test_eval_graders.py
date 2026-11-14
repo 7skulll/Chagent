@@ -151,6 +151,8 @@ class WorkspaceCheckTests(unittest.TestCase):
                                        final={"src/a.py": "abc", "new.txt": "x"}))[0]
         self.assertEqual(result.result, "fail")
         self.assertIn("added: new.txt", result.evidence[0])
+        # An addition is not also a modification: one file, one reason.
+        self.assertNotIn("changed:", result.evidence[0])
 
 
 class RunFactTests(unittest.TestCase):

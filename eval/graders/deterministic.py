@@ -251,8 +251,11 @@ def check_file_unchanged(facts: Facts, spec: Mapping) -> Finding:
 def check_workspace_unchanged(facts: Facts, spec: Mapping) -> Finding:
     # An empty fixture has an empty snapshot, and that is a reading, not a
     # missing one: "nothing was created" is exactly what such a case asserts.
+    # A path that only exists afterwards is listed under "added" below, not here:
+    # a missing baseline hash is a different fact from a changed one, and saying
+    # both about one file makes the evidence harder to read than the failure warrants.
     changed = sorted(path for path, digest in facts.final.items()
-                     if facts.initial.get(path) != digest)
+                     if path in facts.initial and facts.initial[path] != digest)
     removed = sorted(path for path in facts.initial if path not in facts.final)
     added = sorted(path for path in facts.final if path not in facts.initial)
     if changed or removed or added:
