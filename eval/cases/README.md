@@ -1,6 +1,6 @@
 # 用例与执行证据
 
-目录里是用例规格：一份用例是一次提问、初始夹具、授权边界、预算与判定条件，不含结果。P4 起有六份用例带 `spec`，可由 `eval/runner.py` 自动判定；其余仍是人工/后续协议，运行时每个判据得到 `inconclusive` 并写明原因，而不是被猜成通过。
+目录里是用例规格：一份用例是一次提问、初始夹具、授权边界、预算与判定条件，不含结果。P4 起有七份用例带 `spec`，可由 `eval/runner.py` 自动判定；其余仍是人工/后续协议，运行时每个判据得到 `inconclusive` 并写明原因，而不是被猜成通过。
 
 执行方式（真实模型，写入单独的评测 schema）：
 
@@ -20,8 +20,9 @@ python -m eval.cli report --protocol eval/results/<experiment>
 | `skill-selection/handoff-document-host@1` | `tool_called_with read_skill=task-handoff`、`file_exists HANDOFF.md`、`file_has_headings min=3` | 只判定确定性部分：技能被读取、文件存在、有三个以上标题。内容是否符合技能大纲属语义判定，未校准，不在此断言。 |
 | `skill-selection/line-count-negative-host@1` | `file_matches count.txt ^\s*5\s*$`、`tool_not_called read_skill` | 负例：数一个日志文件的行数。与任何工作流都不相邻，读任何技能正文都是纯浪费。`file_matches` 同时防止“什么都不做”通过否定判据。 |
 | `skill-selection/single-fact-negative-host@1` | `answer_contains 7200`、`tool_not_called read_skill`、`workspace_unchanged` | 负例：问 `config.py` 里一个常量。工作区看起来像项目，最容易误触 `project-explorer`，而它自己的简介排除“单个函数问答”，本用例判定那句否定描述有没有被读到。 |
+| `skill-selection/explicit-name@2` | `tool_called_with read_skill=task-handoff`、`tool_called_before`（读在写之前）、`file_exists HANDOFF.md`、`file_has_headings min=3`、`tool_called_only_with read_skill=task-handoff` | 正例，交付物与 `handoff-document-host@1` 相同，判的是它没有的两件事：**顺序**与**排他**。顺序之所以能判，是因为题面把顺序说出来了（“先读…再按它的要求…”）——v1 的题面只要求交付物，先建空文件再读技能是合规执行，判它会变成假阴性；所以本用例判的是“说出来的顺序有没有被执行”，不是模型自发的顺序。排他判的是“顺带读第二个技能满足得了‘读过’，满足不了‘只读了它’”。内容是否符合技能大纲仍属语义判定，未校准，不在此断言。 |
 
-这六份都声明 `boundary=host`：本机没有可用容器，也没有命令执行面，所以诚实的边界就是宿主；把它们声明成 container 再在宿主上跑，等于用“跑了别的轴”冒充通过。
+这七份都声明 `boundary=host`：本机没有可用容器，也没有命令执行面，所以诚实的边界就是宿主；把它们声明成 container 再在宿主上跑，等于用“跑了别的轴”冒充通过。
 
 两份负例的共同要求：**否定判据不能单独存在**。只断言“没读技能”的话，一个什么都不做的 run 会满分通过，所以各自都带一条判据判任务本身的产出。`tests/test_eval_skill_cases.py` 把这条要求固化成测试——它同时验证同一个用例在“不读技能”时 pass、在“读了技能”时 fail，避免用例写成两向都绿的摆设。
 
@@ -29,7 +30,9 @@ python -m eval.cli report --protocol eval/results/<experiment>
 
 ## 仍不可自动执行的用例
 
-`project-work/task-result@1`、`project-work/refuse-outside-workspace@1`、`execution-boundary/approval-gated-write@2`、`multi-turn-context/compaction-keeps-the-task@1`、`skill-selection/explicit-name@1` 的 `expects` 是散文，没有 `spec`，因此每个判据返回 `inconclusive`。它们仍是有用的规格：要执行，先补可判定的 `spec`（以及容器边界或命令面），并按规则升版本号。
+`project-work/task-result@1`、`project-work/refuse-outside-workspace@1`、`execution-boundary/approval-gated-write@2`、`multi-turn-context/compaction-keeps-the-task@1` 的 `expects` 是散文，没有 `spec`，因此每个判据返回 `inconclusive`。它们仍是有用的规格：要执行，先补可判定的 `spec`（以及容器边界或命令面），并按规则升版本号。
+
+`skill-selection/explicit-name@1` 已经这样升到了 @2（2026-11-15）：补上 `spec`，同时把 `boundary` 从 container 改为 host、`gate` 从 approval 改为 none——本机跑不了容器，声明 container 再在宿主上跑就是冒充。升版还多做了两件事，因为只补 `spec` 会让它与 `handoff-document-host@1` 完全重复，等于花钱把同一件事测两遍：新增 `tool_called_before` 与 `tool_called_only_with` 两个判据来判顺序与排他。旧 @1 保留在 git 历史里，绑定它的协议仍可读出当时的语义。
 
 ## 审批用例的历史协议（v2，容器边界）
 

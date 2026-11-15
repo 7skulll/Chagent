@@ -1,4 +1,4 @@
-"""The negative skill cases must decide something, and decide it in both directions.
+"""Skill cases must decide something, and decide it in both directions.
 
 A negative case is easy to write and easy to write uselessly. Two failures are
 possible and each gets a test here:
@@ -10,6 +10,10 @@ possible and each gets a test here:
 
 The third test is the one that matters: the same case must pass when the skill is
 left alone and fail when it is loaded. Everything else is bookkeeping.
+
+The last class does the same job for the positive case: ``explicit-name`` claims
+the named skill was read *before* the work started, and a tool list cannot show
+that. Its tests check the claim is decided by ordering, in both directions.
 """
 
 import hashlib
@@ -126,6 +130,67 @@ class SkillNegativeCaseTests(unittest.TestCase):
                 fixture = (ROOT / self.load(filename).fixture["path"]).resolve()
                 self.assertTrue(fixture.is_relative_to(ROOT))
                 self.assertTrue(fixture.is_dir())
+
+
+class ExplicitNameCaseTests(unittest.TestCase):
+    """The positive case has to decide order, not just presence."""
+
+    FILENAME = "skill-selection-explicit-name.json"
+    HANDOFF = "# 交接\n\n## 目标与约束\n\n交付交接说明。\n\n## 已完成\n\n读过技能。\n\n## 继续入口\n\n无。\n"
+
+    def load(self):
+        return casefile.load(CASES / self.FILENAME)
+
+    def graded(self, *, tool_calls, handoff=True, extra_skill=None):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        if handoff:
+            (root / "HANDOFF.md").write_text(self.HANDOFF, encoding="utf-8")
+        calls = tuple(tool_calls)
+        if extra_skill:
+            calls = calls + (skill_read(extra_skill),)
+        facts = Facts(workspace=root, status="completed", end_reason="model_stop",
+                      final_text="", tool_calls=calls, approvals=(),
+                      initial={}, final=snapshot(root), pre_decision={}, verdicts={},
+                      usage={}, notes=())
+        return {result.grader_id: result for result in grade_all(self.load(), facts)}
+
+    @staticmethod
+    def write():
+        return ToolFact(name="create_file", status="completed",
+                        arguments={"path": "HANDOFF.md"}, failed=False, text="")
+
+    def test_the_case_is_executable(self):
+        case = self.load()
+        self.assertEqual(case.version, 2)
+        self.assertEqual(case.authority["boundary"], "host")
+        for grader in case.graders:
+            self.assertEqual(grader["kind"], "deterministic", grader["id"])
+            self.assertIn((grader.get("spec") or {}).get("check"), CHECKS, grader["id"])
+
+    def test_the_order_claim_is_executed_not_written_down(self):
+        specs = [grader["spec"] for grader in self.load().graders]
+        ordering = [spec for spec in specs if spec["check"] == "tool_called_before"]
+        self.assertEqual(len(ordering), 1, "the ordering claim has no grader")
+        self.assertEqual(ordering[0]["equals"], "task-handoff")
+        # A write in any of its recorded spellings has to stop the clock.
+        self.assertTrue({"create_file", "write_file"} <= set(ordering[0]["before"]))
+
+    def test_read_then_write_passes_and_write_then_read_fails(self):
+        before = self.graded(tool_calls=(skill_read("task-handoff"), self.write()))
+        self.assertEqual({result.result for result in before.values()}, {"pass"})
+        after = self.graded(tool_calls=(self.write(), skill_read("task-handoff")))
+        self.assertEqual(after["read_before_first_write"].result, "fail")
+        # Reading late still leaves the file and the structure: only order changed.
+        self.assertEqual(after["document_written"].result, "pass")
+        self.assertEqual(after["skill_was_read"].result, "pass")
+
+    def test_a_second_skill_read_is_caught(self):
+        result = self.graded(tool_calls=(skill_read("task-handoff"), self.write()),
+                             extra_skill="project-explorer")
+        self.assertEqual(result["no_substitute_skill"].result, "fail")
+        self.assertIn("project-explorer", result["no_substitute_skill"].evidence[0])
+        self.assertEqual(result["skill_was_read"].result, "pass")
 
 
 if __name__ == "__main__":

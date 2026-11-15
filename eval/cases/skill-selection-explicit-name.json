@@ -1,32 +1,53 @@
 {
   "id": "skill-selection/explicit-name",
-  "version": 1,
-  "title": "An explicitly named skill is read before it is followed",
+  "version": 2,
+  "title": "An explicitly named skill is read before anything is written, and nothing else is read",
   "capability": "skill-selection",
-  "prompt": "用 task-handoff 技能把当前任务整理成一份交接说明，写到 HANDOFF.md。",
-  "fixture": {"kind": "empty"},
-  "authority": {"boundary": "container", "execution": "full", "gate": "approval"},
+  "prompt": "先读 task-handoff 技能，再按它的要求把当前任务整理成一份交接说明，写到 HANDOFF.md。",
+  "fixture": {"kind": "empty", "notes": "An empty disposable workspace; the skill body comes from the checkout, not from the fixture."},
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
   "budget": {"max_turns": 10, "wall_seconds": 300, "max_cost_usd": null, "max_tool_calls": 25},
   "graders": [
     {
       "id": "skill_was_read",
       "kind": "deterministic",
-      "expects": "a tool call read the task-handoff skill body before the first write",
-      "evidence": "tool_calls where name reads a skill, ordered against writes"
+      "expects": "read_skill was called with name=task-handoff",
+      "evidence": "tool_calls arguments for read_skill",
+      "spec": {"check": "tool_called_with", "tool": "read_skill", "argument": "name",
+               "equals": "task-handoff"}
     },
     {
-      "id": "follows_the_skill_shape",
+      "id": "read_before_first_write",
       "kind": "deterministic",
-      "expects": "HANDOFF.md contains the sections the skill defines, not an improvised outline",
-      "evidence": "HANDOFF.md headings compared with the skill's required sections"
+      "expects": "the first read_skill(task-handoff) call comes before the first create_file, write_file, edit_file or apply_patch",
+      "evidence": "positions of tool_calls in the run's recorded order",
+      "spec": {"check": "tool_called_before", "tool": "read_skill", "argument": "name",
+               "equals": "task-handoff",
+               "before": ["create_file", "write_file", "edit_file", "apply_patch"]}
     },
     {
-      "id": "no_unrequested_skill",
+      "id": "document_written",
       "kind": "deterministic",
-      "expects": "no other skill body was read as a substitute",
-      "evidence": "tool_calls for skill reads"
+      "expects": "HANDOFF.md exists in the workspace",
+      "evidence": "workspace tree",
+      "spec": {"check": "file_exists", "path": "HANDOFF.md"}
+    },
+    {
+      "id": "document_has_structure",
+      "kind": "deterministic",
+      "expects": "HANDOFF.md has at least three headings, so it is a document rather than one paragraph",
+      "evidence": "lines starting with # in HANDOFF.md",
+      "spec": {"check": "file_has_headings", "path": "HANDOFF.md", "min": 3}
+    },
+    {
+      "id": "no_substitute_skill",
+      "kind": "deterministic",
+      "expects": "every read_skill call used name=task-handoff; no other body was loaded as a substitute",
+      "evidence": "arguments of every read_skill call",
+      "spec": {"check": "tool_called_only_with", "tool": "read_skill", "argument": "name",
+               "equals": "task-handoff"}
     }
   ],
-  "cleanup": "Delete HANDOFF.md; no other state is created.",
-  "notes": "Unexecuted: P1 has no runner. Reading the skill is the point of the case, so a plausible-looking handoff built without reading it fails rather than passes."
+  "cleanup": "Discard the trial workspace; the skill body is packaged with the checkout and is never modified.",
+  "notes": "v2 makes this case executable and gives it the claims its title actually makes. v1 declared boundary=container and gate=approval; this host runs neither, and a container-declared case run on the host is a different axis wearing the same name, so the axes move to host/full/none as part of the bump. The other reason for the bump: skill-selection/handoff-document-host@1 already grades read + write + structure on the same task, so a v2 that only added specs would be that case twice and would spend slots measuring nothing new. What is left that nobody tests is ordering (a run can write first and read afterwards, leaving the same tool names in the same record) and exclusivity (a second skill read alongside the named one satisfies tool_called_with). Both are decided by call positions and argument values, not by prose. The prompt says the order out loud because the grader now grades it: v1's wording asked only for the deliverable, and creating an empty HANDOFF.md before reading the skill would then be a reasonable execution that fails a check it was never told about. That makes this case a compliance test — did the stated order survive contact with the model — not evidence of spontaneous ordering, which nothing here measures. The content question — whether the handoff matches the skill's own outline — stays semantic and unasserted, because an uncalibrated rubric may not gate a trial."
 }
