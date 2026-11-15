@@ -16,7 +16,8 @@ from eval.casefile import Case
 from eval.graders import Facts, format_findings, grade_all
 from eval.graders.deterministic import (
     ApprovalFact, ToolFact, check_answer_quotes_tool_result, check_file_unchanged_at_decision,
-    check_no_write_outside_workspace, check_tool_called_with, check_tool_succeeded,
+    check_no_write_outside_workspace, check_tool_called_before, check_tool_called_only_with,
+    check_tool_called_with, check_tool_succeeded,
 )
 from eval.records import GraderResult
 
@@ -219,6 +220,58 @@ class RunFactTests(unittest.TestCase):
         result = grade_all(case, facts(approvals=approvals))[0]
         self.assertEqual(result.result, "fail")
         self.assertIn("recorded", result.notes)
+
+
+class ToolOrderCheckTests(unittest.TestCase):
+    """Ordering and exclusivity, the two claims a name list cannot express."""
+
+    read = ToolFact("read_skill", "completed", {"name": "task-handoff"}, False, "")
+    write = ToolFact("create_file", "completed", {"path": "HANDOFF.md"}, False, "")
+    spec = {"tool": "read_skill", "argument": "name", "equals": "task-handoff",
+            "before": ["create_file", "write_file"]}
+
+    def test_read_after_write_fails(self):
+        result = check_tool_called_before(facts(tool_calls=(self.write, self.read)), self.spec)
+        self.assertEqual(result.result, "fail")
+        self.assertIn("preceded", result.evidence[0])
+
+    def test_read_before_write_passes(self):
+        result = check_tool_called_before(facts(tool_calls=(self.read, self.write)), self.spec)
+        self.assertEqual(result.result, "pass")
+        self.assertIn("before create_file", result.evidence[0])
+
+    def test_no_write_yet_says_the_order_was_not_exercised(self):
+        # A pass, but one that admits it decided nothing: the task graders own that question.
+        result = check_tool_called_before(facts(tool_calls=(self.read,)), self.spec)
+        self.assertEqual(result.result, "pass")
+        self.assertIn("not exercised", result.evidence[0])
+
+    def test_a_different_skill_does_not_satisfy_the_order(self):
+        other = ToolFact("read_skill", "completed", {"name": "website-builder"}, False, "")
+        result = check_tool_called_before(facts(tool_calls=(other, self.write)), self.spec)
+        self.assertEqual(result.result, "fail")
+        self.assertIn("no read_skill call", result.evidence[0])
+
+    def test_a_substitute_skill_is_named(self):
+        other = ToolFact("read_skill", "completed", {"name": "website-builder"}, False, "")
+        result = check_tool_called_only_with(facts(tool_calls=(self.read, other)),
+                                             {"tool": "read_skill", "argument": "name",
+                                              "equals": "task-handoff"})
+        self.assertEqual(result.result, "fail")
+        self.assertIn("website-builder", result.evidence[0])
+
+    def test_one_skill_read_once_passes(self):
+        result = check_tool_called_only_with(facts(tool_calls=(self.read,)),
+                                             {"tool": "read_skill", "argument": "name",
+                                              "equals": "task-handoff"})
+        self.assertEqual(result.result, "pass")
+        self.assertIn("all 1", result.evidence[0])
+
+    def test_no_skill_read_at_all_fails_rather_than_passing_vacuously(self):
+        result = check_tool_called_only_with(facts(tool_calls=(self.write,)),
+                                             {"tool": "read_skill", "argument": "name",
+                                              "equals": "task-handoff"})
+        self.assertEqual(result.result, "fail")
 
 
 class FormatTests(unittest.TestCase):

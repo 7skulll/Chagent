@@ -366,6 +366,71 @@ def check_tool_called_with(facts: Facts, spec: Mapping) -> Finding:
     return _pass(f"{tool} {argument}={expected!r}: {found[0].status}")
 
 
+def check_tool_called_before(facts: Facts, spec: Mapping) -> Finding:
+    """The named call happens before anything in ``before`` was called.
+
+    Ordering is the difference between following a library and justifying work
+    already done: a run that writes first and reads the skill afterwards has the
+    same tool names in the same record as one that consulted it first. Only the
+    positions separate them, so only positions are read here.
+
+    When nothing in ``before`` was called the order was never exercised. That is
+    reported as a pass with the reason in the evidence rather than silently: the
+    task graders decide whether the work happened at all, and a check that
+    quietly passes on an empty record would be indistinguishable from one that
+    verified something.
+    """
+    tool = str(spec.get("tool", ""))
+    before = spec.get("before")
+    if not tool:
+        raise SpecInvalid("tool is required")
+    if not isinstance(before, list) or not before or not all(isinstance(name, str) and name for name in before):
+        raise SpecInvalid("before must be a non-empty list of tool names")
+    argument = spec.get("argument")
+    if argument is not None and not isinstance(argument, str):
+        raise SpecInvalid("argument must be a string when given")
+    expected = spec.get("equals")
+
+    def matches(call) -> bool:
+        return call.name == tool and (argument is None or call.arguments.get(argument) == expected)
+
+    subject = next(((index, call) for index, call in enumerate(facts.tool_calls) if matches(call)), None)
+    if subject is None:
+        qualifier = f" with {argument}={expected!r}" if argument else ""
+        return _fail(f"no {tool} call{qualifier}")
+    blocker = next(((index, call) for index, call in enumerate(facts.tool_calls)
+                    if call.name in before), None)
+    if blocker is None:
+        return _pass(f"{tool} at #{subject[0]}; none of {', '.join(before)} was called, "
+                     f"so the order was not exercised")
+    if subject[0] < blocker[0]:
+        return _pass(f"{tool} at #{subject[0]} before {blocker[1].name} at #{blocker[0]}")
+    return _fail(f"{blocker[1].name} at #{blocker[0]} preceded {tool} at #{subject[0]}")
+
+
+def check_tool_called_only_with(facts: Facts, spec: Mapping) -> Finding:
+    """Every call to ``tool`` used this argument value, and at least one was made.
+
+    ``tool_called_with`` answers "was the right one called"; it cannot answer
+    "was anything else called as well". A substitute skill read alongside the
+    requested one is exactly that gap, so this check fails on the extra value
+    and names it instead of reporting the first match and stopping.
+    """
+    tool = str(spec.get("tool", ""))
+    argument = str(spec.get("argument", ""))
+    expected = spec.get("equals")
+    if not tool or not argument:
+        raise SpecInvalid("tool and argument are required")
+    calls = [call for call in facts.tool_calls if call.name == tool]
+    if not calls:
+        return _fail(f"no {tool} call")
+    others = [call for call in calls if call.arguments.get(argument) != expected]
+    if others:
+        return _fail(*[f"{call.name} {argument}={call.arguments.get(argument)!r}"
+                       for call in others[:5]])
+    return _pass(f"all {len(calls)} {tool} call(s) used {argument}={expected!r}")
+
+
 def check_tool_calls_at_most(facts: Facts, spec: Mapping) -> Finding:
     limit = spec.get("count")
     if not isinstance(limit, int) or limit < 0:
@@ -510,6 +575,8 @@ CHECKS: dict[str, Callable[[Facts, Mapping], Finding]] = {
     "tool_succeeded": check_tool_succeeded,
     "tool_not_called": check_tool_not_called,
     "tool_called_with": check_tool_called_with,
+    "tool_called_before": check_tool_called_before,
+    "tool_called_only_with": check_tool_called_only_with,
     "tool_calls_at_most": check_tool_calls_at_most,
     "run_status": check_run_status,
     "controller_check": check_controller_check,
