@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 from pathlib import Path
 import re
 from typing import Any, Callable, Mapping
@@ -474,6 +475,51 @@ def check_controller_check(facts: Facts, spec: Mapping) -> Finding:
 
 # --- text checks -----------------------------------------------------------
 
+def check_answer_json_schema(facts: Facts, spec: Mapping) -> Finding:
+    """Check explicit structured answers; this is not a semantic prose judge."""
+    from jsonschema import Draft202012Validator, SchemaError
+    schema = spec.get('schema')
+    if not isinstance(schema, dict):
+        raise SpecInvalid('schema must be a JSON Schema object')
+    def no_refs(value):
+        if isinstance(value, dict):
+            if '$ref' in value or '$dynamicRef' in value:
+                raise SpecInvalid('schema references are not supported')
+            for item in value.values():
+                no_refs(item)
+        elif isinstance(value, list):
+            for item in value:
+                no_refs(item)
+    no_refs(schema)
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as error:
+        raise SpecInvalid('invalid answer schema') from error
+    text = facts.final_text.strip()
+    if text.startswith('```'):
+        match = re.fullmatch(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+        if match:
+            text = match.group(1)
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError('duplicate JSON key')
+            result[key] = value
+        return result
+    try:
+        answer = json.loads(text, object_pairs_hook=pairs,
+                            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+    except (ValueError, RecursionError):
+        return _fail('answer is not one unambiguous JSON value')
+    problems = list(Draft202012Validator(schema).iter_errors(answer))
+    if problems:
+        # Do not export the answer or echo potentially sensitive invalid values.
+        return _fail(*[f"answer contract mismatch at {'/'.join(map(str, error.path))[:100] or '<root>'} "
+                       f"({error.validator})" for error in problems[:5]])
+    return _pass('structured answer satisfies the frozen factual contract')
+
+
 def check_answer_contains(facts: Facts, spec: Mapping) -> Finding:
     wanted = spec.get("text")
     if not isinstance(wanted, str) or not wanted:
@@ -562,6 +608,7 @@ def check_file_unchanged_at_decision(facts: Facts, spec: Mapping) -> Finding:
 
 
 CHECKS: dict[str, Callable[[Facts, Mapping], Finding]] = {
+    "answer_json_schema": check_answer_json_schema,
     "file_exists": check_file_exists,
     "file_missing": check_file_missing,
     "file_contains": check_file_contains,

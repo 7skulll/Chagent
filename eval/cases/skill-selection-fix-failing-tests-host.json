@@ -1,0 +1,56 @@
+{
+  "id": "skill-selection/fix-failing-tests-host",
+  "version": 1,
+  "title": "A failing-test report that never names a skill loads the debug-and-fix workflow, and the fix passes the contract",
+  "capability": "skill-selection",
+  "prompt": "这个项目的测试现在过不了，帮我查清原因并修好；修好后告诉我改了哪一行、为什么。不要改测试文件。 本用例只支持两个纯 Python 函数、简单运算/循环和显式 ValueError 检查；不要新增模块导入、属性访问、装饰器或动态执行。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/off-by-one",
+    "notes": "stats.py divides by len(values) - 1; six tests in tests/test_stats.py fail two and error one. Same fixture as project-work/fix-off-by-one, used here for a different question: was the debugging workflow loaded without being named."
+  },
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_cost_usd": null, "max_tool_calls": 30},
+  "graders": [
+    {
+      "id": "skill_was_read",
+      "kind": "deterministic",
+      "expects": "read_skill was called with name=debug-and-fix",
+      "evidence": "tool_calls arguments for read_skill",
+      "spec": {"check": "tool_called_with", "tool": "read_skill", "argument": "name",
+               "equals": "debug-and-fix"}
+    },
+    {
+      "id": "no_substitute_skill",
+      "kind": "deterministic",
+      "expects": "every read_skill call used name=debug-and-fix; no other workflow was loaded instead",
+      "evidence": "arguments of every read_skill call",
+      "spec": {"check": "tool_called_only_with", "tool": "read_skill", "argument": "name",
+               "equals": "debug-and-fix"}
+    },
+    {
+      "id": "contract_passes",
+      "kind": "deterministic",
+      "expects": "the fixed stats.py passes the six fixed functional checks of the controller contract",
+      "evidence": "controller validates stats.py AST before isolated execution and applies six fixed input/output checks",
+      "spec": {"check": "controller_check", "name": "stats_contract_v2", "expect": "pass"}
+    },
+    {
+      "id": "tests_unmodified",
+      "kind": "deterministic",
+      "expects": "tests/test_stats.py still has the bytes the fixture was shipped with",
+      "evidence": "SHA-256 of tests/test_stats.py after the run against the fixture's own hash",
+      "spec": {"check": "file_sha256", "path": "tests/test_stats.py",
+               "sha256": "c765e52faa7e33f60119eddc7cf8254d0fa93b622bd3cc3080f65e880ba9fa3b"}
+    },
+    {
+      "id": "tool_budget",
+      "kind": "deterministic",
+      "expects": "no more than the declared number of tool calls",
+      "evidence": "tool_calls for this run",
+      "spec": {"check": "tool_calls_at_most", "count": 30}
+    }
+  ],
+  "cleanup": "Discard the trial workspace after grading; the fixture directory is never written to.",
+  "notes": "The prompt states the failure and asks for a fix without naming any workflow, so loading debug-and-fix is the model's decision. The controller check keeps the pass honest about the work: reading the skill and describing a fix without applying one fails contract_passes. The AST-subset disclosure is copied verbatim from project-work/fix-off-by-one so that a controller failure here cannot be blamed on a restriction the prompt hid."
+}

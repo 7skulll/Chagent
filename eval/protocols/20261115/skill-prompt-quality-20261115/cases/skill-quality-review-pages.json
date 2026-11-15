@@ -1,0 +1,91 @@
+{
+  "id": "skill-quality/review-pages",
+  "version": 1,
+  "title": "review-pages factual quality independent of skill loading",
+  "capability": "project-work",
+  "prompt": "审查 changes.diff 和改后 page.py，只核对新增分页计数在非空列表、size 为正整数时的行为；零/负 size 和旧函数不在此次审查范围。返回 findings 数组；每项含 function、source（相对路径）、trigger（non_divisible 或 exact_multiple）、counterexample（含 count、size、actual、expected 整数字段）。给出 count=10、size=3 的证据；不要为范围外行为报告问题。\n最终只返回一个 JSON 对象（不要改文件），使用题面规定的字段；数组顺序不限。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/review-diff"
+  },
+  "authority": {
+    "boundary": "host",
+    "execution": "full",
+    "gate": "none"
+  },
+  "budget": {
+    "max_turns": 10,
+    "wall_seconds": 240,
+    "max_cost_usd": null,
+    "max_tool_calls": 30
+  },
+  "graders": [
+    {
+      "id": "factual_contract",
+      "kind": "deterministic",
+      "expects": "Structured facts match the independent fixture oracle; keywords alone do not pass.",
+      "evidence": "Final JSON fields against source files; exact factual contract, not general prose quality.",
+      "spec": {
+        "check": "answer_json_schema",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "findings": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  {
+                    "function": "total_pages",
+                    "source": "page.py",
+                    "trigger": "non_divisible",
+                    "counterexample": {
+                      "count": 10,
+                      "size": 3,
+                      "actual": 3,
+                      "expected": 4
+                    }
+                  }
+                ]
+              },
+              "allOf": [
+                {
+                  "contains": {
+                    "const": {
+                      "function": "total_pages",
+                      "source": "page.py",
+                      "trigger": "non_divisible",
+                      "counterexample": {
+                        "count": 10,
+                        "size": 3,
+                        "actual": 3,
+                        "expected": 4
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "findings"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "workspace_untouched",
+      "kind": "deterministic",
+      "expects": "No workspace file changes.",
+      "evidence": "Controller snapshots.",
+      "spec": {
+        "check": "workspace_unchanged"
+      }
+    }
+  ],
+  "cleanup": "Discard trial workspace.",
+  "notes": "Expected relevant workflow: change-reviewer. Skill loading is an observation, never a prerequisite for quality pass. Structured output is explicitly requested; no claim about unrestricted prose quality."
+}

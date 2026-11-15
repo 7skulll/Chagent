@@ -1,0 +1,80 @@
+{
+  "id": "skill-quality/synthesize-retries",
+  "version": 1,
+  "title": "synthesize-retries factual quality independent of skill loading",
+  "capability": "project-work",
+  "prompt": "核对 notes 的重试策略，不把较新的灰度记录当成取代政策的决定。返回 obsolete_retries、policy_retries、canary_retries（三个整数）、policy_source、canary_source（相对路径）、alignment（confirmed 或 pending）、conflict（布尔值，指当前政策与灰度实际值不同）。\n最终只返回一个 JSON 对象（不要改文件），使用题面规定的字段；数组顺序不限。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/retry-conflict"
+  },
+  "authority": {
+    "boundary": "host",
+    "execution": "full",
+    "gate": "none"
+  },
+  "budget": {
+    "max_turns": 10,
+    "wall_seconds": 240,
+    "max_cost_usd": null,
+    "max_tool_calls": 30
+  },
+  "graders": [
+    {
+      "id": "factual_contract",
+      "kind": "deterministic",
+      "expects": "Structured facts match the independent fixture oracle; keywords alone do not pass.",
+      "evidence": "Final JSON fields against source files; exact factual contract, not general prose quality.",
+      "spec": {
+        "check": "answer_json_schema",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "obsolete_retries": {
+              "const": 2
+            },
+            "policy_retries": {
+              "const": 5
+            },
+            "canary_retries": {
+              "const": 1
+            },
+            "policy_source": {
+              "const": "notes/policy-v2.md"
+            },
+            "canary_source": {
+              "const": "notes/rollout.md"
+            },
+            "alignment": {
+              "const": "pending"
+            },
+            "conflict": {
+              "const": true
+            }
+          },
+          "required": [
+            "obsolete_retries",
+            "policy_retries",
+            "canary_retries",
+            "policy_source",
+            "canary_source",
+            "alignment",
+            "conflict"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "workspace_untouched",
+      "kind": "deterministic",
+      "expects": "No workspace file changes.",
+      "evidence": "Controller snapshots.",
+      "spec": {
+        "check": "workspace_unchanged"
+      }
+    }
+  ],
+  "cleanup": "Discard trial workspace.",
+  "notes": "Expected relevant workflow: document-synthesizer. Skill loading is an observation, never a prerequisite for quality pass. Structured output is explicitly requested; no claim about unrestricted prose quality."
+}

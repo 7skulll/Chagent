@@ -1,0 +1,5 @@
+--- a/page.py
++++ b/page.py
+@@ -0,0 +1,2 @@
++def total_pages(items, size):
++    return len(items) // size + 1

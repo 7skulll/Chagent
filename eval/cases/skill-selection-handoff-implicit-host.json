@@ -1,0 +1,44 @@
+{
+  "id": "skill-selection/handoff-implicit-host",
+  "version": 1,
+  "title": "A handoff request that never names a skill is the unnamed twin of explicit-name@2",
+  "capability": "skill-selection",
+  "prompt": "把当前任务整理成一份交接说明，写到工作区的 HANDOFF.md。",
+  "fixture": {"kind": "empty", "notes": "An empty disposable workspace; the skill body comes from the checkout, not from the fixture."},
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_cost_usd": null, "max_tool_calls": 25},
+  "graders": [
+    {
+      "id": "skill_was_read",
+      "kind": "deterministic",
+      "expects": "read_skill was called with name=task-handoff",
+      "evidence": "tool_calls arguments for read_skill",
+      "spec": {"check": "tool_called_with", "tool": "read_skill", "argument": "name",
+               "equals": "task-handoff"}
+    },
+    {
+      "id": "no_substitute_skill",
+      "kind": "deterministic",
+      "expects": "every read_skill call used name=task-handoff; no other workflow was loaded instead",
+      "evidence": "arguments of every read_skill call",
+      "spec": {"check": "tool_called_only_with", "tool": "read_skill", "argument": "name",
+               "equals": "task-handoff"}
+    },
+    {
+      "id": "document_written",
+      "kind": "deterministic",
+      "expects": "HANDOFF.md exists in the workspace",
+      "evidence": "workspace tree",
+      "spec": {"check": "file_exists", "path": "HANDOFF.md"}
+    },
+    {
+      "id": "document_has_structure",
+      "kind": "deterministic",
+      "expects": "HANDOFF.md has at least three headings, so it is a document rather than one paragraph",
+      "evidence": "lines starting with # in HANDOFF.md",
+      "spec": {"check": "file_has_headings", "path": "HANDOFF.md", "min": 3}
+    }
+  ],
+  "cleanup": "Discard the trial workspace; the skill body is packaged with the checkout and is never modified.",
+  "notes": "Deliberate twin of skill-selection/explicit-name@2: same deliverable, same skill, same authority, and the only difference is that this prompt neither names the skill nor states an order. Run together they answer a question neither can alone — whether the name in the prompt is what produces the read. This case has no ordering grader on purpose: nothing in the prompt asks for an order, so grading one would be the false negative that explicit-name v2 was rewritten to avoid. Content quality stays semantic and unasserted."
+}

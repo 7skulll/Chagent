@@ -1,0 +1,55 @@
+{
+  "id": "skill-selection/explore-unfamiliar-project-host",
+  "version": 1,
+  "title": "An exploration request that never names a skill loads the project-explorer workflow, and the answer comes from the code",
+  "capability": "skill-selection",
+  "prompt": "我刚接手这个项目，先别改任何东西。讲清它是干什么的：入口在哪个文件、启动后默认监听哪个端口、对外有哪些 HTTP 路由。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/explore-service",
+    "notes": "A four-module service. README deliberately omits the port and the route list; both exist only in code, so an answer that names them was read rather than guessed."
+  },
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_cost_usd": null, "max_tool_calls": 30},
+  "graders": [
+    {
+      "id": "skill_was_read",
+      "kind": "deterministic",
+      "expects": "read_skill was called with name=project-explorer",
+      "evidence": "tool_calls arguments for read_skill",
+      "spec": {"check": "tool_called_with", "tool": "read_skill", "argument": "name",
+               "equals": "project-explorer"}
+    },
+    {
+      "id": "no_substitute_skill",
+      "kind": "deterministic",
+      "expects": "every read_skill call used name=project-explorer; no other workflow was loaded instead",
+      "evidence": "arguments of every read_skill call",
+      "spec": {"check": "tool_called_only_with", "tool": "read_skill", "argument": "name",
+               "equals": "project-explorer"}
+    },
+    {
+      "id": "answer_names_entry",
+      "kind": "deterministic",
+      "expects": "the answer names main.py as the entry point",
+      "evidence": "final assistant text",
+      "spec": {"check": "answer_contains", "text": "main.py"}
+    },
+    {
+      "id": "answer_names_port",
+      "kind": "deterministic",
+      "expects": "the answer names the default port 8765, which appears only in service/main.py",
+      "evidence": "final assistant text against the fixture's DEFAULT_PORT",
+      "spec": {"check": "answer_contains", "text": "8765"}
+    },
+    {
+      "id": "answer_names_route",
+      "kind": "deterministic",
+      "expects": "the answer names the /health route, which appears only in service/routes.py",
+      "evidence": "final assistant text against the fixture's ROUTES",
+      "spec": {"check": "answer_contains", "text": "/health"}
+    }
+  ],
+  "cleanup": "Discard the trial workspace; the fixture directory is never written to.",
+  "notes": "The prompt asks for what any owner would ask and never names a skill: whether project-explorer is loaded is the model's own decision, which is the thing measured. The three answer graders exist to stop a pass that reads the skill and then describes a project it never opened; they do not grade the quality of the description, and a run that reads the skill but names no port still fails here. Whether the answer follows the skill's own outline stays semantic and unasserted."
+}

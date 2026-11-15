@@ -52,11 +52,14 @@ class Arm:
     provider: str
     model: str
     note: str = ""
+    prompt: dict | None = None
 
     def to_json(self) -> dict:
         document = {"name": self.name, "provider": self.provider, "model": self.model}
         if self.note:
             document["note"] = self.note
+        if self.prompt is not None:
+            document["prompt"] = dict(self.prompt)
         return document
 
 
@@ -179,6 +182,12 @@ def _validate_document(document: dict) -> None:
     names = [arm["name"] for arm in document["arms"]]
     if len(set(names)) != len(names):
         raise ProtocolInvalid("arm names must be unique")
+    for arm in document['arms']:
+        prompt = arm.get('prompt')
+        if prompt is not None:
+            from eval.manifests import sha256_text
+            if prompt['sha256'] != sha256_text(prompt['content']):
+                raise ProtocolInvalid('arm prompt content does not match its sha256')
     keys = [f"{case['id']}@{case['version']}" for case in document["cases"]]
     if len(set(keys)) != len(keys):
         raise ProtocolInvalid("a case appears twice in the protocol")
@@ -241,8 +250,8 @@ def check(protocol: Protocol, cases, arms) -> list[str]:
             problems.append(f"{key}: case document changed since it was preregistered")
     for key in sorted(set(by_key) - set(declared)):
         problems.append(f"{key}: loaded but not preregistered; it is not part of this experiment")
-    actual = {(arm.name, arm.provider, arm.model) for arm in arms}
-    promised = {(arm.name, arm.provider, arm.model) for arm in protocol.arms}
+    actual = {(arm.name, arm.provider, arm.model, sha256_json(arm.prompt)) for arm in arms}
+    promised = {(arm.name, arm.provider, arm.model, sha256_json(arm.prompt)) for arm in protocol.arms}
     for entry in sorted(actual - promised):
         problems.append(f"arm {entry[0]} runs {entry[1]}/{entry[2]}, which was not preregistered")
     for entry in sorted(promised - actual):

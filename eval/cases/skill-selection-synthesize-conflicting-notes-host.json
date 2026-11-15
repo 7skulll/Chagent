@@ -1,0 +1,48 @@
+{
+  "id": "skill-selection/synthesize-conflicting-notes-host",
+  "version": 1,
+  "title": "A request to reconcile three notes that never names a skill loads document-synthesizer, and the answer carries both values",
+  "capability": "skill-selection",
+  "prompt": "notes 目录里这几份材料对缓存过期时间的说法不一致，帮我核对一下：有哪些说法、哪些互相对不上、当前应该按哪个值。不要改文件。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/docs-conflict",
+    "notes": "Three notes: v1 says 60, v2 supersedes it with 300, and a later rollout note says the canary runs at 120 pending confirmation. The two live values are 300 and 120; neither is stated in any other file."
+  },
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_cost_usd": null, "max_tool_calls": 30},
+  "graders": [
+    {
+      "id": "skill_was_read",
+      "kind": "deterministic",
+      "expects": "read_skill was called with name=document-synthesizer",
+      "evidence": "tool_calls arguments for read_skill",
+      "spec": {"check": "tool_called_with", "tool": "read_skill", "argument": "name",
+               "equals": "document-synthesizer"}
+    },
+    {
+      "id": "no_substitute_skill",
+      "kind": "deterministic",
+      "expects": "every read_skill call used name=document-synthesizer; no other workflow was loaded instead",
+      "evidence": "arguments of every read_skill call",
+      "spec": {"check": "tool_called_only_with", "tool": "read_skill", "argument": "name",
+               "equals": "document-synthesizer"}
+    },
+    {
+      "id": "answer_carries_current_value",
+      "kind": "deterministic",
+      "expects": "the answer carries 300, the value the newest policy states",
+      "evidence": "final assistant text against notes/cache-policy-v2.md",
+      "spec": {"check": "answer_contains", "text": "300"}
+    },
+    {
+      "id": "answer_carries_canary_value",
+      "kind": "deterministic",
+      "expects": "the answer carries 120, the canary value that contradicts it, so the conflict was found rather than papered over",
+      "evidence": "final assistant text against notes/rollout.md",
+      "spec": {"check": "answer_contains", "text": "120"}
+    }
+  ],
+  "cleanup": "Discard the trial workspace; the fixture directory is never written to.",
+  "notes": "Both numbers are required because the task is a conflict, not a lookup: an answer with only 300 read the policy and missed the rollout note, and an answer with only 120 did the reverse. Neither number appears outside the two files it comes from. Whether the reconciliation is sound — which value wins and why — stays semantic and unasserted."
+}

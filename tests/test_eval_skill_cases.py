@@ -193,5 +193,127 @@ class ExplicitNameCaseTests(unittest.TestCase):
         self.assertEqual(result["skill_was_read"].result, "pass")
 
 
+IMPLICIT_CASES = {
+    "skill-selection-explore-unfamiliar-project-host.json": "project-explorer",
+    "skill-selection-synthesize-conflicting-notes-host.json": "document-synthesizer",
+    "skill-selection-review-commit-diff-host.json": "change-reviewer",
+    "skill-selection-verify-delivery-against-requirements-host.json": "project-verifier",
+    "skill-selection-handoff-implicit-host.json": "task-handoff",
+}
+
+#: What a run has to produce for the task graders, per case. Kept next to the
+#: case map so the "the task was done too" claim is exercised, not asserted.
+TASK_OUTPUT = {
+    "skill-selection-explore-unfamiliar-project-host.json": {
+        "answer": "入口在 service/main.py，默认端口 8765，路由含 GET /health。"},
+    "skill-selection-synthesize-conflicting-notes-host.json": {
+        "answer": "v2 写 300，rollout 写 120，两者对不上。"},
+    "skill-selection-review-commit-diff-host.json": {
+        "answer": "total_pages 用整除，10 条 3 条一页会少一页。"},
+    "skill-selection-verify-delivery-against-requirements-host.json": {
+        "answer": "第 3 条不满足：没有 run.sh；app.py 只有 /status 与 /version。"},
+    "skill-selection-handoff-implicit-host.json": {
+        "files": {"HANDOFF.md": "# 交接\n\n## 目标\n\n整理。\n\n## 进展\n\n无。\n\n## 下一步\n\n无。\n"}},
+}
+
+
+class ImplicitSkillCaseTests(unittest.TestCase):
+    """Cases that never name a skill, so the read is the model's own decision.
+
+    These cases exist to measure auto-selection. Two ways they could be useless
+    are tested here: the prompt secretly names the skill (which would make the
+    measurement a copy of ``explicit-name``), and the case grades only the read
+    (so a run that loads a workflow and does nothing would pass).
+    """
+
+    def load(self, filename):
+        return casefile.load(CASES / filename)
+
+    def graded(self, case, *, answer="", files=None, tool_calls=()):
+        source = ROOT / case.fixture["path"] if case.fixture.get("path") else None
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        if source is not None:
+            shutil.copytree(source, root, dirs_exist_ok=True)
+        initial = snapshot(root)
+        for name, text in (files or {}).items():
+            (root / name).write_text(text, encoding="utf-8")
+        facts = Facts(workspace=root, status="completed", end_reason="model_stop",
+                      final_text=answer, tool_calls=tuple(tool_calls), approvals=(),
+                      initial=initial, final=snapshot(root), pre_decision={}, verdicts={},
+                      usage={}, notes=())
+        return {result.grader_id: result for result in grade_all(case, facts)}
+
+    def test_every_implicit_case_is_runnable(self):
+        for filename in IMPLICIT_CASES:
+            with self.subTest(case=filename):
+                case = self.load(filename)
+                self.assertEqual(case.capability, "skill-selection")
+                self.assertEqual(case.authority, {"boundary": "host", "execution": "full",
+                                                  "gate": "none"})
+                for grader in case.graders:
+                    self.assertEqual(grader["kind"], "deterministic", grader["id"])
+                    self.assertIn((grader.get("spec") or {}).get("check"), CHECKS, grader["id"])
+
+    def test_no_implicit_prompt_names_the_skill_it_expects(self):
+        for filename, skill in IMPLICIT_CASES.items():
+            with self.subTest(case=filename):
+                prompt = self.load(filename).prompt
+                self.assertNotIn(skill, prompt, "a named skill makes this a copy of explicit-name")
+                # The Chinese descriptions do not use the English skill name, but the
+                # ordering phrase would give the game away just as well.
+                self.assertNotIn("技能", prompt)
+
+    def test_every_implicit_case_watches_read_skill_in_both_directions(self):
+        for filename, skill in IMPLICIT_CASES.items():
+            with self.subTest(case=filename):
+                specs = [grader["spec"] for grader in self.load(filename).graders]
+                watched = [spec for spec in specs if spec["check"] == "tool_called_with"
+                           and spec.get("tool") == "read_skill"]
+                exclusive = [spec for spec in specs if spec["check"] == "tool_called_only_with"]
+                self.assertEqual([spec.get("equals") for spec in watched], [skill])
+                self.assertEqual([spec.get("equals") for spec in exclusive], [skill])
+
+    def test_every_implicit_case_also_grades_the_task(self):
+        for filename in IMPLICIT_CASES:
+            with self.subTest(case=filename):
+                checks = {grader["spec"]["check"] for grader in self.load(filename).graders}
+                self.assertTrue(checks & TASK_OUTPUT_CHECKS,
+                                "loading a workflow and doing nothing would pass")
+
+    def test_the_task_alone_fails_and_the_right_read_passes(self):
+        for filename, skill in IMPLICIT_CASES.items():
+            with self.subTest(case=filename):
+                case = self.load(filename)
+                output = TASK_OUTPUT[filename]
+                alone = self.graded(case, **output)
+                self.assertEqual(alone["skill_was_read"].result, "fail")
+                self.assertEqual(alone["no_substitute_skill"].result, "fail")
+                self.assertNotIn("fail", {result.result for key, result in alone.items()
+                                          if key not in ("skill_was_read", "no_substitute_skill")})
+                both = self.graded(case, tool_calls=(skill_read(skill),), **output)
+                self.assertEqual({result.result for result in both.values()}, {"pass"})
+
+    def test_a_sibling_skill_is_named_rather_than_accepted(self):
+        for filename, skill in IMPLICIT_CASES.items():
+            with self.subTest(case=filename):
+                sibling = "change-reviewer" if skill != "change-reviewer" else "project-explorer"
+                result = self.graded(self.load(filename), tool_calls=(skill_read(sibling),),
+                                     **TASK_OUTPUT[filename])
+                self.assertEqual(result["skill_was_read"].result, "fail")
+                self.assertEqual(result["no_substitute_skill"].result, "fail")
+                self.assertIn(sibling, result["no_substitute_skill"].evidence[0])
+
+    def test_fixtures_stay_inside_the_checkout(self):
+        for filename in IMPLICIT_CASES:
+            with self.subTest(case=filename):
+                path = self.load(filename).fixture.get("path")
+                if path is None:
+                    continue
+                fixture = (ROOT / path).resolve()
+                self.assertTrue(fixture.is_relative_to(ROOT))
+                self.assertTrue(fixture.is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()

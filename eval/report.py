@@ -200,9 +200,36 @@ def build(protocol, trials) -> dict:
         "unstable": unstable,
         "stray": stray,
         "budget": budget,
+        "observations": _observations(protocol, trials),
         "invalid": invalid,
         "limitations": _limitations(protocol, underpowered),
     }
+
+
+def _observations(protocol, trials):
+    """Keep actual skill use separate from task checks and aggregate verdicts."""
+    output = []
+    for case in protocol.cases:
+        for arm in protocol.arms:
+            group = [t for t in trials if t.case_id == case['id'] and t.case_version == case['version']
+                     and t.manifest.get('arm') == arm.name]
+            reads = [t.usage.get('skill_reads') for t in group]
+            counts = {}
+            for trial in group:
+                for grader in trial.graders:
+                    cell = counts.setdefault(grader.grader_id, {})
+                    cell[grader.result] = cell.get(grader.result, 0) + 1
+            known = all(isinstance(value, list) for value in reads)
+            costs = _budget(protocol, group)['cost']
+            output.append({'case': f"{case['id']}@{case['version']}", 'arm': arm.name,
+                'trials': len(group), 'graders': counts,
+                'trials_with_skill_read': sum(bool(value) for value in reads) if known and group else None,
+                'skill_reads': reads if known else None,
+                'model_calls': sum(t.usage.get('model_calls', 0) for t in group),
+                'tool_calls': sum(t.usage.get('tool_calls', 0) for t in group),
+                'wall_seconds': round(sum(t.usage.get('wall_seconds', 0) for t in group), 3),
+                'cost_upper_bound_usd': costs['estimated_usd'], 'tokens': costs['tokens']})
+    return output
 
 
 def _invalid_trials(protocol, trials):
@@ -238,6 +265,14 @@ def _invalid_trials(protocol, trials):
                 bad('duplicate repeat slot')
             seen_slots.add(slot)
         model = trial.manifest.get('model') or {}
+        if arm.prompt is not None:
+            from eval.prompts import binding
+            calls = trial.usage.get('model_calls', 0)
+            if (type(calls) is not int or calls < 1
+                    or trial.manifest.get('prompt_arm') != binding(arm, calls)):
+                bad('actual request prompt does not match frozen arm')
+        elif trial.manifest.get('prompt_arm') is not None:
+            bad('undeclared prompt variant')
         if model.get('provider') != arm.provider or model.get('requested_id') != arm.model:
             bad('requested model does not match arm')
         endpoints.setdefault(arm_name, set()).add(model.get('endpoint_sha256'))

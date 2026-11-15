@@ -32,13 +32,15 @@ class CostAccount:
 
 
 class BudgetClient:
-    def __init__(self, client, protocol, case, *, synthetic=False, account=None):
+    def __init__(self, client, protocol, case, *, synthetic=False, account=None, expected_preamble=None):
         # A reservation covers exactly one HTTP attempt. Product retry policy
         # remains unchanged; evaluation clients must expose every failed call.
         from chagent.models.http import HTTPModelClient
         if isinstance(client, HTTPModelClient):
             client.settings = replace(client.settings, retry_attempts=0)
         self.client, self.synthetic = client, synthetic
+        self.expected_preamble = expected_preamble
+        self.verified_requests = 0
         self.max_turns = min(protocol.budget['max_turns'], case.budget['max_turns'])
         self.max_tools = min(protocol.budget['max_tool_calls'],
                              case.budget.get('max_tool_calls') if case.budget.get('max_tool_calls') is not None
@@ -83,6 +85,9 @@ class BudgetClient:
         from chagent.domain.messages import ToolCall
         from chagent.models.events import DoneEvent, ErrorEvent
 
+        if self.expected_preamble is not None:
+            from eval.prompts import verify
+            verify(request, self.expected_preamble)
         if self.model_calls >= self.max_turns:
             self._stop('model call budget exhausted')
         try:
@@ -91,6 +96,8 @@ class BudgetClient:
             self.violation = str(error)
             raise
         self.model_calls += 1
+        if self.expected_preamble is not None:
+            self.verified_requests += 1
         terminal = False
         try:
             async for event in self.client.stream(request):

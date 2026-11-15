@@ -1,0 +1,22 @@
+{
+  "experiment": "skill-autoload-20261115",
+  "question": "在对得上技能描述、但题面从不点名技能的任务上，模型会不会自己去读那个技能？把它和「题面点名」的同一任务、以及「对不上」的负例放在同一次运行里，三种条件的差别就是自动选择的边界。",
+  "hypothesis": "预登记（依据是同日预试验 skill-autoload-pilot-20261115：探索题 6 槽零读取、修复题 6 槽仅 1 槽读取）：1) 四份隐式正例加起来，读技能的槽位不超过三分之一（≤8/24），且每一份都至少有一槽不读；2) 点名对照 explicit-name@2 六槽全部读取，且顺序判据为受检通过；3) 两份负例十二槽零次 read_skill。若隐式组读取率高于三分之一，说明预试验那天的观测是异常，而不是稳定行为。",
+  "created_at": "2026-11-15T08:50:00+00:00",
+  "arms": [
+    {"name": "baseline", "provider": "deepseek", "model": "deepseek-flash",
+     "note": "official documented backend DeepSeek-V4.1-Flash-1017; moving API name"},
+    {"name": "candidate", "provider": "deepseek", "model": "deepseek-v4-pro",
+     "note": "official documented backend DeepSeek-V4-Pro-0813; moving API name"}
+  ],
+  "repeats": 3,
+  "min_repeats_for_stability": 3,
+  "order": "interleaved",
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_tool_calls": 30, "total_cost_usd": 1.8},
+  "thresholds": {"improve_points": 0.3, "regress_points": 0.3},
+  "analysis": "本实验的主指标不是臂间差值，而是「读没读技能」这个二分观测，按条件分组报告：隐式组（4 份 × 2 臂 × 3 次 = 24 槽）、点名组（6 槽）、负例组（12 槽）。每格仍给 Wilson 95% 区间；隐式组按份报告而不是只报合计，因为四份的题面难度不同，合计会掩盖差异。臂间差值照常给 Newcombe 区间与 0.3 阈值，但不作为本实验的结论——两个模型都是候选实现，本实验问的是机制，不是选型。读取率的分母是完成的槽位，infra_error 与 inconclusive 退出分母并逐条列出。",
+  "exclusions": "1) infra_error 退出分母但逐条列出，inconclusive 单独计数、不折算成通过。2) skill-selection/fix-failing-tests-host@1 不进本协议：它的唯一诚实产出判据 controller_check(stats_contract_v2) 需要内核沙箱，本机 sandbox-exec 返回 exit 71「Operation not permitted」，在预试验里 6/6 槽位都是 GraderUnavailable；在沙箱外复跑同样失败，因此这条用例在本机只能判「读没读技能」而判不了「修没修好」，按仓库「只判一半的用例不算证据」的规则剔除，它的技能选择留作未测。3) 四份用例全部保留，不因结果剔除。",
+  "stopping_rule": "48 个槽位各跑一次即停。遇到未知花费、超出 cap USD1.80 或执行身份漂移即停，不重跑、不追加槽位。预计花费：预试验 12 槽实测 USD0.3135（均值 0.0261），本实验 48 槽按用例分别估：探索 6×0.026、综合 6×0.020、审查 6×0.020、验收 6×0.025、隐式交接 6×0.030、点名交接 6×0.035、负例 12×0.012，合计约 USD1.08，cap 取其约 1.7 倍。",
+  "pricing": {"input_usd_per_mtok": 1.32, "output_usd_per_mtok": 3.96,
+              "source": "DeepSeek official https://api-docs.deepseek.com/quick_start/pricing/ checked 2026-11-15; same ceiling as skill-selection-crossday-20261115, applied to measured tokens rather than invoices."}
+}

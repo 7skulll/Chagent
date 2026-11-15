@@ -95,6 +95,29 @@
           },
           "note": {
             "type": "string"
+          },
+          "prompt": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "version",
+              "content",
+              "sha256"
+            ],
+            "properties": {
+              "version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "content": {
+                "type": "string",
+                "maxLength": 8000
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
           }
         }
       },

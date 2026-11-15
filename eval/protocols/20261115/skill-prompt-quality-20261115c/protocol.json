@@ -1,0 +1,93 @@
+{
+  "analysis": "Per-case Wilson/Newcombe 95% intervals; 0.3 means 30 percentage points. Primary outcome is factual_contract plus workspace_untouched, or task/no_skill checks for negatives. Skill reads are observations, not quality graders. Report per-case skill names, per-arm costs/token/latency. Six positive cases are three task families, two fixtures each; do not pool heterogeneous cases into one inferred population. Three repeats are exploratory, not powered for small effects. No automatic adoption. Engineering adoption requires reproducible quality/process benefit, zero observed extra negative skill reads, and acceptable cost; no reading-only claim. Same model/settings/tools/fixtures; only frozen preamble appendix varies. No untested semantic rubric is enabled.",
+  "arms": [
+    {
+      "model": "deepseek-flash",
+      "name": "baseline",
+      "prompt": {
+        "content": "",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "version": "current-v1"
+      },
+      "provider": "deepseek"
+    },
+    {
+      "model": "deepseek-flash",
+      "name": "candidate",
+      "prompt": {
+        "content": "When the task matches a workflow description in the read_skill catalog, read the relevant skill before proceeding with the task. For a simple lookup or calculation with no matching workflow, proceed without loading a skill.",
+        "sha256": "53422d24f96664dec6be194de7c2394946bde9b32cfc3a76e69fc3fa8ea9e2fa",
+        "version": "relevant-first-v1"
+      },
+      "provider": "deepseek"
+    }
+  ],
+  "budget": {
+    "max_tool_calls": 30,
+    "max_turns": 10,
+    "total_cost_usd": 3.0,
+    "wall_seconds": 240
+  },
+  "cases": [
+    {
+      "id": "skill-quality/explore-ledger",
+      "sha256": "a885bbe7f3f54cee726c6447ad1edccacdbdc64d36461e6b2076e21f71774994",
+      "version": 3
+    },
+    {
+      "id": "skill-quality/explore-worker",
+      "sha256": "554ec84f0419dd65d0fd8b6013fa3511db84b4f84b4381f63b013897b5bd6e1f",
+      "version": 3
+    },
+    {
+      "id": "skill-quality/synthesize-cache",
+      "sha256": "0a5a3af5ec6cbaed3ca3afd9bab743641e523458c5eafab2ae7394f1068d8a3d",
+      "version": 1
+    },
+    {
+      "id": "skill-quality/synthesize-retries",
+      "sha256": "5de29295b2a1fb54d46328fbc15ab5524697d8d64751c4adee9924ea68c0972f",
+      "version": 1
+    },
+    {
+      "id": "skill-quality/review-pages",
+      "sha256": "d967abbf6ba684ff721bf1fd8e8469c1fa0de11f228c0e4cba10096efdec485d",
+      "version": 2
+    },
+    {
+      "id": "skill-quality/review-extra-page",
+      "sha256": "c6993aa8768e90e30ef2d5680176b5d2693683abbc414b4fd4c8824e998eface",
+      "version": 1
+    },
+    {
+      "id": "skill-selection/line-count-negative-host",
+      "sha256": "9a8ff58b3cb0021422ab750c526c0a3e691cac88c79383e1ac817ede2c8192eb",
+      "version": 1
+    },
+    {
+      "id": "skill-selection/single-fact-negative-host",
+      "sha256": "9be4ae242274aed47e1224efcd046382c2e13a527b9ea79179998f8a25dd5849",
+      "version": 1
+    }
+  ],
+  "created_at": "2026-11-15T09:22:07+00:00",
+  "exclusions": "No red reruns or slot additions. List infrastructure/undecidable/unknown costs separately. Preserve failed factual checks and frozen cases. Fixing a grader or prompt after observing results requires a new protocol and report; it cannot repair this denominator. The first experiment skill-prompt-quality-20261115 is instrument diagnosis only: constructor notation and an affected wrapper caused false negatives. Its 48 trials/costs remain intact, never merged with this experiment. explore-ledger/explore-worker/review-pages are now @2; original case bodies archived alongside the first protocol. Both prompt arms, model, repeat count, thresholds and pricing are unchanged. The second experiment skill-prompt-quality-20261115b exposed another representation-only false negative (Ledger()). It too is preserved as diagnostic evidence, not pooled or regraded. Explore cases now @3 accept the actual module-qualified class/function names, optional empty parentheses and whitespace, while wrong modules/callers and missing edges still fail. Review/synthesis and negative cases, model, prompt arms, repeats, thresholds and prices remain unchanged. This is a new instrument version, not a rerun of a red slot.",
+  "experiment": "skill-prompt-quality-20261115c",
+  "hypothesis": "Candidate increases relevant skill reads. Task quality is the primary outcome; increased reading alone is not an improvement. Any quality regression or negative-task skill use counts against adoption.",
+  "min_repeats_for_stability": 3,
+  "order": "interleaved",
+  "pricing": {
+    "input_usd_per_mtok": 1.32,
+    "output_usd_per_mtok": 3.96,
+    "source": "Conservative ceilings copied unchanged from same-day archived skill-autoload-20261115b protocol (pricing source: DeepSeek official pricing checked 2026-11-15). Applied to all measured input including cache reads; estimated upper bounds, not provider invoices."
+  },
+  "protocol_version": 1,
+  "question": "Does a relevant-workflow-first prompt improve factual task quality while preserving negative-task selectivity?",
+  "repeats": 3,
+  "sha256": "97540d415705c3a1454d3e16c581eff039eda3a473a920a909cd589e732a861e",
+  "stopping_rule": "Each of 48 slots once. Stop on unknown cost, USD3 cap, execution drift or interruption. Existing immutable claim/identity guards apply. Expected cost about USD1.5-2.0, uncertain for new structured tasks; never exceed cap to fill slots.",
+  "thresholds": {
+    "improve_points": 0.3,
+    "regress_points": 0.3
+  }
+}

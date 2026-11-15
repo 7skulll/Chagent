@@ -1,0 +1,22 @@
+{
+  "experiment": "skill-autoload-pilot-20261115",
+  "question": "预试验：五份新的「隐式技能选择」用例里，夹具能不能被真实模型读懂、判据会不会给出可读的证据？先拿探索与修复两类各跑 3 次，确认链路再冻结正式协议。",
+  "hypothesis": "两臂各 3 次共 6 槽能完整跑完；read_skill 至少被调用一次；任务产物判据不是全 fail（全 fail 说明夹具或题面有问题，不是模型的问题）。预试验的结论不进入正式协议的分母。",
+  "created_at": "2026-11-15T08:35:00+00:00",
+  "arms": [
+    {"name": "baseline", "provider": "deepseek", "model": "deepseek-flash",
+     "note": "official documented backend DeepSeek-V4.1-Flash-1017; moving API name"},
+    {"name": "candidate", "provider": "deepseek", "model": "deepseek-v4-pro",
+     "note": "official documented backend DeepSeek-V4-Pro-0813; moving API name"}
+  ],
+  "repeats": 3,
+  "min_repeats_for_stability": 3,
+  "order": "interleaved",
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_tool_calls": 30, "total_cost_usd": 0.8},
+  "thresholds": {"improve_points": 0.3, "regress_points": 0.3},
+  "analysis": "预试验只回答「链路是否成立」，不做臂间比较：12 槽位里任何一格出现 infra_error、判据 inconclusive 或缺证据，就先修夹具/判据再冻结正式协议。3 次重复在这里是链路验证，不是稳定性估计。",
+  "exclusions": "infra_error 逐条列出并计入链路问题；预试验的槽位与正式协议完全独立，不合并、不复用。",
+  "stopping_rule": "12 个槽位各跑一次即停；出现未知花费、超出 cap USD0.8 或执行身份漂移即停。预计花费：按单槽 0.02–0.05 估，12 槽约 USD0.36。",
+  "pricing": {"input_usd_per_mtok": 1.32, "output_usd_per_mtok": 3.96,
+              "source": "DeepSeek official https://api-docs.deepseek.com/quick_start/pricing/ checked 2026-11-15; same ceiling as skill-selection-crossday-20261115, applied to measured tokens rather than invoices."}
+}

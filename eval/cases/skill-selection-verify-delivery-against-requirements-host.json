@@ -1,0 +1,48 @@
+{
+  "id": "skill-selection/verify-delivery-against-requirements-host",
+  "version": 1,
+  "title": "A delivery-acceptance request that never names a skill loads project-verifier, and the answer names the missing entry point",
+  "capability": "skill-selection",
+  "prompt": "按工作区的 REQUIREMENTS.md 逐条验收这份交付：每条给出满足或不满足的结论和核对依据。不要修改任何文件。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/delivery-check",
+    "notes": "Three requirements, all unmet in different ways: no /health route (only /status and /version), retry attempts is 2 instead of 3, and run.sh does not exist."
+  },
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_cost_usd": null, "max_tool_calls": 30},
+  "graders": [
+    {
+      "id": "skill_was_read",
+      "kind": "deterministic",
+      "expects": "read_skill was called with name=project-verifier",
+      "evidence": "tool_calls arguments for read_skill",
+      "spec": {"check": "tool_called_with", "tool": "read_skill", "argument": "name",
+               "equals": "project-verifier"}
+    },
+    {
+      "id": "no_substitute_skill",
+      "kind": "deterministic",
+      "expects": "every read_skill call used name=project-verifier; no other workflow was loaded instead",
+      "evidence": "arguments of every read_skill call",
+      "spec": {"check": "tool_called_only_with", "tool": "read_skill", "argument": "name",
+               "equals": "project-verifier"}
+    },
+    {
+      "id": "answer_names_missing_entrypoint",
+      "kind": "deterministic",
+      "expects": "the answer names run.sh, the requirement that is unmet because the file does not exist",
+      "evidence": "final assistant text against the fixture tree and REQUIREMENTS.md",
+      "spec": {"check": "answer_contains", "text": "run.sh"}
+    },
+    {
+      "id": "answer_cites_real_routes",
+      "kind": "deterministic",
+      "expects": "the answer names /status, so the route claim comes from app.py rather than from the requirements text",
+      "evidence": "final assistant text against app.py's ROUTES",
+      "spec": {"check": "answer_contains", "text": "/status"}
+    }
+  ],
+  "cleanup": "Discard the trial workspace; the fixture directory is never written to.",
+  "notes": "Every requirement is unmet, so an answer that reports three passes is wrong on the fixture's own facts; the two text graders only check that the answer reached the file tree and the route table, not that its per-item reasoning is sound. The distinguishing claim remains the skill read, which nothing in the prompt names. Per-item verdict quality stays semantic and unasserted."
+}

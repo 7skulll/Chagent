@@ -1,0 +1,41 @@
+{
+  "id": "skill-selection/review-commit-diff-host",
+  "version": 1,
+  "title": "A change-review request that never names a skill loads change-reviewer, and the answer reaches the new function",
+  "capability": "skill-selection",
+  "prompt": "这是本次提交的改动：changes.diff 是差异，page.py 是改动后的文件。帮我审查有没有会改变行为的问题，指出函数名和触发条件。不要改代码。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/review-diff",
+    "notes": "The diff adds total_pages() as len(items) // size, so a 10-item list with size 3 renders 3 pages and loses the fourth. page.py is the post-change file; nothing in the fixture states the defect."
+  },
+  "authority": {"boundary": "host", "execution": "full", "gate": "none"},
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_cost_usd": null, "max_tool_calls": 30},
+  "graders": [
+    {
+      "id": "skill_was_read",
+      "kind": "deterministic",
+      "expects": "read_skill was called with name=change-reviewer",
+      "evidence": "tool_calls arguments for read_skill",
+      "spec": {"check": "tool_called_with", "tool": "read_skill", "argument": "name",
+               "equals": "change-reviewer"}
+    },
+    {
+      "id": "no_substitute_skill",
+      "kind": "deterministic",
+      "expects": "every read_skill call used name=change-reviewer; no other workflow was loaded instead",
+      "evidence": "arguments of every read_skill call",
+      "spec": {"check": "tool_called_only_with", "tool": "read_skill", "argument": "name",
+               "equals": "change-reviewer"}
+    },
+    {
+      "id": "answer_names_new_function",
+      "kind": "deterministic",
+      "expects": "the answer names total_pages, the function the diff introduces, so it read the diff rather than the prompt",
+      "evidence": "final assistant text against changes.diff",
+      "spec": {"check": "answer_contains", "text": "total_pages"}
+    }
+  ],
+  "cleanup": "Discard the trial workspace; the fixture directory is never written to.",
+  "notes": "This case grades the weakest claim of the five: naming total_pages proves the diff was opened, not that the off-by-one was found. No deterministic check can decide 'the review found the defect' without judging prose, and an uncalibrated rubric may not gate a trial, so the finding itself stays unasserted and is reported as such. The skill read is the measurement; this grader only keeps a pass from being a guess."
+}

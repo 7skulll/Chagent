@@ -425,8 +425,11 @@ async def run_trial(plan: TrialPlan, *, database, env: Mapping[str, str],
         if not plan.protocol.pricing:
             raise TrialError("real model calls require preregistered pricing; no call was made")
         client = create_model_client(model_settings)
+    from eval.prompts import preamble, binding
+    expected_preamble = preamble(plan.arm)
     guard = BudgetClient(client, plan.protocol, plan.case,
-                         synthetic=isinstance(client, FakeModelClient), account=cost_account)
+                         synthetic=isinstance(client, FakeModelClient), account=cost_account,
+                         expected_preamble=expected_preamble)
     workspace = Workspace(fixture, base=workspace_base)
     started_at = datetime.now(timezone.utc)
     started = time.monotonic()
@@ -469,6 +472,8 @@ async def run_trial(plan: TrialPlan, *, database, env: Mapping[str, str],
             process_wall_timeout=settings.process_timeout,
             max_processes=settings.max_processes, web=None,
         )
+        if expected_preamble is not None:
+            runner.context.instructions = expected_preamble
         session = await SessionManager(runner.conversations).create(
             root, title=f"eval {plan.trial_id}", mode="work")
         async with asyncio.timeout(wall_limit):
@@ -525,6 +530,9 @@ async def run_trial(plan: TrialPlan, *, database, env: Mapping[str, str],
     status = "infra_error" if error is not None else status_for(end_reason, None)
     usage = _usage(rows["calls"])
     usage["tool_calls"] = len(rows["tools"])
+    usage["skill_reads"] = [
+        {"name": fact.arguments.get('name'), "succeeded": fact.succeeded, "position": index}
+        for index, fact in enumerate(_tool_facts(rows['tools'])) if fact.name == 'read_skill']
     usage["model_call_rows"] = usage["model_calls"]
     usage["model_calls"] = guard.model_calls
     usage["cost"] = guard.cost()
@@ -545,6 +553,15 @@ async def run_trial(plan: TrialPlan, *, database, env: Mapping[str, str],
     manifest['execution']['end_identity_sha256'] = sha256_json(after_identity)
     manifest['repeat'] = plan.repeat
     manifest['harness']['client_kind'] = 'synthetic' if guard.synthetic else 'live' 
+    if plan.arm.prompt is not None:
+        manifest['prompt_arm'] = binding(plan.arm, guard.verified_requests)
+        from eval.prompts import request_preamble
+        manifest['prompt_arm']['request_preamble_sha256'] = [
+            sha256_text(request_preamble(row.get('request') or {'messages': []}) or '')
+            for row in rows['calls']]
+        if manifest['prompt_arm'] != binding(plan.arm, guard.model_calls):
+            error = error or 'persisted request prompt differs from frozen arm'
+            status = 'infra_error'
     if before_identity != after_identity:
         error = error or "execution identity changed during the trial"
         status = 'infra_error'

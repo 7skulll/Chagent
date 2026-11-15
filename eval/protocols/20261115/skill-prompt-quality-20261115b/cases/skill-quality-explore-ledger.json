@@ -1,0 +1,105 @@
+{
+  "id": "skill-quality/explore-ledger",
+  "version": 2,
+  "title": "explore-ledger factual quality independent of skill loading",
+  "capability": "project-work",
+  "prompt": "阅读这个陌生项目，核对入口、默认端口、创建应用的调用关系、路由来源和存储方式。返回字段 entry（相对路径）、default_port（整数）、call_edges（形如 main->create_app 的字符串数组）、routes_source（相对路径）、health_route（含方法）、storage（memory 或 disk）、launches_http_server（布尔值，按实际代码而非 README 判断）。\n最终只返回一个 JSON 对象（不要改文件），使用题面规定的字段；数组顺序不限。\ncall_edges 只列出从 main 经项目内工厂函数到存储对象构造的两条直接调用边，不列传递调用或内置函数；类构造可以写类名或类名.__init__，不得省略第二条构造边。",
+  "fixture": {
+    "kind": "directory",
+    "path": "eval/fixtures/explore-service"
+  },
+  "authority": {
+    "boundary": "host",
+    "execution": "full",
+    "gate": "none"
+  },
+  "budget": {
+    "max_turns": 10,
+    "wall_seconds": 240,
+    "max_cost_usd": null,
+    "max_tool_calls": 30
+  },
+  "graders": [
+    {
+      "id": "factual_contract",
+      "kind": "deterministic",
+      "expects": "Structured facts match the independent fixture oracle; keywords alone do not pass.",
+      "evidence": "Final JSON fields against source files; exact factual contract, not general prose quality.",
+      "spec": {
+        "check": "answer_json_schema",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "entry": {
+              "const": "service/main.py"
+            },
+            "default_port": {
+              "const": 8765
+            },
+            "call_edges": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "main->create_app",
+                  "create_app->Ledger",
+                  "create_app->Ledger.__init__"
+                ]
+              },
+              "allOf": [
+                {
+                  "contains": {
+                    "const": "main->create_app"
+                  }
+                },
+                {
+                  "contains": {
+                    "enum": [
+                      "create_app->Ledger",
+                      "create_app->Ledger.__init__"
+                    ]
+                  }
+                }
+              ]
+            },
+            "routes_source": {
+              "const": "service/routes.py"
+            },
+            "health_route": {
+              "const": "GET /health"
+            },
+            "storage": {
+              "const": "memory"
+            },
+            "launches_http_server": {
+              "const": false
+            }
+          },
+          "required": [
+            "entry",
+            "default_port",
+            "call_edges",
+            "routes_source",
+            "health_route",
+            "storage",
+            "launches_http_server"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "workspace_untouched",
+      "kind": "deterministic",
+      "expects": "No workspace file changes.",
+      "evidence": "Controller snapshots.",
+      "spec": {
+        "check": "workspace_unchanged"
+      }
+    }
+  ],
+  "cleanup": "Discard trial workspace.",
+  "notes": "Expected relevant workflow: project-explorer. Skill loading is an observation, never a prerequisite for quality pass. Structured output is explicitly requested; no claim about unrestricted prose quality. v2 explicitly scopes both required direct call edges and accepts equivalent Class/Class.__init__ notation. v1 false negatives are retained under the original protocol."
+}
