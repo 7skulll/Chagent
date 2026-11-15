@@ -1,0 +1,24 @@
+{
+  "experiment": "skill-selection-crossday-20261115",
+  "question": "同一套 harness、同一对模型臂，换一个日历日重跑技能选择用例，2026-11-14 的结论是否复现？新增的 explicit-name@2（判「先读后写」与「只读点名的那个」）在两臂上是否通过？",
+  "hypothesis": "三份重复用例复现 11-14 的观测：两份负例两臂各 3/3 通过且零次调用 read_skill，正例 handoff-document-host 两臂各 3/3 且每槽恰好一次读取。explicit-name@2 首次真实运行预期通过；若失败，预登记的失败位置是 read_before_first_write（先建文件、后读技能）——它是本用例新增的、此前只在合成记录上验证过的判据，题面已明说顺序，所以那属于「说出来的顺序没有被执行」，不属于内容质量（内容判据未启用）。若负例出现读取，失败原因是加载了不需要的工作流，不是任务本身难。",
+  "arms": [
+    {"name": "baseline", "provider": "deepseek", "model": "deepseek-flash",
+     "note": "official documented backend DeepSeek-V4.1-Flash-1017; moving API name"},
+    {"name": "candidate", "provider": "deepseek", "model": "deepseek-v4-pro",
+     "note": "official documented backend DeepSeek-V4-Pro-0813; moving API name"}
+  ],
+  "repeats": 3,
+  "min_repeats_for_stability": 3,
+  "order": "interleaved",
+  "budget": {"max_turns": 10, "wall_seconds": 300, "max_tool_calls": 25, "total_cost_usd": 1.5},
+  "thresholds": {"improve_points": 0.3, "regress_points": 0.3},
+  "pricing": {
+    "input_usd_per_mtok": 1.32,
+    "output_usd_per_mtok": 3.96,
+    "source": "DeepSeek official https://api-docs.deepseek.com/quick_start/pricing/ checked 2026-11-15; common conservative ceiling = Pro peak cache-miss input 1.32 and output 3.96 USD/M; covers both arms and cached input. Recorded trial costs are this ceiling applied to measured tokens, not provider invoices; 2026-11-15 is a Sunday, so the actual invoice is billed at off-peak half rates."
+  },
+  "analysis": "每格 Wilson 95% 区间，差值用 Newcombe 区间，阈值 0.3，不因结果调整阈值或重复次数。本实验的 3 次重复是新的分母，不与 skill-selection-negative-2026-11-14 的 3 次合并：跨天的意义是同一个判断在两个独立运行里各出现一次，它提高的是「这个观测不是某一天的偶然」这一层信心，不缩窄任何一个区间，也不能把两次说成 6 次。3 次全通过只说明这格没有出现失败，不说明某个比率低于上限。三份用例是对 11-14 设计的复现，第四份 explicit-name@2 是首次观测，不与任何旧分母对应，它的 3 个槽位同样只能支持「没有出现失败」。归因限制：臂相同、日不同，因此本实验若与 11-14 出现差异，无法区分是日期、供应商当日状态还是 harness 变化——它只能发现「没有复现」，不能指明原因。另一条预登记：若 explicit-name@2 的证据里出现 order was not exercised，说明该槽位没有发生任何写入，顺序判据是在未受检状态下通过的，该槽不能算「顺序被验证过」。",
+  "exclusions": "infra_error 退出分母但逐条列出；inconclusive 单独计数，不折算成通过。四份用例全部保留，不因结果剔除。缺失槽位记为未完成，不补齐、不重跑。",
+  "stopping_rule": "24 个槽位各跑一次即停。遇到未知花费、超出 cap USD1.50 或执行身份漂移即停，不重跑、不追加槽位。预计花费：11-14 的 18 个槽位记录为 USD0.3348（均值 0.0186），本实验 24 个槽位按同一上限口径约 USD0.45，cap 取其约 3.3 倍。"
+}
