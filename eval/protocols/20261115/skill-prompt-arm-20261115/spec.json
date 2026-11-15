@@ -1,0 +1,46 @@
+{
+  "experiment": "skill-prompt-arm-20261115",
+  "question": "第 67 节测到：题面不点名技能时，模型在五份「对得上技能描述」的任务里只读了 5/24（pro 臂 3/15），而失败全部是「没读」不是「读错」。当时留下的建议是「在系统提示里加一句，让模型与技能描述重合时先读技能」，但协议 schema 只有 provider+model，没有提示词维度，所以测不了。现在协议支持提示词臂了。这一句到底能不能把读取率推起来？会不会顺带让无关任务也乱读？",
+  "hypothesis": "预登记（依据：skill-autoload-20261115b 的 pro 臂隐式组 3/15，其中探索 0/3、综合 0/3、验收 0/3、审查 1/3、隐式交接 2/3；负例 12 槽零读取；预试验 skill-prompt-arm-pilot-20261115 探索题 baseline 0/3、candidate 1/3）：1) 链路假设：56 槽全部 completed、invalid 为空、candidate 每槽 prompt_arm 的 verified_requests 等于 model_calls——不成立则本轮不能作为证据；2) 主假设：candidate 在五份隐式用例上读取合计 ≥14/20，baseline ≤8/20；3) 副作用假设：两份负例 candidate 读取 ≤2/16（即这一句不会让无关任务也去读）；4) 若 candidate 隐式读取 ≤8/20，则「加一句系统指令」不足以改变自动技能选择，机制层面要另找手段（首轮强制决策或按任务类型路由），而不是继续改措辞。",
+  "created_at": "2026-11-15T10:25:00+00:00",
+  "arms": [
+    {
+      "name": "baseline",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "note": "宿主默认指令，不追加任何内容；与 candidate 同一 provider+model，差值只来自提示词"
+    },
+    {
+      "name": "candidate",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "note": "同一模型，系统指令后追加 skill-first-1（96 字）",
+      "prompt": {
+        "version": "skill-first-1",
+        "content": "可用技能以 read_skill 工具描述中的目录列出。当用户任务与其中某个技能的描述相符时，先用 read_skill 读取该技能再动手，不要凭猜测执行流程。任务与所有技能都无关时不要读取。",
+        "sha256": "1ed2c71f584dd59bceed4e0a03dbbb29284ceae22f3fffdfd8d24f31f42f525e"
+      }
+    }
+  ],
+  "repeats": 4,
+  "min_repeats_for_stability": 4,
+  "order": "interleaved",
+  "budget": {
+    "max_turns": 10,
+    "wall_seconds": 300,
+    "max_tool_calls": 30,
+    "total_cost_usd": 1.8
+  },
+  "thresholds": {
+    "improve_points": 0.3,
+    "regress_points": 0.3
+  },
+  "analysis": "主指标是「读没读该读的技能」这个二分观测，按条件分组：隐式组 5 份 × 2 臂 × 4 次 = 40 槽、负例组 2 份 × 2 臂 × 4 次 = 16 槽。两组分别报告与 Wilson 区间，不合并成一个「读取率」——合并会把负例的零读取混进正例的分母。臂间差值照常给 Newcombe 区间与 0.3 阈值，但本轮样本量（每臂 20 槽）只够判方向，不够判稳定性：点估计不作结论，区间与逐份计数才是。产物判据单独统计，用来确认「读不读」的变化没有伴随「做不做得完」的变化。",
+  "exclusions": "1) 预试验 skill-prompt-arm-pilot-20261115（6 槽，USD0.156138）只用于验证提示词臂链路与措辞，不并入本协议分母、不重跑；它是可证伪性检查而不是本实验的一部分。2) infra_error 退出分母但逐条列出；inconclusive 单独计数，不折算成通过。3) 七份用例全部保留，不因结果剔除。4) 若运行期间仓库被改动导致执行身份漂移，本轮作废并按新协议重跑，不拼接两次运行。",
+  "stopping_rule": "56 个槽位各跑一次即停。遇到未知花费、超出 cap USD1.80 或执行身份漂移即停，不重跑、不追加槽位。预计花费：按 skill-autoload-20261115b 中 pro 臂单槽实测（探索 0.0264、综合 0.0166、审查 0.0173、验收 0.0182、隐式交接 0.0273、负例 0.0138/0.0086）算，每臂每轮 5 份隐式 0.1058 + 2 份负例 0.0224 = 0.1282，2 臂 × 4 轮 = USD1.03；考虑到追加指令可能多一次 read_skill 调用，cap 取其约 1.7 倍。",
+  "pricing": {
+    "input_usd_per_mtok": 1.32,
+    "output_usd_per_mtok": 3.96,
+    "source": "DeepSeek official https://api-docs.deepseek.com/quick_start/pricing/ checked 2026-11-15; identical ceiling to skill-autoload-20261115b, applied to measured tokens rather than invoices."
+  }
+}

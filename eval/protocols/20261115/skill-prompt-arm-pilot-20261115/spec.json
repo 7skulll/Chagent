@@ -1,0 +1,46 @@
+{
+  "experiment": "skill-prompt-arm-pilot-20261115",
+  "question": "提示词臂这条代码路径从未接过真实模型：在系统指令后追加一句「与技能描述相符时先读技能」，真实请求还能通过 preamble 校验并被正确记录吗？同时看看这一句在最难的一份用例（探索陌生项目）上有没有读数上的反应。",
+  "hypothesis": "预登记：1) 六槽全部完成，`prompt_arm` 绑定与 `binding()` 一致，`verified_requests` 等于 `model_calls`，无 infra_error——不成立则说明提示词臂在真实链路上不可用，正式实验不做；2) 探索题 baseline 三槽零读取（沿用同日 skill-autoload-20261115b 的观测 0/3）；3) candidate 三槽若仍零读取，不足以判断，只作正式实验的措辞检查。",
+  "created_at": "2026-11-15T10:20:00+00:00",
+  "arms": [
+    {
+      "name": "baseline",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "note": "宿主默认指令，不追加任何内容；与 candidate 同一 provider+model，差值只来自提示词"
+    },
+    {
+      "name": "candidate",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "note": "同一模型，系统指令后追加 skill-first-1",
+      "prompt": {
+        "version": "skill-first-1",
+        "content": "可用技能以 read_skill 工具描述中的目录列出。当用户任务与其中某个技能的描述相符时，先用 read_skill 读取该技能再动手，不要凭猜测执行流程。任务与所有技能都无关时不要读取。",
+        "sha256": "1ed2c71f584dd59bceed4e0a03dbbb29284ceae22f3fffdfd8d24f31f42f525e"
+      }
+    }
+  ],
+  "repeats": 3,
+  "min_repeats_for_stability": 3,
+  "order": "interleaved",
+  "budget": {
+    "max_turns": 10,
+    "wall_seconds": 300,
+    "max_tool_calls": 30,
+    "total_cost_usd": 0.4
+  },
+  "thresholds": {
+    "improve_points": 0.3,
+    "regress_points": 0.3
+  },
+  "analysis": "预试验不做臂间结论，只看两件事：绑定是否成立（六槽的 prompt_arm 与 verified_requests），以及这一句在最难用例上有没有让模型去读技能。无论读数如何，预试验六槽都不并入正式实验的分母。",
+  "exclusions": "1) 预试验只用于验证提示词臂链路与措辞，结果不并入正式协议分母、不重跑。2) infra_error 退出分母但逐条列出。3) 探索题 baseline 的历史观测（skill-autoload-20261115b 0/3）只作背景，不作为本协议的分母。",
+  "stopping_rule": "六槽各跑一次即停。遇到未知花费、超出 cap USD0.40、执行身份漂移或 preamble 校验失败即停，不重跑。预计花费：按 skill-autoload-20261115b 中 pro 臂探索题单槽 USD0.0264 估，六槽约 USD0.16，cap 取其约 2.5 倍。",
+  "pricing": {
+    "input_usd_per_mtok": 1.32,
+    "output_usd_per_mtok": 3.96,
+    "source": "DeepSeek official https://api-docs.deepseek.com/quick_start/pricing/ checked 2026-11-15; identical ceiling to skill-autoload-20261115b, applied to measured tokens rather than invoices."
+  }
+}

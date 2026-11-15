@@ -78,6 +78,35 @@ class PromptProtocolTests(unittest.TestCase):
             with self.subTest(path=path):
                 prereg.load(path.parent)
 
+    def test_archived_spec_agrees_with_the_protocol_it_froze(self):
+        """A spec that can be edited after the fact is a protocol that can be.
+
+        The frozen protocol is the evidence; the spec is the intent.  When the two
+        disagree, the hash still verifies and the mismatch is invisible, so the
+        number a reader checks (the frozen file) would no longer be the number the
+        experiment was pre-registered under.
+        """
+        root = Path(__file__).resolve().parent.parent / "eval/protocols"
+        checked = 0
+        for spec_path in sorted(root.glob("*/**/spec.json")):
+            protocol_path = spec_path.with_name("protocol.json")
+            if not protocol_path.exists():
+                continue
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+            frozen = json.loads(protocol_path.read_text(encoding="utf-8"))
+            with self.subTest(spec=spec_path.parent.name):
+                for key in spec:
+                    if key in frozen:
+                        self.assertEqual(spec[key], frozen[key], f"{spec_path.parent.name}: {key}")
+                self.assertEqual(
+                    [(a["name"], a["provider"], a["model"],
+                      (a.get("prompt") or {}).get("sha256")) for a in spec["arms"]],
+                    [(a["name"], a["provider"], a["model"],
+                      (a.get("prompt") or {}).get("sha256")) for a in frozen["arms"]],
+                    f"{spec_path.parent.name}: arms")
+            checked += 1
+        self.assertGreaterEqual(checked, 5, "archived specs with a frozen protocol")
+
 
 class PromptDispatchTests(unittest.IsolatedAsyncioTestCase):
     def request(self, preamble):

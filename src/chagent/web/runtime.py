@@ -6,6 +6,7 @@ importing the module that assembles the application.
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -22,6 +23,36 @@ from chagent.web.policy import validate_web_runner
 from chagent.storage.workspace_identity import ensure_workspace
 
 logger = logging.getLogger(__name__)
+
+#: Longest probe reason carried into the 503. Docker quotes multi-line daemon
+#: output, and the banner is the only place a person sees it.
+PROBE_REASON_LIMIT = 240
+
+#: The one probe failure with a fix a person can apply without reading Docker
+#: output. Docker names the missing image itself, so quote it back.
+MISSING_IMAGE = re.compile(r"Unable to find image '([\w][\w./:@-]{0,80})' locally")
+
+
+def isolation_failure(support: dict) -> str:
+    """The 503 a failed preflight raises, including the probe's own reason.
+
+    The banner used to say only "unavailable", which reads as a permission
+    problem, while the cause worth acting on sat unused in ``detail`` — "Unable
+    to find image 'chagent:local' locally" names a missing executor image, not
+    an account. That case is translated into the command that fixes it; every
+    other reason is flattened to one line and bounded, because Docker quotes
+    multi-line daemon output verbatim.
+    """
+    base = "执行隔离探针失败，code 不可用；不会降低隔离等级"
+    detail = " ".join(str(support.get("detail") or "").split())
+    if not detail:
+        return base
+    missing = MISSING_IMAGE.search(detail)
+    if missing is not None:
+        image = missing.group(1)
+        return f"{base}（原因：执行器镜像 {image} 在本机不存在，先运行 docker build -t {image} .）"
+    suffix = "…" if len(detail) > PROBE_REASON_LIMIT else ""
+    return f"{base}（原因：{detail[:PROBE_REASON_LIMIT]}{suffix}）"
 
 
 class WebRuntime:
@@ -156,7 +187,7 @@ class WebRuntime:
         # Explicit preflight owner, separate from all conversation runs.
         support = await self.runner.sandbox.audit(workspace, owner="web-preflight")
         if not support["available"]:
-            raise HTTPException(503, "执行隔离探针失败，code 不可用；不会降低隔离等级")
+            raise HTTPException(503, isolation_failure(support))
 
     async def run(self, identity: UUID):
         run = await self.runner.runs.get(identity)

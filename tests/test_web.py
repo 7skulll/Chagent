@@ -6,13 +6,16 @@ import os
 from pathlib import Path
 import socket
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import httpx
 from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
 from psycopg.types.json import Jsonb
+from starlette.exceptions import HTTPException
 import uvicorn
 
 from chagent.bootstrap import create_demo_runner
@@ -24,6 +27,7 @@ from chagent.storage.database import Database
 from chagent.storage.migrate import migrate
 from chagent.tools.echo import EchoTool
 from chagent.web.app import WebRuntime, create_app
+from chagent.web.runtime import PROBE_REASON_LIMIT, isolation_failure
 
 
 @unittest.skipUnless(os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Set CHAGENT_TEST_DATABASE_URL")
@@ -1330,3 +1334,57 @@ class ApprovalApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await client.get(f"/api/runs/{self.run_id}")).status_code, 404)
                 self.assertEqual((await client.post(f"/api/approvals/{self.request.id}/decide",
                                                     json={"approve": True})).status_code, 404)
+
+
+class PreflightFailureTests(unittest.IsolatedAsyncioTestCase):
+    """A failed preflight must name the cause it saw, not just "unavailable".
+
+    The banner is the only place a person learns why commands are off; a refusal
+    that reads like a permission problem sends them to the account page.
+    """
+
+    @staticmethod
+    def _runtime(detail, *, available=False):
+        runtime = WebRuntime.__new__(WebRuntime)
+        runtime.programmable = True
+        runtime.native_allowed = True
+        runtime.settings = SimpleNamespace(execution_profile="configured")
+        runtime.runner = SimpleNamespace(sandbox=SimpleNamespace(
+            audit=AsyncMock(return_value={"available": available, "detail": detail})))
+        return runtime
+
+    async def test_the_refusal_carries_the_reason_the_probe_reported(self):
+        runtime = self._runtime(
+            "Could not create workspace container: Unable to find image 'chagent:local' locally")
+        with patch("chagent.web.runtime.validate_web_runner"):
+            with self.assertRaises(HTTPException) as caught:
+                await runtime.require_programming(Path("/tmp"))
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertIn("docker build -t chagent:local .", caught.exception.detail)
+        self.assertIn("不会降低隔离等级", caught.exception.detail)
+
+    def test_an_unrecognised_failure_keeps_the_daemon_text(self):
+        message = isolation_failure(
+            {"detail": "Existing workspace container does not match the required isolation policy"})
+        self.assertIn("does not match the required isolation policy", message)
+
+    async def test_a_silent_probe_still_refuses_with_the_plain_sentence(self):
+        runtime = self._runtime("")
+        with patch("chagent.web.runtime.validate_web_runner"):
+            with self.assertRaises(HTTPException) as caught:
+                await runtime.require_programming(Path("/tmp"))
+        self.assertEqual(caught.exception.detail, "执行隔离探针失败，code 不可用；不会降低隔离等级")
+
+    async def test_the_reason_is_one_bounded_line(self):
+        flattened = isolation_failure({"detail": "first line\n\tsecond line"})
+        self.assertNotIn("\n", flattened)
+        self.assertNotIn("\t", flattened)
+        self.assertIn("first line second line", flattened)
+        bounded = isolation_failure({"detail": "x" * 400})
+        self.assertIn("x" * PROBE_REASON_LIMIT, bounded)
+        self.assertTrue(bounded.endswith("…）"), bounded)
+
+    async def test_a_passing_probe_raises_nothing(self):
+        runtime = self._runtime("", available=True)
+        with patch("chagent.web.runtime.validate_web_runner"):
+            self.assertIsNone(await runtime.require_programming(Path("/tmp")))
