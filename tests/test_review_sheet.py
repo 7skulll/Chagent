@@ -179,6 +179,39 @@ class CheckTests(unittest.TestCase):
         problems = review_sheet.check(self._write(rows), self.packet)
         self.assertTrue(any("sample hash" in problem for problem in problems))
 
+    def test_evidence_outside_the_document_is_refused(self):
+        for evidence in ([7], [1, 999999]):
+            with self.subTest(evidence=evidence):
+                rows = _rows(self.packet)
+                rows[0]["evidence_lines"] = evidence
+                problems = review_sheet.check(self._write(rows), self.packet)
+                self.assertTrue(any("range 1-6" in problem for problem in problems))
+
+    def test_the_last_displayed_line_is_accepted_with_or_without_newline(self):
+        for ending in ("", "\n"):
+            with self.subTest(ending=ending):
+                source = json.loads((self.packet / "samples.json").read_text())
+                for sample in source["samples"]:
+                    sample["document"] = sample["document"].rstrip("\n") + ending
+                    sample["sample_sha256"] = review_sheet.digest(
+                        {k: v for k, v in sample.items() if k != "sample_sha256"})
+                (self.packet / "samples.json").write_text(json.dumps(source))
+                rows = _rows(self.packet)
+                rows[0]["evidence_lines"] = [6]
+                self.assertEqual(review_sheet.check(self._write(rows), self.packet), [])
+
+    def test_evidence_requires_a_list_of_integers_not_booleans(self):
+        for evidence in ([True], [1.0], "1", {"1": 1}, 1):
+            with self.subTest(evidence=evidence):
+                rows = _rows(self.packet)
+                rows[0]["evidence_lines"] = evidence
+                problems = review_sheet.check(self._write(rows), self.packet)
+                self.assertTrue(any("positive line numbers" in problem for problem in problems))
+
+    def test_whitespace_on_the_last_line_is_displayed_and_citable(self):
+        self.assertEqual(review_sheet._lines("a\n ").count('class="ln"'), 2)
+        self.assertEqual(review_sheet._document_lines("a\n \n"), ["a", " "])
+
     def test_two_reviewers_in_one_file_are_refused(self):
         rows = _rows(self.packet)
         rows[-1]["reviewer_id"] = "someone-else"

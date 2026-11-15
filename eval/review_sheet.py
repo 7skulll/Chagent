@@ -70,6 +70,14 @@ def load(folder: Path) -> tuple[dict, list[dict]]:
     return rubric_doc, samples
 
 
+def _document_lines(text: str) -> list[str]:
+    """Use the same line range for rendering and returned evidence."""
+    rows = text.split("\n")
+    if len(rows) > 1 and rows[-1] == "":
+        rows.pop()
+    return rows
+
+
 def _lines(text: str) -> str:
     """The document with a gutter, so a citation names a line a reader can see.
 
@@ -79,9 +87,7 @@ def _lines(text: str) -> str:
     the twenty-four documents end with a newline, so this is the common case,
     not an edge case.
     """
-    rows = text.split("\n")
-    if len(rows) > 1 and not rows[-1].strip():
-        rows.pop()
+    rows = _document_lines(text)
     rendered = []
     for number, line in enumerate(rows, start=1):
         shown = html.escape(line) if line.strip() else "&nbsp;"
@@ -290,8 +296,8 @@ def build(folder: Path, slot: str, destination: Path | None = None) -> Path:
 def check(path: Path, folder: Path) -> list[str]:
     """Every reason a returned file cannot be used, or an empty list.
 
-    The rules are the ones ``analyze_reviews.py`` enforces, reported before a
-    reviewer is told their file was fine and a script later says otherwise.
+    Enforce the analyzer's binding rules and additionally require citations to
+    name lines actually displayed in the worksheet.
     """
     rubric_doc, samples = load(folder)
     rubric_hash = rubric_doc["rubric_sha256"]
@@ -333,10 +339,15 @@ def check(path: Path, folder: Path) -> list[str]:
             reviewers.add(reviewer)
         else:
             problems.append(f"line {number}: {sid} has a verdict but no reviewer_id")
-        if not row["evidence_lines"]:
+        evidence = row["evidence_lines"]
+        if not evidence:
             problems.append(f"line {number}: {sid} has a verdict but no evidence_lines")
-        elif not all(isinstance(item, int) and item > 0 for item in row["evidence_lines"]):
+        elif not isinstance(evidence, list) or not all(type(item) is int and item > 0 for item in evidence):
             problems.append(f"line {number}: {sid} evidence_lines must be positive line numbers")
+        else:
+            last_line = len(_document_lines(known[sid]["document"]))
+            if any(item > last_line for item in evidence):
+                problems.append(f"line {number}: {sid} evidence_lines outside document range 1-{last_line}")
         if not str(row["note"] or "").strip():
             problems.append(f"line {number}: {sid} has a verdict but no note")
     unseen = sorted(set(known) - seen)
