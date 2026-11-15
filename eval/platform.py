@@ -62,12 +62,25 @@ def resolved(overrides, arm):
     return env, settings, model, pinned
 
 
+def requires_sandbox(case) -> bool:
+    """Whether the case's only output evidence is a kernel-confined controller."""
+    return any((g.get('spec') or {}).get('name', '').startswith('stats_contract')
+               for g in case.graders)
+
+
+def sandbox_available() -> bool:
+    from eval.isolation import available
+    return available()
+
+
 class Platform:
-    def __init__(self, root=None, cases=None, *, account_id=None, account_root=None):
+    def __init__(self, root=None, cases=None, *, account_id=None, account_root=None,
+                 sandbox=None):
         self.root = Path(root or REPOSITORY / 'eval/results')
         self.cases = Path(cases or REPOSITORY / 'eval/cases')
         self.account_id = account_id
         self.account_root = Path(account_root) if account_root else None
+        self.sandbox = sandbox or sandbox_available
         self.state = self.root / '.platform'
         self.state.mkdir(parents=True, exist_ok=True)
         self.children = []
@@ -79,20 +92,41 @@ class Platform:
         return self.root / identifier
 
     def catalog(self):
+        """Executable means this host can actually grade it, not just name a check.
+
+        A case whose only output evidence is a controller check needs a kernel
+        sandbox. Listing it as selectable and refusing the plan later makes the
+        page promise something the start guard then denies, so the host probe
+        runs here too and the case is reported as unavailable with its reason.
+        """
+        sandbox = None
         result = []
         for case in casefile.load_all(self.cases):
-            supported = (case.authority.get('boundary') == 'host'
-                         and all(g.get('kind') == 'deterministic' and g.get('spec') for g in case.graders))
+            executable = (case.authority.get('boundary') == 'host'
+                          and all(g.get('kind') == 'deterministic' and g.get('spec') for g in case.graders))
+            needs_sandbox = requires_sandbox(case)
+            if executable and needs_sandbox and sandbox is None:
+                sandbox = self.sandbox()
+            supported = executable and (not needs_sandbox or sandbox)
+            reason = ('' if supported else
+                      '本机无法启动控制器沙箱，该用例的产物判据不可执行' if executable
+                      else '尚无可执行的确定性判据或当前边界不适用')
             result.append({'key': case.key, 'title': case.title, 'capability': case.capability,
-                'sha256': case.sha256, 'supported': supported,
-                'reason': '' if supported else '尚无可执行的确定性判据或当前边界不适用'})
+                'sha256': case.sha256, 'supported': supported, 'requires_sandbox': needs_sandbox,
+                'reason': reason})
         return result
 
     def plan(self, request):
         selected = set(request['cases'])
         cases = [c for c in casefile.load_all(self.cases) if c.key in selected]
+        if len(cases) != len(selected) or not selected:
+            raise ValueError('请选择可执行且版本匹配的用例')
+        # The sandbox is asked about before the generic filter so the operator
+        # gets the reason the case is unavailable, not "pick an executable case".
+        if any(requires_sandbox(case) for case in cases) and not self.sandbox():
+            raise ValueError('当前主机无法启动控制器沙箱，尚未调用模型')
         runnable = {c['key'] for c in self.catalog() if c['supported']}
-        if len(cases) != len(selected) or not selected or not selected <= runnable:
+        if not selected <= runnable:
             raise ValueError('请选择可执行且版本匹配的用例')
         arms = [prereg.Arm('baseline', request['provider'], request['baseline']),
                 prereg.Arm('candidate', request['provider'], request['candidate'])]
@@ -109,12 +143,6 @@ class Platform:
                 fixture_for(case)
         if identities[0] != identities[1]:
             raise ValueError('两臂的执行配置不一致')
-        # Require the backend before any plan can be started, not after paying.
-        if any((g.get('spec') or {}).get('name', '').startswith('stats_contract')
-               for c in cases for g in c.graders):
-            from eval.isolation import available
-            if not available():
-                raise ValueError('当前主机无法启动控制器沙箱，尚未调用模型')
         identifier = 'web-' + datetime.now(timezone.utc).strftime('%Y%m%d') + '-' + uuid4().hex[:12]
         protocol = prereg.build(experiment=identifier, question=request['question'],
             hypothesis='按固定预算和用例比较两臂，不按试验结果调整重复或阈值。', cases=cases, arms=arms,

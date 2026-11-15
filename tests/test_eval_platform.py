@@ -31,7 +31,10 @@ class PlatformTests(unittest.TestCase):
         cases.mkdir()
         source = ROOT / 'eval/cases/project-work-refuse-outside-workspace-host.json'
         (cases / source.name).write_bytes(source.read_bytes())
-        self.base_platform = Platform(root / 'results', cases)
+        sandbox = ROOT / 'eval/cases/skill-selection-fix-failing-tests-host.json'
+        (cases / sandbox.name).write_bytes(sandbox.read_bytes())
+        self.cases = cases
+        self.base_platform = Platform(root / 'results', cases, sandbox=lambda: True)
         self.pinned = fixtures.trial('pass', arm='baseline').manifest['execution']
         self.pinned = {k: v for k, v in self.pinned.items() if k != 'end_identity_sha256'}
         self.resolver = lambda overrides, arm: ({'DEEPSEEK_API_KEY': 'synthetic'}, Settings(),
@@ -45,7 +48,8 @@ class PlatformTests(unittest.TestCase):
         self.admin = self.accounts.register('testadmin', 'test-password-12345',
                                            setup_code=self.accounts.setup_path.read_text())
         self.platform = Platform(root / 'results' / 'users' / self.admin['id'], cases,
-                                 account_id=self.admin['id'], account_root=self.accounts.root)
+                                 account_id=self.admin['id'], account_root=self.accounts.root,
+                                 sandbox=lambda: True)
         self.client = TestClient(create_app(self.base_platform, accounts=self.accounts))
         self.client.post('/api/accounts/login', json={'username': 'testadmin', 'password': 'test-password-12345'})
         self.addCleanup(self.client.close)
@@ -71,6 +75,35 @@ class PlatformTests(unittest.TestCase):
             'cases': ['../../.env']}).status_code, 400)
         self.assertEqual(self.client.post('/api/plans', json={**self.value,
             'repeats': 0}).status_code, 400)
+
+    def test_page_never_preselects_more_cases_than_one_request_carries(self):
+        page = (ROOT / 'eval/platform_ui.html').read_text(encoding='utf-8')
+        limit = next(field for field in PlanRequest.model_fields['cases'].metadata
+                     if hasattr(field, 'max_length')).max_length
+        self.assertEqual(limit, 16)
+        # Selecting every executable case made the default form unsubmittable
+        # once the catalog grew past the request cap.
+        self.assertNotIn('input.checked=c.supported', page)
+        self.assertIn('请至少选择一个可执行用例', page)
+        self.assertIn("querySelectorAll('input:checked')", page)
+
+    def test_catalog_only_offers_cases_this_host_can_grade(self):
+        key = 'skill-selection/fix-failing-tests-host@1'
+        without = Platform(self.platform.root, self.cases, sandbox=lambda: False)
+        rows = {r['key']: r for r in without.catalog()}
+        self.assertFalse(rows[key]['supported'])
+        self.assertTrue(rows[key]['requires_sandbox'])
+        self.assertIn('沙箱', rows[key]['reason'])
+        rows = {r['key']: r for r in self.platform.catalog()}
+        self.assertTrue(rows[key]['supported'])
+        self.assertEqual(rows[key]['reason'], '')
+        self.assertFalse(rows['project-work/refuse-outside-workspace-host@1']['requires_sandbox'])
+
+    def test_sandbox_case_is_refused_with_its_reason_before_the_generic_filter(self):
+        strict = Platform(self.platform.root, self.cases, sandbox=lambda: False)
+        with self.assertRaisesRegex(ValueError, '控制器沙箱'):
+            strict.plan({**self.value, 'cases': ['skill-selection/fix-failing-tests-host@1']})
+        self.assertEqual(list(strict.root.glob('web-*')), [])
 
     def test_prices_require_explicit_confirmation(self):
         self.assertEqual(self.client.post('/api/plans', json={**self.value,
@@ -311,7 +344,7 @@ class PlatformTests(unittest.TestCase):
 
     def test_case_drift_before_start_makes_no_call(self):
         p = self.plan()
-        path = next(self.platform.cases.glob('*.json'))
+        path = self.platform.cases / 'project-work-refuse-outside-workspace-host.json'
         d = json.loads(path.read_text())
         d['prompt'] += ' changed'
         path.write_text(json.dumps(d))

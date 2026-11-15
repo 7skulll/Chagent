@@ -85,7 +85,8 @@ def create_app(platform=None, accounts=None):
                 store.data_root(user['id']) / 'evaluations')
         if user['id'] not in platforms:
             platforms.setdefault(user['id'], Platform(root, platform.cases if platform is not None else None,
-                        account_id=user['id'], account_root=store.root))
+                        account_id=user['id'], account_root=store.root,
+                        sandbox=platform.sandbox if platform is not None else None))
         return platforms[user['id']]
     app = FastAPI(title='Chagent 自主测试平台', docs_url=None, redoc_url=None)
     app.state.platform = platform
