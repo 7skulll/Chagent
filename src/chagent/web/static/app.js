@@ -13,7 +13,7 @@
 import { storage } from "./core/account-storage.js";
 import { $, on } from "./core/dom.js";
 import { copyText } from "./core/clipboard.js";
-import { api, post } from "./core/api.js";
+import { api, post, withWorkspace } from "./core/api.js";
 import { createStore } from "./core/store.js";
 import { initialRunState, reduce } from "./run/run-reducer.js";
 import { createRunRenderer } from "./run/run-render.js";
@@ -45,9 +45,49 @@ function showError(error) {
 }
 function clearError() { $("error").hidden = true; }
 
+/* The executor probe is a fact about this machine, not a failure of the last
+ * click: a missing image leaves browsing, history and file editing working, so
+ * it belongs next to the composer and stays until it is fixed. Re-checking is a
+ * button because building the image needs no restart. */
+function renderIsolation(isolation) {
+  const button = $("code-status");
+  if (isolation?.available !== false) { button.hidden = true; return; }
+  button.hidden = false;
+  button.textContent = `代码执行不可用：${isolation.reason || "原因未知"} · 重新检查`;
+  button.title = "命令与测试工具在此环境不可用；对话历史、工作区与文件读写不受影响。"
+    + (isolation.reason ? `\n原因：${isolation.reason}` : "");
+}
+
+/* A container is created per workspace when its directory is opened, so the
+ * first seconds of a new workspace are neither "ready" nor "unavailable". The
+ * third state exists so that wait is visible instead of looking like a fault
+ * or, worse, looking like nothing happened until the first message fails. */
+function renderExecutor(executor) {
+  const button = $("code-status");
+  if (executor?.state === "preparing") {
+    button.hidden = false;
+    button.disabled = true;
+    button.textContent = "正在准备执行环境（首次在该目录创建容器）…";
+    button.title = "容器按工作区创建，通常几秒完成；就绪后这条提示会自动消失。";
+    return;
+  }
+  button.disabled = false;
+  renderIsolation(executor);
+}
+
+on($("code-status"), "click", async () => {
+  const button = $("code-status");
+  button.disabled = true;
+  try {
+    renderIsolation(await post(withWorkspace("/api/isolation/check", state.workspace), {}));
+    if (button.hidden) clearError();
+  } catch (error) { showError(error); }
+  finally { button.disabled = false; }
+});
+
 /* Actions every module may call. Filled in below, in dependency order, and read
  * only when a handler runs. */
-const ui = {state, showError, clearError};
+const ui = {state, showError, clearError, renderIsolation, renderExecutor};
 
 /* ---------- the run stream ----------
  * One reducer produces the state, one renderer draws it. The renderer never
@@ -218,6 +258,7 @@ async function init() {
     history.replaceState(null, "", location.pathname + location.search);
   }
   const info = await api("/api/info");
+  renderIsolation(info.isolation);
   state.config = await api("/api/config");
   $("model").textContent = `${info.provider} / ${info.model}`;
   const stored = storage.getItem("chagent.workspace");

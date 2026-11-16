@@ -34,14 +34,30 @@ async def host_login(value: HostLogin, request: Request):
 
 
 @router.get("/info", response_model=AppInfo, tags=["本地 Agent"])
-async def info(current: Current):
+async def info(current: Current, workspace: str | None = None):
     axes = current.settings.axes
+    # Cached per-workspace answer: reading it must not start a container.
+    isolation = (current.executor_state(current.root(workspace)) if workspace else None) \
+        or current.isolation or {"available": True, "reason": None}
     return {"workspace": current.workspace, "provider": current.runner.model.provider,
             "model": current.runner.model.id,
             "programmable": current.programmable,
             "boundary": axes.boundary, "capability": axes.capability, "gate": axes.gate,
+            "isolation": isolation,
             # Compatibility for the pre-unified page: there is no mode to pick.
             "code_mode": False}
+
+
+@router.post("/isolation/check", tags=["本地 Agent"])
+async def check_isolation(current: Current, workspace: str | None = None):
+    """Probe the executor now, because the fix (a built image) needs no restart.
+
+    Startup used to be the only probe, so a person who built the missing image
+    had to restart the server to use it. This re-runs the same audit and returns
+    the same sentence a refused request would. The workspace is named by the
+    caller because the answer is per directory.
+    """
+    return await current.check_isolation(current.root(workspace))
 
 
 @router.get("/config", response_model=ConfigView, tags=["本地 Agent"])

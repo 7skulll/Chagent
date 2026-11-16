@@ -143,6 +143,10 @@ def create_builtin_registry(*, mode: str, allow_host_commands: bool = False,
             registry.register(SiteTool(sandbox, artifacts.database))
             registry.register(CollectFileTool(sandbox, artifacts.database))
     if artifacts is not None:
+        if include_skills:
+            from chagent.tools.user_skills import UserSkillTool
+            registry.register(UserSkillTool(artifacts.database))
+            registry.register(UserSkillTool(artifacts.database, read=True))
         registry.register(ReadArtifactTool(artifacts))
         if history_tools:
             diagnostics = RunDiagnosticsRepository(artifacts.database)

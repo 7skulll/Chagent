@@ -100,8 +100,15 @@ async def usage(current: Current, days: Annotated[int, Query(ge=1, le=90)] = 7):
 
 @router.post("/sessions", response_model=Session, status_code=201, tags=["会话"])
 async def create_session(value: SessionCreate, current: Current):
-    """Create a session with the unified programmable tool surface."""
-    await current.require_programming(current.root(value.workspace))
+    """Create a session with the unified programmable tool surface.
+
+    No executor probe: an empty transcript runs nothing. The refusal belongs to
+    the first turn (``POST /sessions/{id}/runs``), so opening a chat while the
+    image is missing stays possible and the reason arrives with the send. A
+    self-contradictory configuration still fails here, because that is a bug in
+    the settings rather than a machine someone can repair under a live page.
+    """
+    current.require_configuration()
     return await current.sessions.create(current.root(value.workspace), value.title, mode="work")
 
 

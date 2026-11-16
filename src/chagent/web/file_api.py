@@ -148,7 +148,18 @@ BROWSE_LIMIT = 200
 #: server never mentioned. ``CHAGENT_WORKSPACE_ROOT`` is that tree when the
 #: deployment sets one — the container mounts host directories under
 #: ``/workspaces`` — and the home directory otherwise.
-def picker_root() -> Path:
+def picker_root(current=None) -> Path:
+    """The account's own workspace under account isolation, else the published root.
+
+    Multi-account mode refuses every workspace outside
+    ``<account data>/<uid>/workspace``. The page used to walk the owner's home
+    directory anyway, so it listed folders that could never be opened and only
+    said so after the click — and the dialog offered no way to make one deeper
+    inside the part it *could* open. Publishing the allowed root instead keeps
+    the list honest: every row is an answer the server is able to give.
+    """
+    if getattr(current, "account_id", None):
+        return Path(current.workspace).expanduser().resolve()
     setting = os.environ.get('CHAGENT_WORKSPACE_ROOT')
     raw = Path(setting).expanduser() if setting and setting.strip() else Path.home()
     try:
@@ -178,15 +189,21 @@ def native_picker_available() -> bool:
     return sys.platform == 'darwin'
 
 
-def choose_directory() -> str:
+def choose_directory(start: Path | None = None) -> str:
     """Ask the OS for a folder; an empty string means the user cancelled.
 
     A cancel and a failure must stay distinct: the first changes nothing, the
     second has to tell the page why, because ``osascript`` also fails when the
-    host denies automation or the dialog cannot reach the display.
+    host denies automation or the dialog cannot reach the display. ``start``
+    opens the dialog where the page is allowed to be, so the first thing it
+    shows is somewhere that can actually be opened.
     """
+    where = ''
+    if start is not None:
+        quoted = str(start).replace('\\', '\\\\').replace('"', '\\"')
+        where = f' default location POSIX file "{quoted}"'
     script = ('try\n'
-              'POSIX path of (choose folder with prompt "选择 Chagent 工作区")\n'
+              f'POSIX path of (choose folder with prompt "选择 Chagent 工作区"{where})\n'
               'on error number -128\n'
               'return ""\n'
               'end try')
@@ -214,7 +231,7 @@ async def picker(current: Current):
     from chagent.web.schemas import WorkspaceCreate
     if not native_picker_available():
         return dict(cancelled=True, native_picker=False)
-    path = await asyncio.to_thread(choose_directory)
+    path = await asyncio.to_thread(choose_directory, picker_root(current))
     if not path:
         return dict(cancelled=True, native_picker=True)
     opened = await open_workspace(WorkspaceCreate(path=path), current)
@@ -230,7 +247,7 @@ async def browse(current: Current, path: str | None = Query(default=None, max_le
     no side effect. The rows carry the same availability verdict as
     ``GET /api/workspaces``, computed now rather than on first use.
     """
-    root = picker_root()
+    root = picker_root(current)
     target = confined(Path(path), root) if path else root
     known = {row['path'] for row in
              await ConversationRepository(current.runner.conversations.database).workspaces()}
@@ -257,7 +274,16 @@ async def browse(current: Current, path: str | None = Query(default=None, max_le
         entry = target / name
         try:
             confined(entry, root)
+            if current.auth_guard is not None:
+                # The same verdict ``POST /workspaces`` would give, computed now:
+                # a row that cannot be opened must say so instead of failing
+                # after the click.
+                current.auth_guard(entry)
             opened = validate_workspace(entry)
+        except PermissionError as error:
+            entries.append(DirectoryEntry(name=entry.name, path=entry, available=False,
+                                          reason=str(error) or '不在当前账户的工作区内',
+                                          opened=False))
         except (ValueError, OSError, RuntimeError):
             entries.append(DirectoryEntry(name=entry.name, path=entry, available=False,
                                           reason='目录不可访问或不符合工作区准入要求',

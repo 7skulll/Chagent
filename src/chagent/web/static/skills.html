@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chagent · 用户技能</title>
+<link rel="stylesheet" href="/static/skills.css"></head><body><main>
+<header><div><small>CHAGENT / SKILLS</small><h1>用户技能</h1></div><a href="/">返回聊天</a></header>
+<p class="muted">导入自己的工作流程，启用后供 Agent 按需查找和读取。仅当前账户可见。</p>
+<section><h2>导入下载的技能</h2><p>选择 <code>SKILL.md</code> 或包含一个技能的 ZIP 包。文件需包含 name、description 的 YAML 头部和正文。上限 2 MB，SKILL.md 上限 64 KB。</p>
+<form id="import-form"><label for="skill-file">技能文件</label><br><input id="skill-file" type="file" accept=".md,.zip" required><br><button class="primary" id="import-button" type="submit">导入为未启用技能</button></form>
+<p class="muted">导入后先预览，再明确启用。附属文件会保留；导入不会运行脚本或安装依赖。依赖其他平台工具的技能可能需要调整。</p></section>
+<p id="notice" role="status"></p><section><h2>我的技能</h2><div id="user-list">正在读取…</div></section>
+<section><h2>系统技能 · 只读</h2><div id="system-list"></div></section>
+<p class="muted">开启从下一次任务生效。关闭或删除后阻止新的读取，并请求取消已读取该技能的活动任务。已发生的操作不能回滚；历史记录、摘要或记忆中的衍生内容不会自动擦除。格式检查通过不代表效果已验证。</p>
+</main><script src="/static/skills.js" defer></script></body></html>

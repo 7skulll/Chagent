@@ -25,3 +25,5 @@ class ToolContext:
     workspace_identity: tuple[int, int] | None = None
     #: Present only when the run declares tools on demand.
     deferred: DeferredTools | None = None
+    user_skills: dict | None = None
+    loaded_user_skills: set[str] = field(default_factory=set)

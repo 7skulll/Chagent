@@ -45,6 +45,8 @@ from chagent.web.runs_api import router as runs_router
 from chagent.web.sessions_api import UPLOAD_PATH
 from chagent.web.sessions_api import router as sessions_router
 from chagent.web.workspace_api import router as workspace_router
+from chagent.web.skills_api import router as skills_router
+from chagent.web.skills_api import page_router as skills_page_router
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,7 @@ logger = logging.getLogger(__name__)
 #: directory read, so adding a module is an explicit line here — and so
 #: tests/test_web_ui.py can prove the page's module graph is fully listed.
 ASSETS = {
+    "skills.js": "text/javascript", "skills.css": "text/css",
     "index.html": "text/html", "api-docs.html": "text/html", "style.css": "text/css",
     "main.js": "text/javascript", "app.js": "text/javascript",
     "file-editor.js": "text/javascript", "markdown.js": "text/javascript",
@@ -140,7 +143,7 @@ class LocalBoundary:
                     return
                 content.extend(message.get("body", b""))
                 file_request = scope["path"].startswith("/api/workspaces/")
-                body_limit = 6_400_000 if file_request else 65_536
+                body_limit = 6_400_000 if file_request else (2_900_000 if scope['path'] == '/api/user-skills/import' else 65_536)
                 if len(content) > body_limit:
                     return await reply({"error": "Request exceeds body limit"}, 413)(scope, receive, send)
                 if not message.get("more_body", False):
@@ -283,7 +286,15 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
                     app.state.runtime.auth_guard = host_auth.guard_workspace
                 try:
                     if not demo:
-                        await app.state.runtime.require_programming(app.state.runtime.workspace)
+                        # Recorded, not enforced. A missing executor image used
+                        # to abort lifespan and answer 503 to every route, so a
+                        # person whose Docker was fine but whose image was not
+                        # got a page that looked alive and did nothing. The
+                        # refusal now happens where work starts, and this line
+                        # is what the status line reads.
+                        status = await app.state.runtime.check_isolation()
+                        if not status["available"]:
+                            logger.warning("code execution is unavailable: %s", status["reason"])
                     app.state.runtime.start_worker()
                     yield
                 finally:
@@ -307,7 +318,7 @@ def create_app(*, workspace: Path, settings: Settings | None = None,
     # Registration order is the order FastAPI tries a path in; keep the api
     # routes in the order they were written in when they shared one module.
     for mounted in (info_router, sessions_router, context_router, runs_router,
-                    file_router, memory_router, workspace_router):
+                    file_router, memory_router, workspace_router, skills_router, skills_page_router):
         app.include_router(mounted)
     async def home(request: Request):
         if account_store is not None and request.scope.get('account') is None:

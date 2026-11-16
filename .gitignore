@@ -34,6 +34,12 @@ dist/
 /uploads/
 /.backups/
 
+# Local run logs. They are inside the checkout, so leaving them untracked would
+# put an append-only file into the uncommitted-patch hash that `eval` binds to
+# every trial — a running server or a test log would then change the execution
+# identity mid-trial and turn a real result into `infra_error`.
+/.run/
+
 # Annotation ledger locks are local coordination state.
 /eval/annotations/*.lock
 

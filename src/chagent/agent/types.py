@@ -43,6 +43,8 @@ class RunState:
     #: Which deferrable tools the model has loaded. Shared with every
     #: ``ToolContext`` of the run, so ``tool_search`` records into the run state.
     deferred: DeferredTools = field(default_factory=DeferredTools)
+    user_skills: dict | None = None
+    loaded_user_skills: set[str] = field(default_factory=set)
     # Facts from earlier runs that ended without a normal stop; loaded once per
     # run so every turn sees the same note and no turn re-queries it.
     recovery: RecoveryNote | None = None

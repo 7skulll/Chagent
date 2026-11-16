@@ -8,7 +8,7 @@ import socket
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import UUID, uuid4
 
 import httpx
@@ -423,6 +423,64 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await self.client.get('/api/workspace-browse',
                     params={'path': str(root / 'escape')})).status_code, 400)
 
+    async def test_browse_starts_inside_the_account_workspace(self):
+        # Account isolation refuses every workspace outside <data>/<uid>/workspace,
+        # so a tree rooted at the home directory listed folders that could never
+        # be opened: the refusal only arrived after the click.
+        (self.workspace / 'project-a').mkdir()
+        with tempfile.TemporaryDirectory() as home, \
+                patch.dict(os.environ, {'CHAGENT_WORKSPACE_ROOT': home}):
+            # A deployment's published root still wins when there is no account.
+            self.assertEqual((await self.client.get('/api/workspace-browse')).json()['root'],
+                             str(Path(home).resolve()))
+            self.runtime.account_id = 'a' * 32
+            try:
+                listing = (await self.client.get('/api/workspace-browse')).json()
+            finally:
+                self.runtime.account_id = None
+            self.assertEqual(listing['root'], str(self.workspace.resolve()))
+            self.assertEqual(listing['path'], str(self.workspace.resolve()))
+            self.assertIsNone(listing['parent'])
+            self.assertIn('project-a', [item['name'] for item in listing['entries']])
+
+    async def test_browse_reports_the_guard_as_a_reason_not_a_click(self):
+        (self.workspace / 'blocked').mkdir()
+        (self.workspace / 'allowed').mkdir()
+
+        def guard(path):
+            if Path(path).name == 'blocked':
+                raise PermissionError('只能访问当前用户的本机工作区及其子目录')
+
+        self.runtime.auth_guard = guard
+        try:
+            with patch.dict(os.environ, {'CHAGENT_WORKSPACE_ROOT': str(self.workspace)}):
+                listing = (await self.client.get('/api/workspace-browse')).json()
+        finally:
+            self.runtime.auth_guard = None
+        blocked = next(item for item in listing['entries'] if item['name'] == 'blocked')
+        allowed = next(item for item in listing['entries'] if item['name'] == 'allowed')
+        self.assertFalse(blocked['available'])
+        self.assertIn('只能访问当前用户的本机工作区', blocked['reason'])
+        self.assertTrue(allowed['available'])
+
+    async def test_a_new_folder_can_be_made_inside_the_allowed_tree(self):
+        created = await self.client.post('/api/workspaces/mkdir',
+                                         json={'parent': str(self.workspace), 'name': 'site-a'})
+        self.assertEqual(created.status_code, 201, created.text)
+        target = self.workspace.resolve() / 'site-a'
+        self.assertTrue(target.is_dir())
+        self.assertEqual(Path(created.json()['path']), target)
+        # Opening is idempotent, so a second attempt is a conflict, not a crash.
+        again = await self.client.post('/api/workspaces/mkdir',
+                                       json={'parent': str(self.workspace), 'name': 'site-a'})
+        self.assertEqual(again.status_code, 409)
+        self.assertEqual((await self.client.get('/api/workspaces')).status_code, 200)
+        for bad in ('a/b', '..', '.', '   ', 'x\x00y'):
+            with self.subTest(name=bad):
+                response = await self.client.post('/api/workspaces/mkdir',
+                                                  json={'parent': str(self.workspace), 'name': bad})
+                self.assertEqual(response.status_code, 400)
+
     async def test_work_agent_creates_a_downloadable_file(self):
         runner = create_demo_runner(self.database, tool_name="create_file", work_only=True,
                                     tool_arguments={"filename": "最后一行代码.md", "content": "# 故事\n正文"})
@@ -562,7 +620,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.get(f"/static/{asset}")).status_code, 200)
         info = (await self.client.get("/api/info")).json()
         self.assertEqual(set(info), {"workspace", "provider", "model", "code_mode", "programmable",
-                                     "boundary", "capability", "gate"})
+                                     "boundary", "capability", "gate", "isolation"})
         self.assertEqual((info["boundary"], info["capability"], info["gate"]), ("none", "read-only", "none"))
         self.assertFalse(info["code_mode"])
         self.assertFalse(info["programmable"])
@@ -1351,6 +1409,7 @@ class PreflightFailureTests(unittest.IsolatedAsyncioTestCase):
         runtime.settings = SimpleNamespace(execution_profile="configured")
         runtime.runner = SimpleNamespace(sandbox=SimpleNamespace(
             audit=AsyncMock(return_value={"available": available, "detail": detail})))
+        runtime.executors = {}
         return runtime
 
     async def test_the_refusal_carries_the_reason_the_probe_reported(self):
@@ -1388,3 +1447,169 @@ class PreflightFailureTests(unittest.IsolatedAsyncioTestCase):
         runtime = self._runtime("", available=True)
         with patch("chagent.web.runtime.validate_web_runner"):
             self.assertIsNone(await runtime.require_programming(Path("/tmp")))
+
+
+class ExecutorDegradationTests(unittest.IsolatedAsyncioTestCase):
+    """A missing executor image must not take the page down with it.
+
+    Reading history, listing workspaces and editing files need no container.
+    The refusal belongs to the request that would run something, so these tests
+    pin both halves: the probe reports a state instead of raising, and the one
+    route that starts a model turn still refuses.
+    """
+
+    @staticmethod
+    def _runtime(detail="Unable to find image 'chagent:local' locally", *, available=False):
+        runtime = WebRuntime.__new__(WebRuntime)
+        runtime.programmable = True
+        runtime.native_allowed = True
+        runtime.settings = SimpleNamespace(execution_profile="configured")
+        runtime.runner = SimpleNamespace(sandbox=SimpleNamespace(
+            audit=AsyncMock(return_value={"available": available, "detail": detail})))
+        runtime.roots = {Path("/tmp")}
+        runtime.executors = {}
+        runtime._provisioning = {}
+        runtime.tasks = set()
+        runtime.closing = False
+        return runtime
+
+    async def test_the_probe_returns_the_reason_instead_of_refusing(self):
+        runtime = self._runtime()
+        status = await runtime.check_isolation(Path("/tmp"))
+        self.assertEqual(status, {"state": "unavailable", "available": False,
+                                  "reason": "执行器镜像 chagent:local 在本机不存在，先运行 docker build -t chagent:local ."})
+        self.assertEqual(runtime.isolation, status)
+
+    async def test_the_status_reason_does_not_repeat_the_refusal_wrapper(self):
+        runtime = self._runtime()
+        status = await runtime.check_isolation(Path("/tmp"))
+        # The wrapper says "code 不可用；不会降低隔离等级"; the status line says
+        # that in its own words, so repeating it there would read as noise.
+        self.assertNotIn("不会降低隔离等级", status["reason"])
+
+    async def test_a_passing_probe_clears_a_remembered_reason(self):
+        runtime = self._runtime("", available=True)
+        self.assertEqual(await runtime.check_isolation(Path("/tmp")),
+                         {"state": "ready", "available": True, "reason": None})
+
+    async def test_reading_a_session_never_runs_the_probe(self):
+        runtime = self._runtime()
+        session = SimpleNamespace(workspace=Path("/tmp"))
+        runtime.sessions = SimpleNamespace(get=AsyncMock(return_value=session))
+        self.assertIs(await runtime.session(UUID(int=1)), session)
+        runtime.runner.sandbox.audit.assert_not_awaited()
+
+    async def test_starting_a_run_still_refuses_when_the_executor_is_missing(self):
+        from chagent.web.runs_api import send
+        from chagent.web.schemas import RunCreate
+
+        current = SimpleNamespace(
+            session=AsyncMock(return_value=SimpleNamespace(workspace=Path("/tmp"))),
+            require_programming=AsyncMock(side_effect=HTTPException(503, isolation_failure({"detail": ""}))),
+            start=AsyncMock())
+        with self.assertRaises(HTTPException) as caught:
+            await send(UUID(int=1), RunCreate(text="hi"), current)
+        self.assertEqual(caught.exception.status_code, 503)
+        current.require_programming.assert_awaited_once()
+        current.start.assert_not_awaited()
+
+    async def test_an_empty_session_runs_nothing_and_opens_without_a_probe(self):
+        from chagent.web.sessions_api import create_session
+        from chagent.web.schemas import SessionCreate
+
+        created = SimpleNamespace(id=UUID(int=2))
+        current = SimpleNamespace(
+            root=lambda path: Path("/tmp"),
+            require_configuration=Mock(),
+            require_programming=AsyncMock(),
+            sessions=SimpleNamespace(create=AsyncMock(return_value=created)))
+        self.assertIs(await create_session(SessionCreate(title="新会话"), current), created)
+        current.require_programming.assert_not_awaited()
+        current.require_configuration.assert_called_once()
+
+
+class WorkspaceExecutorTests(unittest.IsolatedAsyncioTestCase):
+    """Opening a directory prepares its container, so the first message does not.
+
+    A container belongs to one directory, so the answer has to as well: a ready
+    workspace must not answer for a broken one, and "preparing" must be a state
+    the page can paint rather than a request that hangs.
+    """
+
+    @staticmethod
+    def _runtime(*, available=True, detail=""):
+        runtime = WebRuntime.__new__(WebRuntime)
+        runtime.programmable = True
+        runtime.native_allowed = True
+        runtime.settings = SimpleNamespace(execution_profile="configured")
+        runtime.runner = SimpleNamespace(sandbox=SimpleNamespace(
+            audit=AsyncMock(return_value={"available": available, "detail": detail})))
+        runtime.roots = {Path("/tmp")}
+        runtime.executors = {}
+        runtime._provisioning = {}
+        runtime.tasks = set()
+        runtime.closing = False
+        return runtime
+
+    async def test_opening_records_preparing_before_docker_is_touched(self):
+        runtime = self._runtime()
+        state = runtime.schedule_provision(Path("/tmp"))
+        self.assertEqual(state, {"state": "preparing", "available": False, "reason": None})
+        self.assertEqual(runtime.executor_state(Path("/tmp")), state)
+        self.assertEqual(runtime.runner.sandbox.audit.await_count, 0)
+        await asyncio.gather(*runtime.tasks)
+        self.assertEqual(runtime.executor_state(Path("/tmp")),
+                         {"state": "ready", "available": True, "reason": None})
+
+    async def test_each_workspace_keeps_its_own_answer(self):
+        runtime = self._runtime()
+        runtime.runner.sandbox.audit = AsyncMock(side_effect=[
+            {"available": True, "detail": ""},
+            {"available": False, "detail": "Unable to find image 'chagent:local' locally"}])
+        await runtime.provision(Path("/tmp"))
+        await runtime.provision(Path("/tmp/other"))
+        self.assertTrue(runtime.executor_state(Path("/tmp"))["available"])
+        self.assertFalse(runtime.executor_state(Path("/tmp/other"))["available"])
+        # The compatibility field follows the last workspace asked about.
+        self.assertEqual(runtime.isolation, runtime.executor_state(Path("/tmp/other")))
+
+    async def test_a_failure_is_remembered_as_a_state_not_raised(self):
+        runtime = self._runtime(available=False,
+                               detail="Unable to find image 'chagent:local' locally")
+        state = await runtime.provision(Path("/tmp"))
+        self.assertEqual(state["state"], "unavailable")
+        self.assertIn("docker build -t chagent:local .", state["reason"])
+
+    async def test_preparing_twice_joins_the_attempt_in_flight(self):
+        runtime = self._runtime()
+        gate = asyncio.Event()
+
+        async def audit(*args, **kwargs):
+            await gate.wait()
+            return {"available": True, "detail": ""}
+
+        runtime.runner.sandbox.audit = AsyncMock(side_effect=audit)
+        runtime.schedule_provision(Path("/tmp"))
+        runtime.schedule_provision(Path("/tmp"))
+        gate.set()
+        await asyncio.gather(*runtime.tasks)
+        self.assertEqual(runtime.runner.sandbox.audit.await_count, 1)
+
+    async def test_a_refused_run_records_the_answer_it_reports(self):
+        runtime = self._runtime(available=False,
+                               detail="Unable to find image 'chagent:local' locally")
+        with patch("chagent.web.runtime.validate_web_runner"):
+            with self.assertRaises(HTTPException) as caught:
+                await runtime.require_programming(Path("/tmp"))
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(runtime.executor_state(Path("/tmp"))["state"], "unavailable")
+        self.assertEqual(runtime.executor_state(Path("/tmp"))["reason"], runtime.isolation["reason"])
+
+    async def test_preparing_an_unopened_workspace_is_refused(self):
+        from chagent.web.workspace_api import prepare_workspace_executor
+
+        current = SimpleNamespace(settings=SimpleNamespace(execution_profile="host-controller"),
+                                  workspace_path=lambda identity: None)
+        with self.assertRaises(HTTPException) as caught:
+            await prepare_workspace_executor(UUID(int=1), current)
+        self.assertEqual(caught.exception.status_code, 404)

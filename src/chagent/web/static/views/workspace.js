@@ -26,8 +26,56 @@ export function createWorkspaceView(ui) {
     $("workspace").title = opened.path;
     state.currentWorkspace = opened;
     ui.workspaceFiles(opened);
+    watchExecutor(opened);
     loadSiteAccess(opened).catch(() => { $("site-access").hidden = true; });
     return opened;
+  }
+
+  /* ---------- executor ----------
+   * A container belongs to one directory, so opening a directory is the moment
+   * it is created — not the first message. The wait is shown rather than spent
+   * in the dialog: the open call returns immediately, the status line says
+   * "preparing", and the poll turns it into either "ready" or the reason it
+   * could not be built. */
+  const EXECUTOR_POLL_MS = 1500;
+  const EXECUTOR_LIMIT_MS = 90_000;
+  let executorTimer = null;
+
+  async function watchExecutor(workspace) {
+    clearInterval(executorTimer);
+    executorTimer = null;
+    if (state.config?.controller !== "host-controller" || !workspace?.id) return;
+    const id = workspace.id;
+    const deadline = Date.now() + EXECUTOR_LIMIT_MS;
+    let finished = false;
+    const stop = () => { finished = true; clearInterval(executorTimer); executorTimer = null; };
+    const tick = async () => {
+      if (finished) return;
+      let next;
+      try { next = await api(`/api/workspaces/${id}/executor`); }
+      catch (error) {
+        stop();
+        if (state.currentWorkspace?.id === id) {
+          ui.renderExecutor({state: "unavailable", available: false, reason: error.message});
+        }
+        return;
+      }
+      // A slow switch must not paint the directory that was left behind.
+      if (state.currentWorkspace?.id !== id) { stop(); return; }
+      if (next.state === "ready" || next.state === "unavailable") { ui.renderExecutor(next); stop(); return; }
+      if (Date.now() > deadline) {
+        ui.renderExecutor({state: "unavailable", available: false,
+          reason: "执行环境在 90 秒内没有就绪，容器可能卡在创建阶段"});
+        stop();
+        return;
+      }
+      ui.renderExecutor(next);
+    };
+    ui.renderExecutor({state: "preparing"});
+    try { await post(`/api/workspaces/${id}/executor`, {}); }
+    catch (error) { ui.showError(error); }
+    await tick();
+    if (!finished) executorTimer = setInterval(tick, EXECUTOR_POLL_MS);
   }
 
   async function loadSiteAccess(workspace = state.currentWorkspace) {
@@ -175,6 +223,19 @@ export function createWorkspaceView(ui) {
     if (browse.nextAfter) loadBrowse(browse.path, browse.nextAfter).catch(error => workspaceNotice(error.message, true));
   });
   on($("workspace-browse-close"), "click", () => { $("workspace-browse").hidden = true; });
+  on($("workspace-new-folder"), "submit", async event => {
+    event.preventDefault();
+    const name = $("workspace-new-name").value.trim();
+    if (!name || !browse.path) return;
+    try {
+      const opened = await post("/api/workspaces/mkdir", {parent: browse.path, name});
+      $("workspace-new-name").value = "";
+      // Switching is what creates the container, so a new workspace is ready
+      // by the time it is open rather than at the first message.
+      await switchWorkspace(opened.path);
+      $("workspace-dialog").close();
+    } catch (error) { workspaceNotice(error.message, true); }
+  });
   on($("native-workspace-picker"), "click", async () => {
     const button = $("native-workspace-picker"); button.disabled = true;
     workspaceNotice("请选择本机文件夹…");

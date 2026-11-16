@@ -403,6 +403,16 @@ class AgentRunner:
         if previous != identity:
             raise PermissionError("Session workspace directory was replaced")
         history = await self.conversations.messages(session_id, current_run=run_id, project_artifacts=True)
+        # Never replay an imported workflow from a previous run as fresh authority.
+        # The original audited message stays in storage; reloading requires an enabled skill.
+        from dataclasses import replace
+        from chagent.domain.messages import ToolResultMessage
+        history = [replace(item, message=replace(item.message,
+                    content=[TextContent('Previous user skill result omitted. Search and read the enabled skill again.')],
+                    details=None, artifact=None))
+                   if isinstance(item.message, ToolResultMessage)
+                   and item.message.tool_name in {'read_user_skill', 'search_user_skills'}
+                   else item for item in history]
         task_state = await self.conversations.task_state(session_id)
         summary = await self.context_manager.summaries.latest(session_id, current_run=run_id) if self.context_manager else None
         note = build_recovery_note(await self.runs.recovery_facts(session_id, current_run=run_id))
@@ -414,6 +424,10 @@ class AgentRunner:
                 "fact_count": note.fact_count, "source_runs": list(note.run_ids),
             })
         state = RunState(run_id, session, history, task_state, summary, recovery=note, workspace_identity=identity)
+        if self.executor_for(session.mode).registry.get('read_user_skill') is not None:
+            from chagent.user_skills import UserSkillStore
+            state.user_skills = {str(row['id']): row for row in
+                                await UserSkillStore(self.runs.database).list(enabled=True)}
         if self.sandbox is not None:
             settings = self.sandbox.settings
             if settings.containerized:
@@ -471,6 +485,7 @@ class AgentRunner:
         tool_context = ToolContext(
             workspace=state.session.workspace, session_id=session_id, run_id=run_id,
             workspace_identity=state.workspace_identity, deferred=state.deferred,
+            user_skills=state.user_skills, loaded_user_skills=state.loaded_user_skills,
         )
         for iteration in range(self.max_turns):
             from chagent.tools.workspace import WorkspaceFS

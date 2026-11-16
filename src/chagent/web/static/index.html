@@ -29,6 +29,7 @@
       </button>
     </div>
     <div class="rail-bottom">
+      <a class="rail-icon" href="/skills" title="用户技能" aria-label="用户技能">S</a>
       <button class="rail-icon" id="rail-archive" title="查看已归档会话" aria-label="查看已归档会话" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7.5h16V20H4ZM3 4h18v3.5H3ZM9 12h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>
       </button>
@@ -109,7 +110,7 @@
     </section>
 
     <footer class="dock">
-      <div class="status-line"><span id="status" role="status">就绪</span><button id="stop" class="stop-btn" hidden>■ 停止生成</button></div>
+      <div class="status-line"><span id="status" role="status">就绪</span><button id="code-status" class="code-status" type="button" hidden></button><button id="stop" class="stop-btn" hidden>■ 停止生成</button></div>
       <div id="uploads" class="uploads" aria-live="polite"></div>
       <form id="composer" class="composer">
         <label for="input" class="sr-only">输入消息</label>
@@ -238,6 +239,10 @@
       </div>
       <div id="workspace-browse-list" class="workspace-list"></div>
       <button type="button" id="workspace-browse-more" class="quiet" hidden>加载更多文件夹</button>
+      <form id="workspace-new-folder" class="browse-new">
+        <input id="workspace-new-name" placeholder="新文件夹名" aria-label="新文件夹名" required maxlength="120">
+        <button type="submit">新建并打开</button>
+      </form>
       <div class="browse-foot">
         <button type="button" id="workspace-browse-open">打开此文件夹</button>
         <button type="button" id="workspace-browse-close" class="quiet">收起</button>

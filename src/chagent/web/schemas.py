@@ -149,6 +149,23 @@ class ErrorResponse(BaseModel):
     details: list[ErrorDetail] = Field(default_factory=list)
 
 
+class IsolationStatus(BaseModel):
+    """Whether this machine can run commands right now, and why not.
+
+    Data, not a refusal: the page shows it next to the composer so a broken
+    executor is discovered before a message is written, and a run that would
+    have been refused says the same sentence in its 503.
+
+    ``state`` is the same fact while it is still moving: a container is created
+    per workspace when the directory is opened, so "preparing" is a normal
+    answer for the first seconds and must not be mistaken for a refusal.
+    """
+
+    available: bool = True
+    reason: str | None = None
+    state: Literal["preparing", "ready", "unavailable"] = "ready"
+
+
 class AppInfo(BaseModel):
     workspace: Path
     provider: str
@@ -159,6 +176,7 @@ class AppInfo(BaseModel):
     boundary: str = "none"
     capability: str = "read-only"
     gate: str = "none"
+    isolation: IsolationStatus = Field(default_factory=IsolationStatus)
 
 
 class WorkspaceView(BaseModel):
@@ -196,6 +214,17 @@ class FileOperationPage(BaseModel):
 class WorkspaceCreate(InputModel):
     path: Annotated[StrictStr, Field(min_length=1, max_length=4096)]
     touch: StrictBool = True
+
+
+class WorkspaceDirectoryCreate(InputModel):
+    """A new folder named inside a directory the server already opened.
+
+    A name, not a path: the parent decides where it may live, so the request
+    cannot describe somewhere the account is not allowed to be.
+    """
+
+    parent: Annotated[StrictStr, Field(min_length=1, max_length=4096)]
+    name: Annotated[StrictStr, Field(min_length=1, max_length=120)]
 
 
 class DirectoryEntry(BaseModel):

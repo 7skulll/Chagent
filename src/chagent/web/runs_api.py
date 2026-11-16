@@ -29,7 +29,11 @@ TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 
 @router.post("/sessions/{session_id}/runs", response_model=RunAccepted, status_code=202, tags=["运行"])
 async def send(session_id: UUID, value: RunCreate, current: Current):
-    await current.session(session_id)  # Isolation check only; the id is enough.
+    session = await current.session(session_id)
+    # The executor is checked exactly where work begins: a model turn is the
+    # first thing that can run a command, and until it exists a broken image is
+    # a fact about the machine rather than a reason to refuse reading history.
+    await current.require_programming(session.workspace)
     supersede_from = await _replacement_point(current, session_id, value)
     return {"run_id": await current.start(session_id, value.text or "", supersede_from=supersede_from),
             "session_id": session_id}

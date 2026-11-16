@@ -132,10 +132,11 @@ class WebSurfaceTests(unittest.TestCase):
 
     def test_button_surface_is_pinned(self):
         # The site restart and explicit container rebuild controls are included,
-        # as is the task-history disclosure from the context line. Every button
-        # must also pass the handler check above; this count only prevents
-        # accidental duplicates.
-        self.assertEqual(len(self.page.buttons), 63)
+        # as is the task-history disclosure from the context line, the executor
+        # re-check next to the composer, and "new folder" in the browse tree.
+        # Every button must also pass the handler check above; this count only
+        # prevents accidental duplicates.
+        self.assertEqual(len(self.page.buttons), 65)
 
     def test_script_lookups_exist_in_markup(self):
         missing = sorted(self.lookups - self.page.ids - RUNTIME_IDS)

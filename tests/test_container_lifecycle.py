@@ -147,6 +147,7 @@ class ContainerLifecycleTests(TestCase):
                 tool = SiteTool(sandbox, Database())
                 current = SimpleNamespace(
                     roots={root}, _workspace_ids={root: workspace_id},
+                    workspace_path=lambda identity: root if identity == workspace_id else None,
                     settings=SimpleNamespace(execution_profile="host-controller"),
                     workspace_id=AsyncMock(), require_programming=AsyncMock(),
                     runner=SimpleNamespace(tools=SimpleNamespace(registry=SimpleNamespace(get=lambda _: tool))))

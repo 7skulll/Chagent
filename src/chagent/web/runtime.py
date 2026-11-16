@@ -33,6 +33,24 @@ PROBE_REASON_LIMIT = 240
 MISSING_IMAGE = re.compile(r"Unable to find image '([\w][\w./:@-]{0,80})' locally")
 
 
+def probe_reason(support: dict) -> str:
+    """Only the cause, without the "code is off" wrapper.
+
+    Two places need this sentence and disagree about the wrapper: the 503 puts
+    it in parentheses, the status line shows it after a colon. Parsing one out
+    of the other would make the wording load-bearing.
+    """
+    detail = " ".join(str(support.get("detail") or "").split())
+    if not detail:
+        return ""
+    missing = MISSING_IMAGE.search(detail)
+    if missing is not None:
+        image = missing.group(1)
+        return f"执行器镜像 {image} 在本机不存在，先运行 docker build -t {image} ."
+    suffix = "…" if len(detail) > PROBE_REASON_LIMIT else ""
+    return f"{detail[:PROBE_REASON_LIMIT]}{suffix}"
+
+
 def isolation_failure(support: dict) -> str:
     """The 503 a failed preflight raises, including the probe's own reason.
 
@@ -44,15 +62,8 @@ def isolation_failure(support: dict) -> str:
     multi-line daemon output verbatim.
     """
     base = "执行隔离探针失败，code 不可用；不会降低隔离等级"
-    detail = " ".join(str(support.get("detail") or "").split())
-    if not detail:
-        return base
-    missing = MISSING_IMAGE.search(detail)
-    if missing is not None:
-        image = missing.group(1)
-        return f"{base}（原因：执行器镜像 {image} 在本机不存在，先运行 docker build -t {image} .）"
-    suffix = "…" if len(detail) > PROBE_REASON_LIMIT else ""
-    return f"{base}（原因：{detail[:PROBE_REASON_LIMIT]}{suffix}）"
+    reason = probe_reason(support)
+    return base if not reason else f"{base}（原因：{reason}）"
 
 
 class WebRuntime:
@@ -74,6 +85,18 @@ class WebRuntime:
         # set is not addressable, so a stale tab cannot act across workspaces it
         # never selected. The startup directory is open by construction.
         self.roots: set[Path] = {self.workspace}
+        #: Last answer the executor probe gave, for the page to read. ``None``
+        #: until the first check. Kept as data rather than an exception because
+        #: "code is off" describes the machine, not the request that noticed.
+        self.isolation: dict | None = None
+        #: Executor state per workspace: ``preparing`` → ``ready``/``unavailable``.
+        #: A container belongs to one directory, so one directory's answer must
+        #: not stand for another's; ``isolation`` above stays as "the last one
+        #: this page asked about" for the single-workspace compatibility field.
+        self.executors: dict[Path, dict] = {}
+        #: Preparation in flight, so opening the same directory twice joins the
+        #: first attempt instead of racing a second ``docker run`` against it.
+        self._provisioning: dict[Path, asyncio.Task] = {}
         self.tasks: set[asyncio.Task] = set()
         self.closing = False
         self._workspace_ids: dict[Path, UUID] = {}
@@ -169,25 +192,146 @@ class WebRuntime:
         return await self.workspace_id(self.root(raw))
 
     async def session(self, identity: UUID):
+        """A session this process may read.
+
+        Membership only. The executor probe used to sit here, which made a
+        missing Docker image answer 503 to listing messages, opening a file and
+        browsing workspaces — everything a person would try in order to find out
+        what was wrong. Execution is gated where it starts (run creation, site
+        and container management), not on the way to the history.
+        """
         try:
             session = await self.sessions.get(identity)
         except (ValueError, OSError):
             raise SessionNotFoundError("Session workspace is no longer available") from None
         if session.workspace not in self.roots:
             raise SessionNotFoundError("Session belongs to a workspace that is not open")
-        await self.require_programming(session.workspace)
         return session
+
+    def workspace_path(self, identity: UUID) -> Path | None:
+        """The open directory one workspace id names, if this process opened it."""
+        return next((root for root in self.roots if self._workspace_ids.get(root) == identity), None)
+
+    def executor_state(self, workspace: Path | None = None) -> dict | None:
+        """What is known about one workspace's executor; ``None`` means unknown."""
+        return self.executors.get(self.workspace if workspace is None else workspace)
+
+    async def check_isolation(self, workspace: Path | None = None) -> dict:
+        """Probe now and remember the answer; never refuses anything.
+
+        The page needs to know that code is off *before* someone types a
+        request and loses the work to a 503, so this returns the refusal a
+        request would have raised instead of raising it. Docker daemon output is
+        kept to one bounded line for the same reason it is in the 503.
+
+        Failures that are not about the probe — a workspace whose host identity
+        changed, a Docker CLI that is not installed — are reported the same way.
+        They used to abort startup, which turned every one of them into a page
+        that could not say what was wrong.
+        """
+        return await self.provision(workspace)
+
+    async def provision(self, workspace: Path | None = None) -> dict:
+        """Bring one workspace's executor up and record the outcome.
+
+        The container that runs a directory's commands belongs to that
+        directory, but it used to appear inside the first turn: the person
+        waited for Docker mid-sentence, and a missing image looked like a broken
+        agent. Creating it when the directory is opened moves the wait to an
+        empty transcript, and ``preparing`` exists so the page can say so
+        instead of blocking.
+
+        Never raises. Every failure here is a fact about the machine to display,
+        not a reason to fail the request that asked for it.
+        """
+        root = self.workspace if workspace is None else workspace
+        if not self.programmable:
+            state = {"state": "ready", "available": True, "reason": None}
+            self.executors[root] = state
+            self.isolation = state
+            return state
+        self.executors[root] = {"state": "preparing", "available": False, "reason": None}
+        try:
+            # Same order as ``require_programming``: the container bookkeeping
+            # is keyed by workspace identity, so the identity is established
+            # before a container is inspected or built.
+            if self.settings.execution_profile == "host-controller":
+                await self.workspace_id(root)
+            support = await self.runner.sandbox.audit(root, owner="web-preflight")
+        except (HTTPException, OSError, RuntimeError, ValueError) as error:
+            detail = getattr(error, "detail", None) or str(error)
+            state = {"state": "unavailable", "available": False,
+                     "reason": probe_reason({"detail": str(detail)})}
+        else:
+            available = bool(support["available"])
+            state = {"state": "ready" if available else "unavailable", "available": available,
+                     "reason": None if available else probe_reason(support)}
+        self.executors[root] = state
+        self.isolation = state
+        return state
+
+    def schedule_provision(self, workspace: Path | None = None) -> dict | None:
+        """Start preparing in the background; opening a directory does not wait.
+
+        The open call is a dialog closing, not a place to spend ``docker run``.
+        Returns the state as of now — ``preparing`` on the first call, and the
+        same attempt's state when the directory is opened again while it runs.
+        """
+        root = self.workspace if workspace is None else workspace
+        if not self.programmable or self.closing:
+            return self.executors.get(root)
+        running = self._provisioning.get(root)
+        if running is not None and not running.done():
+            return self.executors.get(root)
+        # Recorded before the task starts: a caller that reads the state now, or
+        # a second open of the same directory, must see "preparing" rather than
+        # "nothing happened yet" while the coroutine is still queued.
+        state = {"state": "preparing", "available": False, "reason": None}
+        self.executors[root] = state
+        task = asyncio.create_task(self.provision(root), name=f"web-provision-{root.name}")
+        self._provisioning[root] = task
+        self.tasks.add(task)
+
+        def finished(done: asyncio.Task) -> None:
+            self.tasks.discard(done)
+            if self._provisioning.get(root) is done:
+                self._provisioning.pop(root, None)
+            # ``provision`` swallows its own failures; this is for the ones it
+            # cannot know about, and for a task cancelled at shutdown.
+            if not done.cancelled() and done.exception() is not None:
+                logger.warning("Executor preparation failed (%s)", type(done.exception()).__name__)
+
+        task.add_done_callback(finished)
+        return state
+
+    def require_configuration(self) -> None:
+        """The cheap half of the preflight: declared axes must agree with reality.
+
+        Separate from the probe because they fail for different reasons and at
+        different times. A contradictory configuration is a mistake in the
+        settings and is worth refusing at the first request; a missing Docker
+        image is a repair someone can make while the page stays open.
+        """
+        if not self.programmable:
+            return
+        validate_web_runner(self.settings, self.runner, native_allowed=self.native_allowed)
 
     async def require_programming(self, workspace: Path) -> None:
         if not self.programmable:
             return
-        validate_web_runner(self.settings, self.runner, native_allowed=self.native_allowed)
+        self.require_configuration()
         if self.settings.execution_profile == "host-controller":
             await self.workspace_id(workspace)
         # Explicit preflight owner, separate from all conversation runs.
         support = await self.runner.sandbox.audit(workspace, owner="web-preflight")
         if not support["available"]:
+            reason = probe_reason(support)
+            state = {"state": "unavailable", "available": False, "reason": reason}
+            self.isolation = {"available": False, "reason": reason}
+            self.executors[workspace] = state
             raise HTTPException(503, isolation_failure(support))
+        self.isolation = {"available": True, "reason": None}
+        self.executors[workspace] = {"state": "ready", "available": True, "reason": None}
 
     async def run(self, identity: UUID):
         run = await self.runner.runs.get(identity)
