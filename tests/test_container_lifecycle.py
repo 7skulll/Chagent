@@ -37,7 +37,9 @@ class ContainerLifecycleTests(TestCase):
                     scratch = f"/tmp/chagent-run-{owner}"
                     self.assertIn("HOME=" + scratch, argv)
                     self.assertIn("TMPDIR=" + scratch, argv)
-                    self.assertEqual(argv[-3:], ["chagent-run", scratch, "true"])
+                    self.assertEqual(argv[-1], "true")
+                    self.assertIn(scratch + "/calls/", argv[-3])
+                    self.assertIn("run", argv)
                     await sandbox.release(owner)
                     docker.assert_awaited_once_with("exec", "chagent-ws-test", "rm", "-rf", "--", scratch)
         asyncio.run(check())
@@ -76,6 +78,9 @@ class ContainerLifecycleTests(TestCase):
                 async def fetchall(self):
                     return [{"id": completed}]
 
+                async def fetchone(self):
+                    return None
+
             class Connection:
                 async def __aenter__(self):
                     return self
@@ -84,7 +89,8 @@ class ContainerLifecycleTests(TestCase):
                     return None
 
                 async def execute(self, statement, values):
-                    self_candidates.extend(values[0])
+                    if "SELECT id FROM runs" in statement:
+                        self_candidates.extend(values[0])
                     return Cursor()
 
             class Database:

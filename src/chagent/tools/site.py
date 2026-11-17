@@ -120,7 +120,10 @@ class SiteTool(AgentTool):
                 stale = (await self.sandbox.container_detail(fs.root))["image_stale"]
                 return AgentToolResult(content=[TextContent(json.dumps({"url": None, "service": state, "image_stale": stale}))],
                                        details={"url": None, "service": state, "image_stale": stale})
-        name = await self.sandbox.ensure_container(fs.root)
+        # An uncertain command must not prevent stopping a persistent website
+        # before explicit rebuild. Admission policy still gets checked.
+        name = (await self.sandbox.ensure_container(fs.root, allow_cleanup_pending=True)
+                if action == "stop" else await self.sandbox.ensure_container(fs.root))
         current = await self._state(name)
         host_port = await self._port(name)
         url = f"http://127.0.0.1:{host_port}"

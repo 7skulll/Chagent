@@ -99,6 +99,8 @@ class ExecCommandTool(AgentTool):
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signals.SIGKILL)
             await process.communicate()
+            if self.sandbox is not None:
+                await self.sandbox.finish_invocation(sandbox_record)
             raise
 
         output = bytearray()
@@ -151,6 +153,8 @@ class ExecCommandTool(AgentTool):
                 cancellation.cancel()
                 with suppress(asyncio.CancelledError):
                     await cancellation
+            if self.sandbox is not None:
+                await self.sandbox.finish_invocation(sandbox_record)
         timed_out = timed_out or (self.sandbox is not None and self.sandbox.settings.host_controller
                                    and process.returncode == 124)
         text = output.decode("utf-8", errors="replace")

@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-17",
+  "scope": "container-boundary-A",
+  "platform": "Docker Linux aarch64",
+  "full_regression": {
+    "tests": 1472,
+    "passed": 1471,
+    "skipped": 1,
+    "failed": 0,
+    "seconds": 140.349,
+    "database": "isolated schemas",
+    "docker_enabled": true
+  },
+  "final_specialized_suite": {
+    "tests": 11,
+    "passed": 11,
+    "failed": 0,
+    "seconds": 14.349,
+    "note": "Includes one lost-supervisor test added after full-suite discovery."
+  },
+  "checks": [
+    "policy drift rejected",
+    "actual environment persisted",
+    "detached descendants reaped on cancellation/timeout/normal exit",
+    "cancel-before-start prevents launch",
+    "website HTTP 200 after cancellation",
+    "website stop while cleanup pending",
+    "run_tests environment and cleanup confirmed",
+    "unknown invocation blocks reuse across Sandbox reconstruction",
+    "explicit rebuild clears pending",
+    "lost supervisor reports outcome_unknown"
+  ],
+  "limitations": [
+    "Website persistence helper mocked in HTTP lifecycle test",
+    "No production schema migration or controller restart",
+    "No model calls",
+    "Same-user adversarial process isolation not claimed"
+  ],
+  "source_checks": [
+    "ruff --select F",
+    "git diff --check"
+  ]
+}

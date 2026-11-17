@@ -196,6 +196,8 @@ class RunTestsTool(AgentTool):
             process = await spawn
             _terminate(process.pid)
             await process.communicate()
+            if self.sandbox is not None:
+                await self.sandbox.finish_invocation(sandbox_record)
             raise
 
         captured = bytearray()
@@ -220,6 +222,8 @@ class RunTestsTool(AgentTool):
             raise
         finally:
             _terminate(process.pid)
+            if self.sandbox is not None:
+                await self.sandbox.finish_invocation(sandbox_record)
 
         timed_out = timed_out or (self.sandbox is not None and self.sandbox.settings.host_controller
                                    and process.returncode == 124)

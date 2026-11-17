@@ -11,6 +11,7 @@ from chagent.domain.messages import TextContent, ToolCall
 from chagent.tools.base import AgentToolResult, AgentToolUpdateCallback
 from chagent.tools.context import ToolContext
 from chagent.tools.registry import ToolRegistry
+from chagent.tools.sandbox import ContainerCleanupPending
 
 
 class ToolExecutor:
@@ -71,6 +72,8 @@ class ToolExecutor:
         except TimeoutError:
             return AgentToolResult(content=[TextContent(f"Tool did not return within {effective_timeout:g} seconds (execution timed out)")], is_error=True,
                                    outcome_unknown=execution_started)
+        except ContainerCleanupPending as error:
+            return AgentToolResult(content=[TextContent(str(error))], is_error=True, outcome_unknown=True)
         except Exception as error:
             return AgentToolResult(
                 content=[TextContent(f"{type(error).__name__}: {error}")], is_error=True,

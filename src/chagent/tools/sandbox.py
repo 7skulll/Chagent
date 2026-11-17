@@ -14,7 +14,9 @@ from pathlib import Path
 import re
 import shutil
 from typing import Sequence
-from uuid import UUID
+from uuid import UUID, uuid4
+
+from chagent.tools.container_policy import ContainerPolicy
 
 from chagent.boundaries import validate_workspace
 
@@ -59,6 +61,10 @@ class SandboxSupport:
     detail: str = ""
 
 
+class ContainerCleanupPending(RuntimeError):
+    """Execution may have effects beyond the end of the tool call."""
+
+
 class Sandbox:
     """Keep the tool wrapper API while execution is provided by deployment."""
 
@@ -69,6 +75,9 @@ class Sandbox:
         self._lease_locks: dict[str, asyncio.Lock] = {}
         self._site_uses: dict[str, int] = {}
         self._run_containers: dict[str, str] = {}
+        self.container_policy = ContainerPolicy()
+        self._environments: dict[str, dict] = {}
+        self._cleanup_pending: set[str] = set()
         self.database = None
         self.owner_guard = None
 
@@ -168,8 +177,11 @@ class Sandbox:
                     if details.get("State", {}).get("Running") and await self._site_worker_running(name):
                         raise RuntimeError("Stop the website before rebuilding")
                     await self._remove_container(name, "Could not remove old workspace container: ")
+                self._cleanup_pending.discard(name)
                 async with database.connection() as connection:
-                    await connection.execute("UPDATE workspace_containers SET state='reaped' WHERE workspace_id=%s",
+                    await connection.execute(
+                        "UPDATE container_invocations SET cleanup_confirmed=true WHERE container_name=%s", (name,))
+                    await connection.execute("UPDATE workspace_containers SET state='reaped',cleanup_pending=false WHERE workspace_id=%s",
                                              (workspace_id,))
         return await self.ensure_container(root)
 
@@ -200,7 +212,7 @@ class Sandbox:
     def record(self, policy: SandboxPolicy) -> dict:
         return {"boundary": "container" if policy.containerized else "none",
                 "network": policy.network, "workspace_writable": policy.writable_workspace,
-                "image": os.environ.get("CHAGENT_IMAGE", "chagent:local") if policy.containerized else None,
+                "image": os.environ.get("CHAGENT_EXECUTOR_IMAGE", "chagent:local") if policy.containerized else None,
                 **({"backend": "docker-per-workspace"} if self.settings.host_controller else {})}
 
     @staticmethod
@@ -222,7 +234,7 @@ class Sandbox:
             raise RuntimeError("Docker operation timed out") from None
         return child.returncode, output.decode(errors="replace")
 
-    async def ensure_container(self, workspace: Path) -> str:
+    async def ensure_container(self, workspace: Path, *, allow_cleanup_pending: bool = False) -> str:
         if not self.settings.host_controller:
             raise RuntimeError("Per-workspace containers require host-controller mode")
         root = validate_workspace(Path(workspace))
@@ -231,54 +243,52 @@ class Sandbox:
         name = self.container_name(root)
         lock = self._locks.setdefault(name, asyncio.Lock())
         async with lock:
+            if self.database is not None:
+                async with self.database.connection() as connection:
+                    cursor = await connection.execute(
+                        "SELECT cleanup_pending FROM workspace_containers WHERE container_name=%s", (name,))
+                    row = await cursor.fetchone()
+                    if row and row['cleanup_pending'] and not allow_cleanup_pending:
+                        raise RuntimeError("Container cleanup_pending; explicitly rebuild after stopping active work")
+                    cursor = await connection.execute(
+                        "SELECT i.invocation FROM container_invocations i JOIN runs r ON r.id=i.run_id "
+                        "WHERE i.container_name=%s AND NOT i.cleanup_confirmed "
+                        "AND r.status NOT IN ('queued','running') LIMIT 1", (name,))
+                    if await cursor.fetchone() and not allow_cleanup_pending:
+                        raise RuntimeError("Container cleanup_pending; unfinished invocation from a terminal run")
             status, output = await self._docker("inspect", name, "--format", "{{json .}}")
             if status == 0:
                 details = json.loads(output)
-                mounts = details.get("Mounts", [])
-                host = details.get("HostConfig", {})
-                published = (host.get("PortBindings") or {}).get("18080/tcp") or []
-                valid_mount = any(m.get("Type") == "bind" and m.get("Source") == str(root)
-                                  and m.get("Destination") == str(root) and m.get("RW") for m in mounts)
-                safe_mounts = all((m.get("Type") == "bind" and m.get("Source") == str(root)
-                                   and m.get("Destination") == str(root)) or
-                                  (m.get("Type") == "volume" and m.get("Destination") == "/cache")
-                                  for m in mounts)
-                if (not valid_mount or not safe_mounts or not host.get("ReadonlyRootfs")
-                        or details.get("Config", {}).get("Image") != os.environ.get("CHAGENT_EXECUTOR_IMAGE", "chagent:local")
-                        or host.get("Privileged") or host.get("NetworkMode") != "bridge"
-                        or host.get("PidMode") or host.get("IpcMode") != "private"
-                        or "ALL" not in (host.get("CapDrop") or [])
-                        or "no-new-privileges" not in (host.get("SecurityOpt") or [])
-                        or host.get("Memory", 0) > 2_147_483_648 or host.get("Memory", 0) <= 0
-                        or host.get("PidsLimit", 0) > 256 or host.get("PidsLimit", 0) <= 0
-                        or len(published) != 1 or published[0].get("HostIp") != "127.0.0.1"):
-                    raise RuntimeError("Existing workspace container does not match the required isolation policy")
+                differences = self.container_policy.differences(details, root,
+                    os.environ.get("CHAGENT_EXECUTOR_IMAGE", "chagent:local"))
+                if differences:
+                    raise RuntimeError("Existing workspace container does not match the required isolation policy: "
+                                       + ", ".join(differences) + "; explicitly rebuild after stopping active work")
+                if name in self._cleanup_pending and not allow_cleanup_pending:
+                    raise RuntimeError("Container cleanup_pending; explicitly rebuild after stopping active work")
+                await self._remember_environment(name, root, details)
                 if not details.get("State", {}).get("Running"):
                     code, message = await self._docker("start", name)
                     if code:
                         raise RuntimeError("Could not restart workspace container: " + message[-400:])
                 await self._touch_container(root, name, details.get("Image", ""))
                 return name
+            if allow_cleanup_pending:
+                raise RuntimeError("Workspace container is absent; no service to stop")
             image = os.environ.get("CHAGENT_EXECUTOR_IMAGE", "chagent:local")
-            cache = "chagent-cache-" + sha256(os.fsencode(root)).hexdigest()[:20]
             code, message = await self._docker("run", "-d", "--name", name,
-                "--label", "chagent.workspace=" + sha256(os.fsencode(root)).hexdigest(),
-                "--mount", f"type=bind,src={root},dst={root}",
-                "--mount", f"type=volume,src={cache},dst=/cache",
-                "--workdir", str(root), "--publish", "127.0.0.1::18080",
-                "--memory", "2g", "--cpus", "2", "--pids-limit", "256",
-                "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-                "--read-only", "--tmpfs", "/tmp:rw,nosuid,size=512m",
-                "--env", "HOME=/tmp", "--env", "TMPDIR=/tmp",
-                "--env", "MAVEN_OPTS=-Dmaven.repo.local=/cache/m2",
-                "--env", "PIP_CACHE_DIR=/cache/pip", "--env", "npm_config_cache=/cache/npm",
-                "--entrypoint", "/bin/sleep", image, "infinity", timeout=60)
+                *self.container_policy.create_args(root, image), timeout=60)
             if code:
                 raise RuntimeError("Could not create workspace container: " + message[-400:])
-            code, image_id = await self._docker("inspect", name, "--format", "{{.Image}}")
+            code, raw = await self._docker("inspect", name, "--format", "{{json .}}")
             if code:
                 raise RuntimeError("Could not inspect new workspace container")
-            await self._touch_container(root, name, image_id.strip())
+            details = json.loads(raw)
+            differences = self.container_policy.differences(details, root, image)
+            if differences:
+                raise RuntimeError("New workspace container violates policy: " + ", ".join(differences))
+            await self._remember_environment(name, root, details)
+            await self._touch_container(root, name, details["Image"])
             return name
 
     async def wrap(self, argv: Sequence[str], workspace: Path, *, owner=None,
@@ -304,16 +314,61 @@ class Sandbox:
             cwd = validate_workspace(workdir or policy.workspace)
             if cwd != policy.workspace and not cwd.is_relative_to(policy.workspace):
                 raise PermissionError("Command directory is outside workspace")
-            bounded = (["/usr/bin/timeout", "-k", "2s", f"{max(.001, timeout_seconds - .5):.3f}s", *argv]
-                       if timeout_seconds is not None else list(argv))
+            invocation = uuid4().hex
+            control = f"{scratch}/calls/{invocation}"
+            from chagent.hostexec import command_worker
+            source = Path(command_worker.__file__).read_text()
+            if self.database is not None:
+                async with self.database.connection() as connection:
+                    await connection.execute(
+                        "INSERT INTO container_invocations (invocation,container_name,run_id,control_path,environment) "
+                        "VALUES (%s,%s,%s,%s,%s::jsonb)",
+                        (UUID(invocation), name, owner, control, json.dumps(self._environments[name])))
             return (["docker", "exec", "--workdir", str(cwd),
                      "--env", "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin",
                      "--env", "HOME=" + scratch, "--env", "TMPDIR=" + scratch,
                      "--env", "PYTHONPATH=" + str(policy.workspace),
-                     name, "/bin/sh", "-c", 'mkdir -p -m 700 "$1" && shift && exec "$@"',
-                     "chagent-run", scratch, *bounded],
-                    {**self.record(policy), "container": name})
+                     name, "/app/.venv/bin/python", "-I", "-c", source,
+                     "run", control, str(timeout_seconds or 600), *argv],
+                    {**self.record(policy), "container": name, "invocation": invocation,
+                     "control_path": control, "environment": self._environments.get(name)})
         return list(argv), self.record(policy)
+
+    async def _remember_environment(self, name, root, details):
+        manifest = self.container_policy.manifest(details, root)
+        if not manifest['container_id'] or not manifest['image_id']:
+            raise RuntimeError("Container environment identity unavailable")
+        code, raw = await self._docker("image", "inspect", details['Image'], "--format", "{{json .RepoDigests}}")
+        manifest['repo_digests'] = json.loads(raw) if code == 0 and raw.strip() else None
+        manifest['image_stale'] = await self.image_stale(details['Image'])
+        self._environments[name] = manifest
+
+    async def finish_invocation(self, record):
+        if not self.settings.host_controller or not record.get('invocation'):
+            return
+        name = record['container']
+        from chagent.hostexec import command_worker
+        source = Path(command_worker.__file__).read_text()
+        try:
+            code, output = await self._docker('exec', name, '/app/.venv/bin/python', '-I', '-c', source,
+                                              'stop', record['control_path'], timeout=12)
+            if code:
+                raise RuntimeError(output[-300:])
+        except (OSError, RuntimeError):
+            record['cleanup_confirmed'] = False
+            self._cleanup_pending.add(name)
+            if self.database is not None:
+                async with self.database.connection() as connection:
+                    await connection.execute(
+                        "UPDATE workspace_containers SET cleanup_pending=true WHERE container_name=%s", (name,))
+            raise ContainerCleanupPending('Container cleanup_pending; invocation exit could not be confirmed') from None
+        if self.database is not None:
+            async with self.database.connection() as connection:
+                await connection.execute(
+                    "UPDATE container_invocations SET cleanup_confirmed=true WHERE invocation=%s AND container_name=%s",
+                    (UUID(record['invocation']), name))
+        record['cleanup_confirmed'] = True
+
 
     async def support(self, policy: SandboxPolicy) -> SandboxSupport:
         if self.settings.host_controller:
@@ -335,6 +390,17 @@ class Sandbox:
         name = self._run_containers.get(str(owner))
         if name is None:
             return
+        if name in self._cleanup_pending:
+            raise RuntimeError("Container cleanup_pending; run scratch retained")
+        if self.database is not None:
+            async with self.database.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT invocation,control_path FROM container_invocations "
+                    "WHERE run_id=%s AND NOT cleanup_confirmed", (owner,))
+                outstanding = await cursor.fetchall()
+            for row in outstanding:
+                await self.finish_invocation({'container': name, 'invocation': str(row['invocation']),
+                                              'control_path': row['control_path']})
         path = f"/tmp/chagent-run-{owner}"
         code, output = await self._docker("exec", name, "rm", "-rf", "--", path)
         if code:
@@ -416,6 +482,12 @@ class Sandbox:
             for owner in candidates:
                 if owner not in terminal:
                     continue
+                async with database.connection() as connection:
+                    cursor = await connection.execute(
+                        "SELECT invocation FROM container_invocations WHERE run_id=%s AND NOT cleanup_confirmed",
+                        (owner,))
+                    if await cursor.fetchone():
+                        continue
                 status, _ = await self._docker("exec", name, "rm", "-rf", "--", f"/tmp/chagent-run-{owner}")
                 removed += status == 0
         return removed
