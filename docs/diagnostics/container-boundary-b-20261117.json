@@ -1,0 +1,44 @@
+{
+  "date": "2026-11-17",
+  "scope": "container-boundary-B",
+  "full_regression": {
+    "tests": 1482,
+    "passed": 1481,
+    "skipped": 1,
+    "failed": 0,
+    "seconds": 149.818,
+    "docker": true,
+    "postgresql": "isolated schemas"
+  },
+  "final_specialized": {
+    "tests": 9,
+    "passed": 9,
+    "failed": 0,
+    "seconds": 7.883,
+    "note": "Includes final hard-link admission protection."
+  },
+  "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+  "checks": [
+    "private workspace/cache volumes without host binds",
+    "same frozen snapshot replayed independently",
+    "host source unchanged by execution",
+    "declared artifacts and content hashes",
+    "missing/symlink/oversize artifact failures",
+    "snapshot symlink/hardlink refusal and archive validation",
+    "policy drift refusal",
+    "interrupted environment cleanup recovery",
+    "CLI run and replay",
+    "unrelated resource preservation"
+  ],
+  "limitations": [
+    "command/API backend; Agent/Web/trial integration not implemented",
+    "no independent verification/scoring",
+    "no multi-service/GPU/GUI",
+    "quiescent fixture required for coherent source snapshot",
+    "no model calls or product restart"
+  ],
+  "checks_passed": [
+    "ruff --select F",
+    "git diff --check"
+  ]
+}

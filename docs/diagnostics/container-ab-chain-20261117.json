@@ -1,0 +1,61 @@
+{
+  "evidence_directory": "/Users/macbook/Desktop/智能体/Chagent/eval/results/boundary-ab-chain-dc03a2deec8d",
+  "checks": {
+    "repair_collect_hash_host_unchanged": true,
+    "frozen_replay_reproduces_original_failure": true,
+    "real_controller_sigkill_then_cli_cleanup": true
+  },
+  "recovered_phase": "executing",
+  "artifact_manifest": {
+    "archive_sha256": "a6e54f0d405d395755d376832ecb8ce951e48403e3678f50ca2a596db7c6b2b6",
+    "files": [
+      {
+        "path": "delivery/answer.txt",
+        "bytes": 4,
+        "sha256": "66e4c000f2000eb1cca164f97c441e14d438ca2599c8e79f4de6ecade0de8b32"
+      },
+      {
+        "path": "delivery/stats.py",
+        "bytes": 40,
+        "sha256": "20568a1332e4489c7afcc1e89182e2191cb24b8532137f758b40c4070c01ab41"
+      }
+    ],
+    "bytes": 44,
+    "entries": [
+      "delivery",
+      "delivery/answer.txt",
+      "delivery/stats.py"
+    ]
+  },
+  "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+  "container_ids": [
+    "925210c24beb08614d4e0374ceec7aec14d7af90546820300ae324a377bbf9ef",
+    "91423f43a1ec8c6ef32c2e0515aa5f5040eca2fed52bd26f1d29e790d9283c9b"
+  ],
+  "date": "2026-11-17",
+  "scope": "A/B implementation review and real Docker command lifecycle chain",
+  "finding_fixed": "Repository-local evidence directory was incorrectly used as a protected user workspace; command metadata now uses a separate temporary directory.",
+  "full_regression": {
+    "tests": 1484,
+    "passed": 1483,
+    "skipped": 1,
+    "failed": 0,
+    "seconds": 153.316
+  },
+  "a_specialized": {
+    "tests": 11,
+    "passed": 11,
+    "failed": 0,
+    "seconds": 14.396
+  },
+  "b_chain_regressions": "Included in full regression: repository-local output and repair/collect/frozen-replay chain.",
+  "limitations": [
+    "Controller command chain, not real-model or browser end-to-end test",
+    "No product controller restart or business database migration",
+    "Database checks use independent temporary schemas"
+  ],
+  "checks_passed": [
+    "ruff --select F",
+    "git diff --check"
+  ]
+}

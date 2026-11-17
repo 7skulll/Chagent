@@ -1,6 +1,6 @@
 """Operator command line for the evaluation contracts.
 
-Eleven commands, each answering one question:
+Operator commands, each answering one question:
 
 ``manifest``  which tree, prompts, tools, skills and model produced a result
 ``export``    what one run actually recorded, bounded and redacted
@@ -13,11 +13,11 @@ Eleven commands, each answering one question:
 ``prereg``    what an experiment promises before its first trial
 ``trial``     run one preregistered slot and grade it
 ``report``    what the observed trials do and do not support
+``task-env``  execute a command in a disposable snapshot workspace, or clean it up
 
-The CLI is an operator tool, not a product entry point. Every command except
-``trial`` only reads: the read paths use a read-only transaction, and nothing
-here writes to the product's own database. ``trial`` is the one command that
-spends model calls and writes rows, so it runs against a separate evaluation
+The CLI is an operator tool, not a product entry point. Projection commands only read: the read paths use a read-only transaction, and nothing
+here writes to the product's own database. ``task-env`` writes isolated Docker resources and local evidence without model calls.
+``trial`` spends model calls and writes rows, so it runs against a separate evaluation
 schema and refuses to start a slot the protocol did not promise.
 """
 
@@ -143,17 +143,57 @@ def main(argv: list[str] | None = None) -> int:
     labels.add_argument("--annotations", type=Path, default=annotations.LEDGER)
     labels.add_argument("--json", action="store_true")
 
+    task = commands.add_parser('task-env', help='disposable snapshot task environment')
+    task_commands = task.add_subparsers(dest='task_action', required=True)
+    execute = task_commands.add_parser('run')
+    source = execute.add_mutually_exclusive_group(required=True)
+    source.add_argument('--workspace', type=Path)
+    source.add_argument('--snapshot', type=Path)
+    execute.add_argument('--out', type=Path, required=True)
+    execute.add_argument('--cmd', required=True)
+    execute.add_argument('--artifact', action='append', default=[])
+    execute.add_argument('--timeout', type=float, default=120)
+    execute.add_argument('--network', choices=('none', 'bridge'), default='none')
+    clean = task_commands.add_parser('cleanup')
+    clean.add_argument('--out', type=Path, required=True)
+
     args = parser.parse_args(argv)
     try:
         return {"manifest": _manifest, "export": _export, "timeline": _timeline,
                 "attribute": _attribute, "annotate": _annotate, "labels": _labels,
                 "case": _case, "replay": _replay, "prereg": _prereg,
-                "trial": _trial, "report": _report}[args.command](args)
+                "trial": _trial, "report": _report, "task-env": _task_environment}[args.command](args)
     except (casefile.CaseInvalid, annotations.AnnotationInvalid) as error:
         print(f"invalid input: {error}", file=sys.stderr)
         return 1
     except (LookupError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
+        return 2
+
+
+def _task_environment(args):
+    from chagent.hostexec.task_environment import TaskEnvironment
+
+    async def execute():
+        if args.task_action == 'cleanup':
+            task = TaskEnvironment(args.out)
+            await task.cleanup()
+            _emit(task.state, None)
+            return 0
+        task = await TaskEnvironment.create(args.out, workspace=args.workspace, snapshot=args.snapshot,
+                                            artifacts=args.artifact, network=args.network == 'bridge')
+        try:
+            result = await task.run(args.cmd, timeout=args.timeout)
+            await task.collect()
+            return 1 if result.is_error else 0
+        finally:
+            await task.cleanup()
+            _emit(task.state, None)
+
+    try:
+        return run(execute())
+    except (RuntimeError, OSError, ValueError) as error:
+        print(f'task environment: {error}', file=sys.stderr)
         return 2
 
 
