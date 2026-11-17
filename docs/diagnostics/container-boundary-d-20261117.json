@@ -1,0 +1,170 @@
+{
+  "evidence_directory": "/Users/macbook/Desktop/智能体/Chagent/eval/results/boundary-d-chain-3195cbb89ec8",
+  "checks": {
+    "health_gated_dependency_startup": true,
+    "main_frontend_backend_call": true,
+    "declared_artifact_hash": true,
+    "custom_resources_inspected": true,
+    "task_source_unchanged": true,
+    "offline_independent_verification_passed": true,
+    "same_snapshot_and_frozen_spec_replay": true,
+    "distinct_private_networks": true,
+    "all_cleanup_confirmed": true
+  },
+  "actual_main_resources": {
+    "Memory": 268435456,
+    "NanoCpus": 500000000,
+    "PidsLimit": 64,
+    "Tmpfs": {
+      "/tmp": "rw,nosuid,size=67108864"
+    }
+  },
+  "services": {
+    "backend": {
+      "container_id": "cc4a8eae85fd6ca3e63376b1a13ad42dcf80ccc408a210768433a242821015ac",
+      "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+      "state": {
+        "Status": "running",
+        "Running": true,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 36091,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-17T14:03:24.213683721Z",
+        "FinishedAt": "0001-01-01T00:00:00Z",
+        "Health": {
+          "Status": "healthy",
+          "FailingStreak": 0,
+          "Log": [
+            {
+              "Start": "2026-11-17T14:03:25.276622763Z",
+              "End": "2026-11-17T14:03:25.346375722Z",
+              "ExitCode": 0,
+              "Output": ""
+            }
+          ]
+        }
+      },
+      "resources": {
+        "cpus": 0.5,
+        "memory_mb": 256,
+        "pids": 64,
+        "tmpfs_mb": 64
+      },
+      "depends_on": []
+    },
+    "frontend": {
+      "container_id": "d3d3eab26ac1e7215d49d3b9a1604ca2301d85253caca88c8dffd5a7eebb9a20",
+      "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+      "state": {
+        "Status": "running",
+        "Running": true,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 36407,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-17T14:03:25.453025055Z",
+        "FinishedAt": "0001-01-01T00:00:00Z",
+        "Health": {
+          "Status": "healthy",
+          "FailingStreak": 0,
+          "Log": [
+            {
+              "Start": "2026-11-17T14:03:26.519197291Z",
+              "End": "2026-11-17T14:03:26.586605083Z",
+              "ExitCode": 0,
+              "Output": ""
+            }
+          ]
+        }
+      },
+      "resources": {
+        "cpus": 0.5,
+        "memory_mb": 256,
+        "pids": 64,
+        "tmpfs_mb": 64
+      },
+      "depends_on": [
+        "backend"
+      ]
+    }
+  },
+  "network_identity": {
+    "id": "d7ad78f7d37972dd28cf0a4ba9349be8f591de4e7f4b80d7b10576331e879945",
+    "name": "chagent-task-e9135270fcd149f08114699334cdb285-network",
+    "internal": true
+  },
+  "environment_spec_sha256": "6ae5ffa149a6b7784775d0b623c74f712ea54e4d7632e574cf2aeef9bd30c2b2",
+  "verification": {
+    "grader": {
+      "grader_id": "independent_verifier",
+      "result": "pass",
+      "evidence": [
+        "verification.json",
+        "verifier.log",
+        "raw-result.json"
+      ],
+      "notes": ""
+    },
+    "cleanup": "confirmed",
+    "score": 1,
+    "artifacts_sha256": "0d6fd4d4533d5c320914798ba817a86a2b421c5e6893e403314aafa12b9ce221",
+    "verifier_sha256": "4da75a1a34102fd7cd6d4641367dcbd4a6ce8cc85050f78d1ed69c3f30904426"
+  },
+  "date": "2026-11-17",
+  "scope": "container-boundary-D controlled resources/network/service topology",
+  "full_regression": {
+    "tests": 1508,
+    "passed": 1507,
+    "skipped": 1,
+    "failed": 0,
+    "seconds": 224.924
+  },
+  "specialized": {
+    "tests": 10,
+    "passed": 10,
+    "failed": 0,
+    "seconds": 41.691
+  },
+  "initial_failure": {
+    "reason": "Docker network absence uses network NAME not found; repeated recovery cleanup did not recognize it.",
+    "initial_full_tests": 1508,
+    "errors": 1,
+    "skipped": 1,
+    "seconds": 223.613,
+    "fixed": true
+  },
+  "additional_tests": [
+    "none/bridge/internal modes",
+    "health-timeout rollback",
+    "service policy drift refusal",
+    "cross-task service network isolation",
+    "foreign endpoint preserved; cleanup_pending then recovery",
+    "actual controller kill followed by CLI graph cleanup",
+    "CLI full chain and startup failure exit"
+  ],
+  "limitations": [
+    "controller backend/CLI only; product Agent/Web and official Benchmark adapters not integrated",
+    "bounded JSON topology, not arbitrary Compose/GPU/GUI",
+    "no service state retained for offline verifier",
+    "no persistent-workspace resource-policy change or disk-volume quota",
+    "no model calls or production restart/schema changes"
+  ],
+  "source_sha256": {
+    "src/chagent/hostexec/environment_spec.py": "699d7aef2b1a3e6a1867a5ce9e832e0f88439a70cfa39da99c57ef681d072168",
+    "src/chagent/hostexec/task_services.py": "c00f3089e9f3e5a6fee20ad853d1cb29b392b0b8b2f9adc9770c24757578de73",
+    "src/chagent/hostexec/task_environment.py": "6f9da7b0846a8d595a5d37cf9b7872a822f42823f683929a5ab96e33092e3c0a",
+    "eval/verification.py": "3e05a9b3603f5b21f94d797a55d2ac62009d6885a26a929a14ebdd43ed31b5a5",
+    "eval/cli.py": "78ad43b97b3248d9ac845c3fe36c279ba90b7bcc22f0d3031eacc831470d22db"
+  },
+  "checks_passed": [
+    "ruff --select F",
+    "git diff --check"
+  ]
+}

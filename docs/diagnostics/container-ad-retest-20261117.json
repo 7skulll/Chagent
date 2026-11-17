@@ -1,0 +1,155 @@
+{
+  "evidence_directory": "/Users/macbook/Desktop/智能体/Chagent/eval/results/boundary-d-chain-dab05ea10155",
+  "checks": {
+    "health_gated_dependency_startup": true,
+    "main_frontend_backend_call": true,
+    "declared_artifact_hash": true,
+    "custom_resources_inspected": true,
+    "task_source_unchanged": true,
+    "offline_independent_verification_passed": true,
+    "same_snapshot_and_frozen_spec_replay": true,
+    "distinct_private_networks": true,
+    "all_cleanup_confirmed": true
+  },
+  "actual_main_resources": {
+    "Memory": 268435456,
+    "NanoCpus": 500000000,
+    "PidsLimit": 64,
+    "Tmpfs": {
+      "/tmp": "rw,nosuid,size=67108864"
+    }
+  },
+  "services": {
+    "backend": {
+      "container_id": "49dbeec036b10501be21518ac01339aaf91ff6713406d198e82d1131ffb7bbf3",
+      "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+      "state": {
+        "Status": "running",
+        "Running": true,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 2172,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-17T14:15:22.512715256Z",
+        "FinishedAt": "0001-01-01T00:00:00Z",
+        "Health": {
+          "Status": "healthy",
+          "FailingStreak": 0,
+          "Log": [
+            {
+              "Start": "2026-11-17T14:15:23.56469934Z",
+              "End": "2026-11-17T14:15:23.67428159Z",
+              "ExitCode": 0,
+              "Output": ""
+            }
+          ]
+        }
+      },
+      "resources": {
+        "cpus": 0.5,
+        "memory_mb": 256,
+        "pids": 64,
+        "tmpfs_mb": 64
+      },
+      "depends_on": []
+    },
+    "frontend": {
+      "container_id": "811963423caa96dae2fb3ebd5a2ebdf069884ebd8c0e7155069f962bc9f48809",
+      "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+      "state": {
+        "Status": "running",
+        "Running": true,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 2246,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-17T14:15:23.823405549Z",
+        "FinishedAt": "0001-01-01T00:00:00Z",
+        "Health": {
+          "Status": "healthy",
+          "FailingStreak": 0,
+          "Log": [
+            {
+              "Start": "2026-11-17T14:15:24.880800549Z",
+              "End": "2026-11-17T14:15:24.962583758Z",
+              "ExitCode": 0,
+              "Output": ""
+            }
+          ]
+        }
+      },
+      "resources": {
+        "cpus": 0.5,
+        "memory_mb": 256,
+        "pids": 64,
+        "tmpfs_mb": 64
+      },
+      "depends_on": [
+        "backend"
+      ]
+    }
+  },
+  "network_identity": {
+    "id": "e7ae9e2bc07cba9b99ee3448aed5330991a6a9d29a22c9b81b4d5176ee2bd5e7",
+    "name": "chagent-task-65f622c23b4544d2a934f99ccac183b6-network",
+    "internal": true
+  },
+  "environment_spec_sha256": "6ae5ffa149a6b7784775d0b623c74f712ea54e4d7632e574cf2aeef9bd30c2b2",
+  "verification": {
+    "grader": {
+      "grader_id": "independent_verifier",
+      "result": "pass",
+      "evidence": [
+        "verification.json",
+        "verifier.log",
+        "raw-result.json"
+      ],
+      "notes": ""
+    },
+    "cleanup": "confirmed",
+    "score": 1,
+    "artifacts_sha256": "0d6fd4d4533d5c320914798ba817a86a2b421c5e6893e403314aafa12b9ce221",
+    "verifier_sha256": "4da75a1a34102fd7cd6d4641367dcbd4a6ce8cc85050f78d1ed69c3f30904426"
+  },
+  "date": "2026-11-17",
+  "scope": "A-D unchanged implementation retest",
+  "full_regression": {
+    "tests": 1508,
+    "passed": 1507,
+    "skipped": 1,
+    "failed": 0,
+    "seconds": 223.199
+  },
+  "skipped_test": {
+    "id": "test_run_diagnostics.RunDiagnosticsTests.test_live_provider_uses_evidence_without_executing_log_instructions",
+    "reason": "Opt-in real provider probe"
+  },
+  "docker_tests_enabled": true,
+  "database": "independent temporary PostgreSQL schemas",
+  "source_sha256": {
+    "src/chagent/hostexec/environment_spec.py": "699d7aef2b1a3e6a1867a5ce9e832e0f88439a70cfa39da99c57ef681d072168",
+    "src/chagent/hostexec/task_services.py": "c00f3089e9f3e5a6fee20ad853d1cb29b392b0b8b2f9adc9770c24757578de73",
+    "src/chagent/hostexec/task_environment.py": "6f9da7b0846a8d595a5d37cf9b7872a822f42823f683929a5ab96e33092e3c0a",
+    "eval/verification.py": "3e05a9b3603f5b21f94d797a55d2ac62009d6885a26a929a14ebdd43ed31b5a5",
+    "eval/cli.py": "78ad43b97b3248d9ac845c3fe36c279ba90b7bcc22f0d3031eacc831470d22db"
+  },
+  "implementation_changed_since_D": false,
+  "implementation_fixes_required": false,
+  "residual_task_containers_volumes_networks": [],
+  "residual_verifier_containers_volumes": [],
+  "environment_limitation": "chagent:local tag inspection still fails; explicitly used verified immutable image ID 404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+  "checks_passed": [
+    "ruff --select F",
+    "git diff --check"
+  ],
+  "limitations": [
+    "No opt-in live-provider probe",
+    "No production controller restart or business-schema migration"
+  ]
+}

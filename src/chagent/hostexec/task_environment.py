@@ -18,10 +18,11 @@ from uuid import uuid4
 from chagent.hostexec import command_worker
 from chagent.boundaries import validate_file_identity
 from chagent.tools.command import ExecCommandTool
-from chagent.tools.container_policy import ContainerPolicy
 from chagent.tools.context import ToolContext
 from chagent.tools.sandbox import Sandbox, SandboxSettings
 from chagent.tools.workspace import WorkspaceFS
+from chagent.hostexec.environment_spec import normalize, policy as resource_policy, fingerprint, resource_differences
+from chagent.hostexec.task_services import TaskServices
 
 MAX_BYTES = 100 * 1024**2
 MAX_FILES = 10000
@@ -154,6 +155,8 @@ with tempfile.TemporaryFile() as target:
 
 class TaskSandbox(Sandbox):
     """Command-only adapter; file tools must never read the source workspace."""
+    container_root = '/workspace'
+
     def __init__(self, task):
         super().__init__(SandboxSettings(containerized=True, host_controller=True))
         self.task = task
@@ -162,7 +165,7 @@ class TaskSandbox(Sandbox):
         call = uuid4().hex
         control = f'/tmp/chagent-run-{owner}/calls/{call}'
         relative = (workdir or workspace).relative_to(workspace)
-        directory = str(PurePosixPath('/workspace') / relative.as_posix())
+        directory = str(PurePosixPath(self.container_root) / relative.as_posix())
         record = {'container': self.task.name, 'invocation': call, 'control_path': control,
                   'environment': self.task.state['environment']}
         self.task.state['invocation'] = record
@@ -188,7 +191,9 @@ class TaskEnvironment:
         if len(key) != 32 or any(c not in '0123456789abcdef' for c in key):
             raise ValueError('Invalid task identity')
         self.name = 'chagent-task-' + key
-        self.volumes = [self.name + '-workspace', self.name + '-cache']
+        self.services = TaskServices(self)
+        self.volumes = [self.name + '-workspace', self.name + '-cache'] + [
+            self.services.volume(service) for service in self.services.services]
         self.sandbox = TaskSandbox(self)
 
     def save(self):
@@ -204,7 +209,10 @@ class TaskEnvironment:
         return output
 
     @classmethod
-    async def create(cls, output, *, workspace=None, snapshot=None, artifacts=(), network=False):
+    async def create(cls, output, *, workspace=None, snapshot=None, artifacts=(), network=False, spec=None):
+        spec = normalize(spec if spec is not None else {'network': 'bridge' if network else 'none'})
+        if network and spec['network'] != 'bridge':
+            raise ValueError('Conflicting network settings')
         output = Path(output).resolve()
         artifacts = [relative_path(a) for a in artifacts]
         if len(set(artifacts)) != len(artifacts) or any(
@@ -217,7 +225,7 @@ class TaskEnvironment:
         output.mkdir(parents=True, exist_ok=False)
         target = output / 'snapshot.tar'
         state = {'version': 1, 'id': uuid4().hex, 'phase': 'preparing', 'snapshot': None,
-                 'artifacts': artifacts, 'network': 'bridge' if network else 'none',
+                 'artifacts': artifacts, 'network': spec['network'], 'environment_spec': spec,
                  'cache': 'private-per-task', 'commands': []}
         (output / 'environment.json').write_text(json.dumps(state))
         task = cls(output)
@@ -231,14 +239,22 @@ class TaskEnvironment:
                 shutil.copyfile(snapshot, target)
                 frozen = archive_manifest(target)
             task.state['snapshot'] = frozen
-            policy = ContainerPolicy()
-            image = os.environ.get('CHAGENT_EXECUTOR_IMAGE', 'chagent:local')
+            policy = resource_policy(spec['resources'])
+            image = spec.get('image_id') or spec.get('image') or os.environ.get('CHAGENT_EXECUTOR_IMAGE', 'chagent:local')
             image_id = (await task.docker('image', 'inspect', image, '--format', '{{.Id}}')).strip()
+            state_spec = task.state['environment_spec']
+            state_spec['image'] = state_spec.get('image') or image
+            state_spec['image_id'] = image_id
             state = task.state
             state['image_id'] = image_id
             state['policy'] = asdict(policy)
+            for service in state['environment_spec']['services']:
+                service['image_id'] = (await task.docker('image', 'inspect', service.get('image_id') or service['image'], '--format', '{{.Id}}')).strip()
+            state['environment_spec_sha256'] = fingerprint(state['environment_spec'])
+            (output / 'environment-spec.json').write_text(json.dumps(state['environment_spec'], ensure_ascii=False, indent=2) + '\n')
             task.save()
-            for volume in task.volumes:
+            await task.services.start()
+            for volume in task.volumes[:2]:
                 await task.docker('volume', 'create', '--label', 'chagent.task=' + key, volume)
             await task.docker('run', '-d', '--name', task.name, '--label', 'chagent.task=' + key,
                 '--mount', f'type=volume,src={task.volumes[0]},dst=/workspace',
@@ -271,6 +287,7 @@ class TaskEnvironment:
                     raise RuntimeError('Snapshot initialization failed: ' + response.decode(errors='replace')[-500:])
             state['phase'] = 'ready'
             task.save()
+            await task.admit()
             return task
         except BaseException as error:
             if (output / 'environment.json').exists():
@@ -282,11 +299,24 @@ class TaskEnvironment:
             raise
 
     async def admit(self):
+        try:
+            return await self._admit()
+        except BaseException as error:
+            self.state['admission_error'] = f'{type(error).__name__}: {error}'[:1000]
+            self.save()
+            raise
+
+    async def _admit(self):
         details = json.loads(await self.docker('inspect', self.name, '--format', '{{json .}}'))
         environment = self.state['environment']
         host = details.get('HostConfig') or {}
         mounts = details.get('Mounts') or []
-        policy = ContainerPolicy()
+        spec = self.state.get('environment_spec')
+        if spec is not None and fingerprint(spec) != self.state['environment_spec_sha256']:
+            raise RuntimeError('Frozen environment specification changed')
+        limits = (spec or {}).get('resources')
+        policy = resource_policy(limits)
+        await self.services.admit()
         if (details['Id'] != environment['container_id'] or details['Image'] != environment['image_id']
                 or (details.get('Config', {}).get('Labels') or {}).get('chagent.task') != self.state['id']
                 or not details.get('State', {}).get('Running')
@@ -297,8 +327,10 @@ class TaskEnvironment:
                 or set(host.get('CapDrop') or []) != {'ALL'}
                 or host.get('PidMode') or host.get('IpcMode') != 'private'
                 or host.get('NetworkMode') != self.state['network']
+                or set(details.get('NetworkSettings', {}).get('Networks') or {}) != {self.state['network']}
                 or host.get('Memory') != policy.memory or host.get('NanoCpus') != policy.nano_cpus
                 or host.get('PidsLimit') != policy.pids
+                or resource_differences(details, limits)
                 or host.get('PortBindings')
                 or set(host.get('Tmpfs') or {}) != {'/tmp'}
                 or not {'rw', 'nosuid'} <= set((host.get('Tmpfs') or {}).get('/tmp', '').split(','))
@@ -409,6 +441,7 @@ class TaskEnvironment:
                 await self.docker('rm', '-f', details['Id'])
             elif 'no such' not in raw.lower():
                 raise RuntimeError('Cannot confirm container absence: ' + raw[-300:])
+            await self.services.cleanup_containers()
             for volume in self.volumes:
                 code, raw = await Sandbox._docker('volume', 'inspect', volume)
                 if code:
@@ -419,6 +452,7 @@ class TaskEnvironment:
                 if (details.get('Labels') or {}).get('chagent.task') != self.state['id']:
                     raise RuntimeError('Refusing to delete volume with mismatched owner')
                 await self.docker('volume', 'rm', volume)
+            await self.services.cleanup_network()
             self.state['cleanup'] = 'confirmed'
             if self.state['phase'] != 'cleaned':
                 self.state['phase_before_cleanup'] = self.state['phase']

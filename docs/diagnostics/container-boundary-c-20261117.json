@@ -1,0 +1,111 @@
+{
+  "evidence_directory": "/Users/macbook/Desktop/智能体/Chagent/eval/results/boundary-c-chain-517501631f84",
+  "cases": [
+    {
+      "name": "correct",
+      "result": {
+        "grader": {
+          "grader_id": "independent_verifier",
+          "result": "pass",
+          "evidence": [
+            "verification.json",
+            "verifier.log",
+            "raw-result.json"
+          ],
+          "notes": ""
+        },
+        "cleanup": "confirmed",
+        "score": 1,
+        "artifacts_sha256": "0d6fd4d4533d5c320914798ba817a86a2b421c5e6893e403314aafa12b9ce221",
+        "verifier_sha256": "7a1336b22bf3c7c4485faacc58177c955b130d7ecaed7ea5ce65ad3eb4ba2047"
+      },
+      "task_id": "9e201cb78e8d412ba6cd9ca4d8a1f637",
+      "verifier_container_id": "43ae2bf28694a235d1c004d374570286e305243aa7db9f7d40d73214cbfe3d37"
+    },
+    {
+      "name": "wrong",
+      "result": {
+        "grader": {
+          "grader_id": "independent_verifier",
+          "result": "fail",
+          "evidence": [
+            "verification.json",
+            "verifier.log",
+            "raw-result.json"
+          ],
+          "notes": ""
+        },
+        "cleanup": "confirmed",
+        "score": 0,
+        "artifacts_sha256": "456fedcbb007abd405ee589a79ad9613fbe3f0dce1f3950fbf8a920e8a385777",
+        "verifier_sha256": "7a1336b22bf3c7c4485faacc58177c955b130d7ecaed7ea5ce65ad3eb4ba2047"
+      },
+      "task_id": "102e77ca9b904263afad2b7135dc87d2",
+      "verifier_container_id": "d52cc11032416369b782a73c8e2581ebd659e2aa818e82eb79a00627d3940641"
+    },
+    {
+      "name": "broken",
+      "result": {
+        "grader": {
+          "grader_id": "independent_verifier",
+          "result": "infra_error",
+          "evidence": [
+            "verification.json",
+            "verifier.log",
+            "raw-result.json"
+          ],
+          "notes": "RuntimeError: verifier infrastructure probe"
+        },
+        "cleanup": "confirmed",
+        "score": null,
+        "artifacts_sha256": "0d6fd4d4533d5c320914798ba817a86a2b421c5e6893e403314aafa12b9ce221",
+        "verifier_sha256": "f63703f6235d610dc9a50723184ffb3eae50e9e83a68d4b11e2c7baaae150ea8"
+      },
+      "task_id": "d0f3c0aa6ee2450187efd8c44a289b25",
+      "verifier_container_id": "289b8d1fc55a2e968bae3a1e129c3ebec4cc0e8dd9622fb5ec6e2ce900b909af"
+    }
+  ],
+  "date": "2026-11-17",
+  "scope": "container-boundary-C independent verification backend and CLI",
+  "full_regression": {
+    "tests": 1497,
+    "passed": 1496,
+    "skipped": 1,
+    "failed": 0,
+    "seconds": 178.515
+  },
+  "final_specialized": {
+    "tests": 14,
+    "passed": 14,
+    "failed": 0,
+    "seconds": 27.598,
+    "note": "Adds one spoof/early-exit regression after full-suite discovery and covers final bounded result reader/error summaries."
+  },
+  "checks": [
+    "correct artifact pass",
+    "wrong artifact fail",
+    "verifier exception/invalid return infra_error",
+    "timeout infra_error",
+    "frozen code unaffected by source edits",
+    "tampered input rejected before execution",
+    "read-only verifier and artifact volumes",
+    "candidate stdout not used as verdict",
+    "bounded structured result required",
+    "functional candidate code checked in subprocess",
+    "real verifier-controller interruption and cleanup recovery",
+    "cleanup failure cannot publish pass",
+    "protected-checkout controller verifier freeze",
+    "CLI freeze-execute-collect-clean-verify-clean"
+  ],
+  "limitations": [
+    "controller backend/CLI only; product Agent/Web and trial scheduling not integrated",
+    "verify-function-v1 deterministic binary verdict; no semantic model judge",
+    "trusted verifier code required; candidate execution in subprocess recommended",
+    "no same-interpreter adversarial grading isolation claim",
+    "no production restart/schema changes/model calls"
+  ],
+  "checks_passed": [
+    "ruff --select F",
+    "git diff --check"
+  ]
+}

@@ -153,9 +153,23 @@ def main(argv: list[str] | None = None) -> int:
     execute.add_argument('--cmd', required=True)
     execute.add_argument('--artifact', action='append', default=[])
     execute.add_argument('--timeout', type=float, default=120)
-    execute.add_argument('--network', choices=('none', 'bridge'), default='none')
+    execute.add_argument('--network', choices=('none', 'bridge', 'internal'))
+    execute.add_argument('--environment-spec', type=Path, help='frozen resource/network/service specification JSON')
+    execute.add_argument('--verifier', type=Path, help='controller-owned directory with check.py')
+    execute.add_argument('--verifier-image', help='prebuilt verifier image (default: executor image)')
+    execute.add_argument('--verifier-timeout', type=float, default=120)
     clean = task_commands.add_parser('cleanup')
     clean.add_argument('--out', type=Path, required=True)
+    verify = task_commands.add_parser('verify', help='verify an already collected and cleaned task')
+    verify.add_argument('--task-out', type=Path, required=True)
+    verify.add_argument('--verifier', type=Path, required=True)
+    verify.add_argument('--out', type=Path, required=True)
+    verify.add_argument('--verifier-image')
+    verify.add_argument('--verifier-timeout', type=float, default=120)
+    verify.add_argument('--verifier-resources', type=Path, help='verifier resource limits JSON')
+    verify_cleanup = task_commands.add_parser('verify-cleanup')
+    verify_cleanup.add_argument('--out', type=Path, required=True)
+
 
     args = parser.parse_args(argv)
     try:
@@ -175,20 +189,72 @@ def _task_environment(args):
     from chagent.hostexec.task_environment import TaskEnvironment
 
     async def execute():
+        import tempfile
+        from eval.verification import Verification, freeze_verifier
         if args.task_action == 'cleanup':
             task = TaskEnvironment(args.out)
             await task.cleanup()
             _emit(task.state, None)
             return 0
-        task = await TaskEnvironment.create(args.out, workspace=args.workspace, snapshot=args.snapshot,
-                                            artifacts=args.artifact, network=args.network == 'bridge')
-        try:
-            result = await task.run(args.cmd, timeout=args.timeout)
-            await task.collect()
+        if args.task_action == 'verify-cleanup':
+            verifier = Verification(args.out)
+            await verifier.cleanup()
+            _emit(verifier.state, None)
+            return 0
+        from chagent.hostexec.environment_spec import normalize
+        environment_spec = None
+        verifier_resources = None
+        if args.task_action == 'run':
+            raw = json.loads(args.environment_spec.read_text()) if args.environment_spec else {}
+            environment_spec = normalize(raw)
+            if args.network is not None:
+                if args.environment_spec and args.network != environment_spec['network']:
+                    raise ValueError('Network flag conflicts with environment specification')
+                environment_spec['network'] = args.network
+                environment_spec = normalize(environment_spec)
+            verifier_resources = environment_spec['verifier_resources']
+        elif args.verifier_resources:
+            verifier_resources = json.loads(args.verifier_resources.read_text())
+        with tempfile.TemporaryDirectory(prefix='chagent-verifier-plan-') as temp:
+            plan = None
+            # Freeze verifier inputs before starting any candidate command.
+            if args.verifier is not None:
+                plan = await freeze_verifier(args.verifier, Path(temp) / 'plan',
+                    image=args.verifier_image, timeout=args.verifier_timeout, resources=verifier_resources)
+            if args.task_action == 'verify':
+                verifier = await Verification.create(args.task_out, plan, args.out)
+                await verifier.run()
+                summary = verifier.publish()
+                _emit(summary, None)
+                return {'pass': 0, 'fail': 1}.get(summary['grader']['result'], 2)
+            task = await TaskEnvironment.create(args.out, workspace=args.workspace, snapshot=args.snapshot,
+                                                artifacts=args.artifact, spec=environment_spec)
+            try:
+                if plan is not None:
+                    import shutil
+                    frozen = task.output / 'verifier-plan'
+                    shutil.copytree(plan, frozen)
+                    plan = frozen
+                    task.state['verifier_plan'] = json.loads((plan / 'plan.json').read_text())
+                    task.save()
+                result = await task.run(args.cmd, timeout=args.timeout)
+                await task.collect()
+            finally:
+                await task.cleanup()
+                if plan is None:
+                    _emit(task.state, None)
+            if plan is not None:
+                verifier = await Verification.create(task.output, plan, task.output / 'verification')
+                await verifier.run()
+                summary = verifier.publish()
+                task.state['verification'] = summary
+                task.save()
+                _emit(task.state, None)
+                verdict = summary['grader']['result']
+                if verdict == 'infra_error':
+                    return 2
+                return 1 if result.is_error or verdict != 'pass' else 0
             return 1 if result.is_error else 0
-        finally:
-            await task.cleanup()
-            _emit(task.state, None)
 
     try:
         return run(execute())
