@@ -1,0 +1,69 @@
+{
+ "date": "2026-11-18",
+ "scope": "E3 review fixes: catalog duplicate semantics, stale worker progress, poll-time snapshot rehash, identity guard tests",
+ "fixes": [
+  "catalog(): duplicate case versions stay visible and unselectable instead of being reported as unreadable; entries() still hard-rejects and names both directories",
+  "platform_worker.execute(): clear current on failure and keep the slot id in status.error",
+  "container_catalog.verified_task(): signature cache (mtime_ns/size/inode of the five validated files), deep-copied results, 256-entry cap; image preflight stays uncached",
+  "4 new tests: duplicate rows, frozen path tamper, execution identity mismatch, cache copy/invalidation"
+ ],
+ "tests": {
+  "platform": {
+   "run": 46,
+   "passed": 46,
+   "skipped": 0,
+   "seconds": 37.506,
+   "note": "includes the 13 E3-specific tests (9 original + 4 added here)"
+  },
+  "full": {
+   "run": 1564,
+   "failed": 0,
+   "skipped": 11,
+   "seconds": 419.68
+  }
+ },
+ "measured_detail_ms": {
+  "note": "same three real browser-acceptance plans, 12 KiB snapshots, this host",
+  "before_change_one_call_each": [
+   29.7,
+   37.5,
+   18.6
+  ],
+  "after_change_first_call": [
+   27.2,
+   37.0,
+   20.1
+  ],
+  "after_change_warm_calls": [
+   [
+    1.3,
+    1.2
+   ],
+   [
+    6.8,
+    6.6
+   ],
+   [
+    3.6,
+    3.6
+   ]
+  ],
+  "interpretation": "the first call still validates fully; warm calls skip archive hashing and only assemble the report"
+ },
+ "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+ "paid_calls": 0,
+ "residual_resources": {
+  "task_containers": [],
+  "task_volumes": [],
+  "task_networks": []
+ },
+ "business_schema_migration": false,
+ "production_restarted": false,
+ "historical_records_rewritten": false,
+ "source_sha256": {
+  "eval/container_catalog.py": "e84623b554d8d5d5b895ae9e414663eac5c9789bb471ebc4b7097400e3c49721",
+  "eval/platform_worker.py": "7adf361b2c05a3c7c50868593f6d38560521ca59a57aeca5bf6d85da4b189d90",
+  "tests/test_eval_container_platform.py": "5d213552d5b4a8c1fd9f2b1dc0300aedc99d0f73176e2cee8cac1b656f4c5d28"
+ },
+ "python_grammar": "ast.parse(feature_version=(3,11)) accepted for both changed modules"
+}

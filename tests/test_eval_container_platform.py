@@ -1,5 +1,6 @@
 """E3 operator workflow: real Docker, runner, verifier, worker and HTTP; no paid calls."""
 from copy import deepcopy
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,7 +11,9 @@ from psycopg import sql
 from fastapi.testclient import TestClient
 from chagent.models.fake import FakeModelClient
 from chagent.users.store import AccountStore
+from eval import container_catalog as catalog_module
 from eval import container_trial as ct
+from eval import prereg
 from eval.platform import Platform, lease
 from eval.platform_worker import execute
 from eval.web import PlanRequest, create_app
@@ -181,3 +184,70 @@ class ContainerPlatformTests(unittest.IsolatedAsyncioTestCase):
         response = self.client.post('/api/plans', json=payload)
         self.assertEqual(response.status_code, 400)
         self.assertIn('分别创建', response.json()['error'])
+
+    async def test_duplicate_catalog_key_is_visible_and_not_selectable(self):
+        # The catalog must name the collision instead of calling the copy
+        # unreadable, and must not let either copy into a plan.
+        shutil.copytree(self.catalog / 'answer', self.catalog / 'answer-copy')
+        rows = [r for r in self.client.get('/api/catalog').json()['cases'] if r['key'] == self.case.key]
+        self.assertEqual(len(rows), 2)
+        self.assertFalse(any(r['supported'] for r in rows))
+        for row in rows:
+            self.assertIn('2 次', row['reason'])
+        response = self.client.post('/api/plans', json=self.request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('2 次', response.json()['error'])
+
+    async def test_frozen_binding_tamper_is_incomparable_and_makes_no_call(self):
+        p = self.plan()
+        folder = self.platform.directory(p['id'])
+        path = folder / '.platform/plan.json'
+        tampered = json.loads(path.read_text())
+        tampered['container_tasks'][self.case.key]['path'] = '.platform/tasks/../../escape'
+        path.write_text(json.dumps(tampered))
+        called = AsyncMock()
+        with patch.object(ct, 'execute_slot', called):
+            await execute(self.platform, p['id'])
+        called.assert_not_called()
+        detail = self.platform.detail(p['id'])
+        self.assertEqual(detail['status']['state'], 'failed')
+        self.assertEqual(detail['report']['claim'], 'incomparable')
+        self.assertTrue(any('路径绑定不合法' in e['reason'] for e in detail['report']['invalid']),
+                        detail['report']['invalid'])
+
+    async def test_execution_identity_mismatch_claims_no_slot(self):
+        p = self.plan()
+        folder = self.platform.directory(p['id'])
+        plan = json.loads((folder / '.platform/plan.json').read_text())
+        task_directory = folder / plan['container_tasks'][self.case.key]['path']
+        protocol = prereg.load(folder)
+        fake = FakeModelClient('exec_command', {'cmd': 'cd /workspace; cp input.txt answer.txt'})
+        with self.assertRaisesRegex(ValueError, 'identity differs'):
+            await ct.execute_slot(task_directory, protocol, protocol.baseline, 0,
+                database=self.database, root=self.platform.root, env=self.env, client=fake,
+                expected_identity='0' * 64)
+        # The check sits before the anchor and the claim, so nothing is consumed.
+        self.assertFalse((folder / '.claims').exists())
+        self.assertEqual(self.platform.detail(p['id'])['report']['schedule']['observed'], 0)
+
+    async def test_verified_task_cache_returns_copies_and_notices_edits(self):
+        directory = self.catalog / 'answer'
+        calls = []
+        original = catalog_module.load_task
+
+        def counting(*args, **kwargs):
+            calls.append(1)
+            return original(*args, **kwargs)
+
+        with patch.object(catalog_module, 'load_task', side_effect=counting):
+            first = catalog_module.verified_task(directory)
+            second = catalog_module.verified_task(directory)
+            self.assertEqual(len(calls), 1)
+            first[1]['environment']['network'] = 'mutated-by-test'
+            self.assertNotEqual(catalog_module.verified_task(directory)[1]['environment']['network'],
+                                'mutated-by-test')
+            stamp = (directory / 'case.json').stat().st_mtime_ns
+            os.utime(directory / 'case.json', ns=(stamp + 1_000_000, stamp + 1_000_000))
+            third = catalog_module.verified_task(directory)
+            self.assertEqual(len(calls), 2)
+        self.assertEqual(second[2], third[2])

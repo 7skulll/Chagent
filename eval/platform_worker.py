@@ -91,7 +91,13 @@ async def execute(platform, identifier, executor=None):
             save(status_path, status)
         status.update(state=state, current=None, updated_at=now())
     except Exception as error:
-        status.update(state='failed', updated_at=now(), error=f'{type(error).__name__}: {error}'[:500])
+        # A stale `current` would keep the page claiming a slot is in flight.
+        # Name it in the error instead, so the diagnosis survives without it.
+        slot = status.get('current') or {}
+        trial_id = slot.get('trial_id')
+        where = f'（槽位 {trial_id}）' if trial_id else ''
+        status.update(state='failed', current=None, updated_at=now(),
+                      error=f'{type(error).__name__}{where}: {error}'[:500])
     finally:
         save(status_path, status)
 
