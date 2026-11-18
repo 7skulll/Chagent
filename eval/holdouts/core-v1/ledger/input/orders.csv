@@ -1,0 +1,12 @@
+id,revision,status,region,amount
+a,1,paid,east,10.10
+b,1,paid,west,20.20
+a,2,refunded,east,10.10
+c,1,paid,east,0.10
+d,1,cancelled,west,99.99
+e,2,paid,west,5.05
+e,1,paid,west,100.00
+f,1,paid,east,0.20
+g,1,paid,north,12.34
+g,2,cancelled,north,12.34
+h,1,paid,west,-1.25

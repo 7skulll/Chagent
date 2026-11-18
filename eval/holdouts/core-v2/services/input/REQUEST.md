@@ -1,0 +1,1 @@
+Use the declared frontend HTTP endpoint http://frontend:8080/events. Follow the next relative URL until null. Only state=settled counts. Values are integer cents; negative settled adjustments count. Do not access backend directly.

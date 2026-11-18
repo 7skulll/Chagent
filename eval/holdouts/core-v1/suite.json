@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "id": "core-v1",
+  "purpose": "Reserved fixed regression tasks; never tune prompts or solutions using formal results. Once used, these are monitored regression tasks, not an unseen generalization test.",
+  "resources": {
+    "cpus": 0.5,
+    "memory_mb": 256,
+    "pids": 64,
+    "tmpfs_mb": 64
+  },
+  "tasks": [
+    {
+      "name": "ledger",
+      "id": "holdout-ledger",
+      "title": "订单修订与精确金额汇总",
+      "prompt": "Read orders.csv. For each id keep the greatest integer revision, regardless of row order. Include only final status paid; negative paid amounts are valid adjustments. Group by region. Write summary.json as an object mapping each included region to {\"count\": integer, \"net\": string with exactly two decimal places}. Omit regions without paid orders. Use exact decimal arithmetic and verify the output. Deliver summary.json.",
+      "artifacts": [
+        "summary.json"
+      ],
+      "network": "none",
+      "services": [],
+      "controls": {
+        "correct": "python3 -c 'from pathlib import Path; Path('\"'\"'/workspace/summary.json'\"'\"').write_text('\"'\"'{\"east\": {\"count\": 2, \"net\": \"0.30\"}, \"west\": {\"count\": 3, \"net\": \"24.00\"}}'\"'\"')'",
+        "incorrect": "python3 -c 'from pathlib import Path; Path('\"'\"'/workspace/summary.json'\"'\"').write_text('\"'\"'{}'\"'\"')'"
+      }
+    },
+    {
+      "name": "repair",
+      "id": "holdout-repair",
+      "title": "闭区间合并修复",
+      "prompt": "Repair merge_intervals(intervals) in intervals.py. Input is a list of length-2 lists or tuples of integers. Return sorted merged closed intervals as lists; touching endpoints overlap. Handle empty, unsorted, duplicate, nested and negative intervals, without modifying the input. A reversed interval or an item not containing exactly two integers (bool is invalid) must raise ValueError. Keep the public function name. Verify with boundary tests and deliver intervals.py.",
+      "artifacts": [
+        "intervals.py"
+      ],
+      "network": "none",
+      "services": [],
+      "controls": {
+        "correct": "python3 -c 'from pathlib import Path; Path('\"'\"'/workspace/intervals.py'\"'\"').write_text(\"def merge_intervals(intervals):\\n    pairs=[]\\n    for item in intervals:\\n        if len(item)!=2 or any(type(v) is not int for v in item) or item[0]>item[1]:\\n            raise ValueError('\"'\"'invalid interval'\"'\"')\\n        pairs.append(list(item))\\n    pairs.sort()\\n    result=[]\\n    for start,end in pairs:\\n        if result and start<=result[-1][1]:\\n            result[-1][1]=max(result[-1][1],end)\\n        else:\\n            result.append([start,end])\\n    return result\\n\")'",
+        "incorrect": "python3 -c 'from pathlib import Path; Path('\"'\"'/workspace/intervals.py'\"'\"').write_text('\"'\"'def merge_intervals(intervals):\\n    return []\\n'\"'\"')'"
+      }
+    },
+    {
+      "name": "documents",
+      "id": "holdout-documents",
+      "title": "冲突文档中的有效配置提取",
+      "prompt": "Read all notes/. As of 2026-11-18, determine the accepted production cache configuration, resolving superseded policies and unapproved drafts. Write decision.json with exactly these keys: as_of (ISO date), ttl_seconds (integer), owner (string), timeout_action (bypass or stale), serve_stale (boolean), max_retries (integer), rollback ({error_ratio_gt:number, window_minutes:integer, action:string}), sources ({policy:relative filepath, rollout:relative filepath}). Cite the actual files supporting current policy and deployed rollback. Verify facts against the sources. Deliver decision.json.",
+      "artifacts": [
+        "decision.json"
+      ],
+      "network": "none",
+      "services": [],
+      "controls": {
+        "correct": "python3 -c 'from pathlib import Path; Path('\"'\"'/workspace/decision.json'\"'\"').write_text('\"'\"'{\"as_of\": \"2026-11-18\", \"max_retries\": 2, \"owner\": \"runtime-team\", \"rollback\": {\"action\": \"CACHE_ENABLED=false\", \"error_ratio_gt\": 0.02, \"window_minutes\": 5}, \"serve_stale\": false, \"sources\": {\"policy\": \"notes/03-decision.md\", \"rollout\": \"notes/04-rollout.md\"}, \"timeout_action\": \"bypass\", \"ttl_seconds\": 180}'\"'\"')'",
+        "incorrect": "python3 -c 'from pathlib import Path; Path('\"'\"'/workspace/decision.json'\"'\"').write_text('\"'\"'{}'\"'\"')'"
+      }
+    },
+    {
+      "name": "services",
+      "id": "holdout-services",
+      "title": "分页服务数据交付",
+      "prompt": "Read REQUEST.md. Fetch all pages through the declared frontend interface. Write settlement.json with exactly {\"settled_count\": integer, \"total_cents\": integer, \"pages\": integer}. Verify pagination, state filtering, and arithmetic. Deliver settlement.json.",
+      "artifacts": [
+        "settlement.json"
+      ],
+      "network": "internal",
+      "services": [
+        {
+          "name": "backend",
+          "command": [
+            "/app/.venv/bin/python",
+            "-c",
+            "import http.server,json\nPAGES={'/events': {'items':[{'id':'a','state':'settled','cents':125},{'id':'b','state':'cancelled','cents':900}], 'next':'/events?page=2'}, '/events?page=2':{'items':[{'id':'c','state':'settled','cents':-25},{'id':'d','state':'settled','cents':310}], 'next':'/events?page=3'}, '/events?page=3':{'items':[{'id':'e','state':'pending','cents':700},{'id':'f','state':'settled','cents':90}], 'next':None}}\nclass H(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200 if self.path in PAGES else 404); self.end_headers(); self.wfile.write(json.dumps(PAGES.get(self.path,{})).encode())\n def log_message(self,*a): pass\nhttp.server.HTTPServer(('0.0.0.0',8080),H).serve_forever()\n"
+          ],
+          "depends_on": [],
+          "healthcheck": [
+            "/app/.venv/bin/python",
+            "-c",
+            "import urllib.request; assert b'items' in urllib.request.urlopen('http://127.0.0.1:8080/events',timeout=2).read()"
+          ],
+          "resources": {
+            "cpus": 0.5,
+            "memory_mb": 256,
+            "pids": 64,
+            "tmpfs_mb": 64
+          },
+          "startup_timeout": 20
+        },
+        {
+          "name": "frontend",
+          "command": [
+            "/app/.venv/bin/python",
+            "-c",
+            "import http.server,urllib.request\nclass H(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  response=urllib.request.urlopen('http://backend:8080'+self.path,timeout=3).read()\n  self.send_response(200); self.end_headers(); self.wfile.write(response)\n def log_message(self,*a): pass\nhttp.server.HTTPServer(('0.0.0.0',8080),H).serve_forever()\n"
+          ],
+          "depends_on": [
+            "backend"
+          ],
+          "healthcheck": [
+            "/app/.venv/bin/python",
+            "-c",
+            "import urllib.request; assert b'items' in urllib.request.urlopen('http://127.0.0.1:8080/events',timeout=2).read()"
+          ],
+          "resources": {
+            "cpus": 0.5,
+            "memory_mb": 256,
+            "pids": 64,
+            "tmpfs_mb": 64
+          },
+          "startup_timeout": 20
+        }
+      ],
+      "controls": {
+        "correct": "python3 -c 'from pathlib import Path; Path('\"'\"'/workspace/settlement.json'\"'\"').write_text('\"'\"'{\"pages\": 3, \"settled_count\": 4, \"total_cents\": 500}'\"'\"')'",
+        "incorrect": "python3 -c 'from pathlib import Path; Path('\"'\"'/workspace/settlement.json'\"'\"').write_text('\"'\"'{}'\"'\"')'"
+      }
+    }
+  ]
+}

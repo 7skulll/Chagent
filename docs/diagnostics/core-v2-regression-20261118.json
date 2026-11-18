@@ -1,0 +1,58 @@
+{
+  "date": "2026-11-18",
+  "status": "incomplete_stopped_unknown_cost",
+  "suite": "eval/holdouts/core-v2",
+  "suite_sha256": "c1c81e0e1f9aef62023524e82a306c684774b231b0760a847fb7d642ca99ef6e",
+  "protocol_sha256": "b332e8823521443efc6da2b8f600294dbc0edcac2f29068992c01cbf0ba0ba59",
+  "arms": "same deepseek-flash, default prompt vs verify-contract-v1; no product prompt promoted",
+  "planned": 160,
+  "recorded": 52,
+  "missing": 108,
+  "outcomes": {
+    "pass": 51,
+    "fail": 1,
+    "infra_error": 0,
+    "inconclusive": 0
+  },
+  "calibration": {
+    "synthetic_slots": 24,
+    "correct_pass": 12,
+    "incorrect_fail": 12
+  },
+  "live_requests": 237,
+  "cleanup_resources_absent": true,
+  "all_evidence_hashes_valid": true,
+  "all_request_preambles_verified": true,
+  "cost": {
+    "estimated_usd": null,
+    "known_subtotal_usd": 0.177095,
+    "unknown_trials": 1,
+    "source": "estimated upper bound from preregistered rates, including cached input",
+    "tokens": {
+      "input": 101239,
+      "output": 60166,
+      "cache_read": 248413,
+      "cache_write": 0
+    },
+    "over_cap": null
+  },
+  "failed": [
+    {
+      "trial": "core-v2-prompt-20261118.holdout-repair.candidate.r6",
+      "error": "trial_wall timeout during candidate",
+      "status": "failed"
+    }
+  ],
+  "comparison_claim": "none; full sample not completed, one unknown-cost trial, all capability directions withheld",
+  "withdrawn_v1": {
+    "recorded": 12,
+    "known_cost_usd": 0.042925,
+    "reason": "Undisclosed canonical rollback.action format caused false negatives; withdrawn, not pooled with v2."
+  },
+  "artifacts": "/Users/macbook/Desktop/智能体/Chagent/eval/results/core-v2-20261118",
+  "source_sha256": {
+    "eval/regression.py": "1d29e02bd0c5b055112613506114f9b78a403625cb5735af460073c573f887b3",
+    "eval/holdouts/core-v2/suite.json": "35f6860507748534482d14293866726871b652e5f2272502488eae7cb4b58c65",
+    "tests/test_eval_regression.py": "3c8687cbbaa9498a38fee4be4013514e45c6668cdbbaed7ae36d0f78d689ffc7"
+  }
+}

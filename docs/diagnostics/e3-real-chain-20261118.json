@@ -1,0 +1,126 @@
+{
+ "date": "2026-11-18",
+ "scope": "Live paid-provider run of the frozen container trial chain after the E3 review fixes: model -> container exec -> artifact collection -> topology cleanup -> independent verifier -> TrialRecord -> diagnostic report",
+ "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+ "provider": {
+  "provider": "deepseek",
+  "model": "deepseek-flash",
+  "api": "openai-chat"
+ },
+ "slots": [
+  {
+   "experiment": "e3-real-chain-live-20261118",
+   "trial_id": "e3-real-chain-live-20261118.e3-live-offline-sum.baseline.r0",
+   "verdict": "pass",
+   "status": "completed",
+   "protocol_sha256": "f437e774ee676039dae788aa3b53b88f1611ebc31efc46f2ae94e7cf3f964e4f",
+   "case": {
+    "id": "e3-live-offline-sum",
+    "sha256": "60b60b6a84bb968ed435eddd0c507a47c796d7f4a430c99b555a50b1e9473373",
+    "version": 1
+   },
+   "task_sha256": "df3cd063bcef8b766c91528ee456c1273565410da8a41de25c9d10b6cec29a2f",
+   "run_id": "671e5c4e-6794-4024-9d53-2d5b2f812eb4",
+   "model_calls": 3,
+   "tool_calls": 2,
+   "wall_seconds": 8.783,
+   "tokens": {
+    "cache_read": 1792,
+    "cache_write": 0,
+    "input": 709,
+    "output": 270,
+    "reasoning": 0,
+    "total_tokens": 2771
+   },
+   "estimated_cost_usd": 0.0010743,
+   "grader": [
+    [
+     "independent_verifier",
+     "pass"
+    ]
+   ],
+   "artifact": "answer.txt = 21",
+   "verifier_cleanup": true,
+   "tool_sequence": [
+    "ls -la /workspace && cat /workspace/numbers.json",
+    "cd /workspace && python3 -c ... write answer.txt ... verify"
+   ],
+   "note": "The model addressed /workspace by absolute path inside the container; this is the scenario that broke the earlier live slot."
+  },
+  {
+   "experiment": "e3-real-chain-services-20261118",
+   "trial_id": "e3-real-chain-services-20261118.e3-live-service-chain.baseline.r0",
+   "verdict": "pass",
+   "status": "completed",
+   "protocol_sha256": "d6f5f6b9b4bd40bd4a8e600bc4cb0d3408af707de64ee8fd821d9d64dbcea3a3",
+   "case": {
+    "id": "e3-live-service-chain",
+    "sha256": "f973a7b91c716c2fc30830f8b6a8f3b6dc6c3b0d134005342f176159f351fb31",
+    "version": 1
+   },
+   "task_sha256": "aecf4c18d5b0192dd35e3b2ba0137935c3d7c7f142a22a7e48ee165f751af92c",
+   "run_id": "8e06a763-6918-4303-96d6-4c74f38325ac",
+   "model_calls": 4,
+   "tool_calls": 3,
+   "wall_seconds": 11.508,
+   "tokens": {
+    "cache_read": 2432,
+    "cache_write": 0,
+    "input": 1164,
+    "output": 219,
+    "reasoning": 0,
+    "total_tokens": 3815
+   },
+   "estimated_cost_usd": 0.0013416,
+   "grader": [
+    [
+     "independent_verifier",
+     "pass"
+    ]
+   ],
+   "artifact": "answer.txt = 42",
+   "verifier_cleanup": true,
+   "tool_sequence": [
+    "cd /workspace && ls -la && cat request.txt",
+    "cd /workspace && curl -sS -m 10 -i http://frontend:8080/",
+    "cd /workspace && printf '42' > answer.txt && cat answer.txt"
+   ],
+   "note": "Two dependent services on an internal network; the model reached backend only through the declared frontend interface."
+  }
+ ],
+ "totals": {
+  "paid_slots": 2,
+  "model_calls": 7,
+  "tool_calls": 5,
+  "estimated_cost_usd": 0.0024159
+ },
+ "budget_gate_finding": {
+  "experiment": "e3-real-chain-20261118",
+  "trial_id": "e3-real-chain-20261118.e4-offline-sum.baseline.r0",
+  "verdict": "fail",
+  "observed": "The slot stopped in 3.1 s with 0 model calls: RunFailedError: BudgetExceeded: insufficient remaining trial budget for maximum request cost.",
+  "why": "BudgetClient reserves one worst-case request before every real call: (context_window * input_rate + max_tokens * output_rate) / 1e6. With the default 65536/8192 window and Flash rates 0.30/1.20 USD per Mtok that is $0.0294912, while eval/smallsets/e4-v1 cases cap a trial at $0.01 (and the protocol capped $0.02). Synthetic clients skip the reservation, so E4 never saw this.",
+  "not_a_regression": "The refusal is the guard working as designed; the case budget was simply below one live request.",
+  "consequence": "A live run needs max_cost_usd >= $0.0295 at the default window (or a smaller CHAGENT_CONTEXT_WINDOW / CHAGENT_MAX_TOKENS). The two live slots above used a separately frozen variant with max_cost_usd = 0.05 and identical input, verifier bytes and service topology.",
+  "preserved": "The refused slot stays recorded as fail with its claim consumed; it was not rerun."
+ },
+ "residual_resources": {
+  "task_containers": [],
+  "task_volumes": [],
+  "task_networks": [],
+  "services": [],
+  "verifier_containers": []
+ },
+ "business_schema_migration": false,
+ "production_restarted": false,
+ "database_schema": "chagent_eval_container (separate evaluation schema, disposable)",
+ "source_sha256": {
+  "eval/container_trial.py": "38b316f23ca64d22522ed5a13d1bfe8bbbe5588bf9a61b97a94fbda1db7b78c9",
+  "eval/platform.py": "529d2572d59834eb99c11d3a44334a2a883b2f0a197ff6b1693786e5c2589085",
+  "eval/budgets.py": "d65f8ee6ed85bd9b6e292cb6b2a0bba8d7e313c56fdc048c7982b5d8acc6a289",
+  "eval/runner.py": "a5312afb43410cd769e273a2ee7883b2fc1e21da7fd41370f97d5e942bfe0c55",
+  "eval/container_catalog.py": "e84623b554d8d5d5b895ae9e414663eac5c9789bb471ebc4b7097400e3c49721",
+  "src/chagent/agent/runner.py": "6897e065bc6e830f079808a8bf510d0704548b0fa0137ea0cfd9b97888408085",
+  "src/chagent/hostexec/task_environment.py": "d4ef7b6c07c2d571844abfee8ff8bb005c3dd791096233226ecaea9c297413c4"
+ }
+}
