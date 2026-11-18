@@ -1,0 +1,130 @@
+{
+  "date": "2026-11-18",
+  "scope": "E1 only; command-only real AgentRunner, FakeModelClient, Docker and PostgreSQL",
+  "paid_model_calls": 0,
+  "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+  "evidence_directory": "eval/results/e1-final-20261118",
+  "tests": {
+    "E1": {
+      "run": 7,
+      "passed": 7,
+      "skipped": 0,
+      "seconds": 9.673
+    },
+    "default_regression": {
+      "run": 1515,
+      "passed": 1468,
+      "skipped": 47,
+      "seconds": 133.224
+    },
+    "docker_AD": {
+      "run": 41,
+      "passed": 41,
+      "skipped": 0,
+      "seconds": 81.979
+    }
+  },
+  "limitations": [
+    "E2/E3/E4 not implemented",
+    "No paid provider probe",
+    "No product restart or business schema migration",
+    "command-only profile; no process/file/skill tools or compaction/memory",
+    "Task topology cleanup owned by controller; completed run is not a quality grade"
+  ],
+  "source_sha256": {
+    "src/chagent/agent/runner.py": "f228054572f44bd357500de4af406a4439fb71af75334182ad54bd30910bd819",
+    "src/chagent/bootstrap.py": "3925fa1d9ce9342d3550519ab000bf947fd5aa30d0810978b5344f2427f2684e",
+    "src/chagent/hostexec/task_environment.py": "d4ef7b6c07c2d571844abfee8ff8bb005c3dd791096233226ecaea9c297413c4",
+    "src/chagent/hostexec/task_runner.py": "51206e1fc8f494a2ccfec3069c621a26afe8d1a04797c246731b5bd811d5f79f",
+    "src/chagent/tools/context.py": "335acdaf284afb8925f4e640609fcccfd072b576d052989bfeae9d9dd737bb39",
+    "tests/test_task_runner.py": "6d1b1233befa96f43e3ad3770df7d815a833aecdc45245dd1504a3a90ceeccc9"
+  },
+  "cases": {
+    "test_cancel_and_wall_timeout_are_not_success": {
+      "task_id": "9ea6e00d55264ac99bcfa1b78bd9e534",
+      "cleanup": "confirmed",
+      "run_cleanup": "confirmed",
+      "binding": {
+        "session_id": "34e8c1f2-72a0-4d67-8983-76b3cf636938",
+        "run_id": "7a94b3d7-c707-494f-8338-c1757074df9d",
+        "task_id": "9ea6e00d55264ac99bcfa1b78bd9e534",
+        "profile": "task-command-only-v1"
+      }
+    },
+    "test_cancel_records_interruption": {
+      "task_id": "53ee87493e944451bd4586e37be97eac",
+      "cleanup": "confirmed",
+      "run_cleanup": "confirmed",
+      "binding": {
+        "session_id": "3e5b1df9-b39c-4900-91b4-50649b9f82ce",
+        "run_id": "91409bb2-eb5b-4a66-a320-ee14e7201223",
+        "task_id": "53ee87493e944451bd4586e37be97eac",
+        "profile": "task-command-only-v1"
+      }
+    },
+    "test_cleanup_failure_stays_unknown": {
+      "task_id": "4ba55b4d3bc44f31b635ef507af40b90",
+      "cleanup": "confirmed",
+      "run_cleanup": "unknown",
+      "binding": {
+        "session_id": "ff14c47a-2739-45d6-aa4c-4af33f7f311f",
+        "run_id": "f3f44ee0-245c-4b1d-a6cf-67446993c940",
+        "task_id": "4ba55b4d3bc44f31b635ef507af40b90",
+        "profile": "task-command-only-v1"
+      }
+    },
+    "test_command_timeout_reaped": {
+      "task_id": "c03a81e9cdbe47d5b853f938f2782cfc",
+      "cleanup": "confirmed",
+      "run_cleanup": "confirmed",
+      "binding": {
+        "session_id": "ce5259de-475e-40f5-8a43-7c6afd43787c",
+        "run_id": "71fdce0c-1ae8-4784-85ef-bfb52384b43d",
+        "task_id": "c03a81e9cdbe47d5b853f938f2782cfc",
+        "profile": "task-command-only-v1"
+      }
+    },
+    "test_read_modify_read_and_remote_evidence": {
+      "task_id": "9cad53c2685a4a5baaf1f72081d7cac0",
+      "cleanup": "confirmed",
+      "run_cleanup": "confirmed",
+      "binding": {
+        "session_id": "7791099f-45d0-4e57-aaf8-b3b88f55a831",
+        "run_id": "f8578bf8-32ac-4d17-8f6e-34c24e222896",
+        "task_id": "9cad53c2685a4a5baaf1f72081d7cac0",
+        "profile": "task-command-only-v1"
+      }
+    },
+    "test_wrong_command_context_rejected": {
+      "task_id": "d42cbbfb1288460bb4236f0de6d1573a",
+      "cleanup": "confirmed",
+      "run_cleanup": "pending",
+      "binding": {
+        "session_id": "9202451c-89bf-4eb2-95e6-ba5c1da290d4",
+        "run_id": "1e193106-5caa-4a9c-b50c-a9661eaf5046",
+        "task_id": "d42cbbfb1288460bb4236f0de6d1573a",
+        "profile": "task-command-only-v1"
+      }
+    },
+    "test_wrong_session_and_consumed_task_rejected": {
+      "task_id": "65493ac11490483e973f58b905214e01",
+      "cleanup": "confirmed",
+      "run_cleanup": "confirmed",
+      "binding": {
+        "session_id": "ba3c3feb-0794-4a0b-ad83-b292cdaff7e2",
+        "run_id": "1430fa53-723a-4076-a7b4-c956a136a825",
+        "task_id": "65493ac11490483e973f58b905214e01",
+        "profile": "task-command-only-v1"
+      }
+    }
+  },
+  "regression_repair": "VerificationSandbox inherits TaskSandbox; removed task-specific phase restriction from shared wrapper. TaskEnvironment.run retains ready guard, Verification.run retains verifying lifecycle.",
+  "environment_note": "Existing chagent:local label lookup fails; tests explicitly use verified existing full image ID, no automatic fallback.",
+  "residual_resources": {
+    "task_containers": [],
+    "task_volumes": [],
+    "task_networks": [],
+    "verification_containers": [],
+    "verification_volumes": []
+  }
+}

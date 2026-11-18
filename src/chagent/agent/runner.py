@@ -70,10 +70,12 @@ class AgentRunner:
         memory_service: MemoryService | None = None,
         max_tool_concurrency: int = 4,
         memory_worker=None,
+        task_execution=None,
     ):
         if max_turns < 1 or not math.isfinite(timeout) or timeout <= 0 or (wall_timeout is not None and
                 (not math.isfinite(wall_timeout) or wall_timeout <= 0)):
             raise ValueError("Run limits must be positive and finite")
+        self.task_execution = task_execution
         self.model = model
         self.client = client
         self.context = context
@@ -250,6 +252,18 @@ class AgentRunner:
                     # than the failure here, but a leaked process group is worth
                     # a line: nothing else will reap it.
                     logger.warning("Could not terminate run processes (%s)", type(error).__name__)
+            if self.task_execution is not None and self.task_execution.run_id == run_id:
+                cleanup_event, cleanup_error = "task_run_released", None
+                try:
+                    await self.task_execution.release(run_id)
+                except (OSError, RuntimeError) as error:
+                    cleanup_event, cleanup_error = "task_cleanup_unknown", str(error)[:500]
+                try:
+                    await self.runs.audit_event(run_id, cleanup_event, {
+                        **self.task_execution.evidence(), "reason": cleanup_error})
+                except Exception:
+                    # The task's recovery file remains authoritative if storage is down.
+                    logger.exception("Could not persist task release audit")
             if self.sandbox is not None and processes_reaped:
                 try:
                     cleanup = self.sandbox.release(run_id)
@@ -314,10 +328,11 @@ class AgentRunner:
 
     async def _record_manifest_before(self, run_id: UUID, root) -> dict | None:
         try:
-            before = await asyncio.to_thread(snapshot, root, self._manifest_cache(root))
+            before = (await self.task_execution.snapshot(run_id) if self.task_execution is not None
+                      else await asyncio.to_thread(snapshot, root, self._manifest_cache(root)))
             await self.runs.event(run_id, "workspace_manifest_before", before)
             return before
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, RuntimeError) as error:
             logger.warning("Could not inventory workspace before run (%s)", type(error).__name__)
             await self.runs.event(run_id, "workspace_manifest_error",
                                   {"phase": "before", "reason": type(error).__name__})
@@ -327,11 +342,12 @@ class AgentRunner:
         if run_id in self._manifest_after_recorded or root is None:
             return
         try:
-            after = await asyncio.to_thread(snapshot, root, self._manifest_cache(root))
+            after = (await self.task_execution.snapshot(run_id) if self.task_execution is not None
+                     else await asyncio.to_thread(snapshot, root, self._manifest_cache(root)))
             summary = diff(before, after) if before is not None else None
             await self.runs.event(run_id, "workspace_manifest_after", {**after, "diff": summary})
             self._manifest_after_recorded.add(run_id)
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, RuntimeError) as error:
             logger.warning("Could not inventory workspace after run (%s)", type(error).__name__)
             await self.runs.event(run_id, "workspace_manifest_error",
                                   {"phase": "after", "reason": type(error).__name__})
@@ -402,6 +418,9 @@ class AgentRunner:
         previous = self._workspace_identities.setdefault(session_id, identity)
         if previous != identity:
             raise PermissionError("Session workspace directory was replaced")
+        if self.task_execution is not None:
+            await self.task_execution.bind(session_id, run_id, root)
+            await self.runs.event(run_id, "task_environment_bound", self.task_execution.evidence())
         history = await self.conversations.messages(session_id, current_run=run_id, project_artifacts=True)
         # Never replay an imported workflow from a previous run as fresh authority.
         # The original audited message stays in storage; reloading requires an enabled skill.
@@ -428,6 +447,8 @@ class AgentRunner:
             from chagent.user_skills import UserSkillStore
             state.user_skills = {str(row['id']): row for row in
                                 await UserSkillStore(self.runs.database).list(enabled=True)}
+        if self.task_execution is not None:
+            state.environment = self.task_execution.environment
         if self.sandbox is not None:
             settings = self.sandbox.settings
             if settings.containerized:
@@ -486,6 +507,7 @@ class AgentRunner:
             workspace=state.session.workspace, session_id=session_id, run_id=run_id,
             workspace_identity=state.workspace_identity, deferred=state.deferred,
             user_skills=state.user_skills, loaded_user_skills=state.loaded_user_skills,
+            task_id=self.task_execution.task_id if self.task_execution is not None else None,
         )
         for iteration in range(self.max_turns):
             from chagent.tools.workspace import WorkspaceFS

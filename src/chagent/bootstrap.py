@@ -239,3 +239,26 @@ def create_runner(
         retry_delay=5.0,
     )
     return runner
+
+
+def create_task_runner(database: Database, model: Model, client: ModelClient, *,
+                       task, session_id, control_workspace, max_turns=32,
+                       timeout=600, wall_timeout=3600) -> AgentRunner:
+    """Controlled internal task profile. Does not install local builtin tools.
+
+    One fresh task and empty session-control directory per run. The caller owns
+    collection and final topology cleanup; this runner only reaps its invocations.
+    E1 fixes memory/compaction off so deterministic diagnostics spend no extra calls.
+    """
+    from chagent.hostexec.task_runner import TaskExecution
+    execution = TaskExecution(task, session_id, control_workspace)
+    builder = BasicContextBuilder(policy=ContextPolicy.from_env(), counter=select_counter(model))
+    runs = RunRepository(database, inline_bytes=inline_bytes_for(builder.input_budget(model)))
+    if isinstance(client, HTTPModelClient):
+        async def outbound_audit(run_id, purpose):
+            await runs.audit_event(run_id, 'model_export_blocked', {'purpose': purpose, 'reason': 'protected_path'})
+        client.outbound_audit = outbound_audit
+    return AgentRunner(model=model, client=client, context=builder,
+        tools=ToolExecutor(execution.registry()), conversations=ConversationRepository(database),
+        runs=runs, max_turns=max_turns, timeout=timeout, wall_timeout=wall_timeout,
+        max_tool_concurrency=1, task_execution=execution)

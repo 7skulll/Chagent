@@ -27,3 +27,5 @@ class ToolContext:
     deferred: DeferredTools | None = None
     user_skills: dict | None = None
     loaded_user_skills: set[str] = field(default_factory=set)
+    #: Controller-owned disposable task binding; absent in the default product profile.
+    task_id: str | None = None

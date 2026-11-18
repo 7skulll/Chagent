@@ -162,6 +162,10 @@ class TaskSandbox(Sandbox):
         self.task = task
 
     async def wrap(self, argv, workspace, *, owner=None, workdir=None, timeout_seconds=None):
+        binding = self.task.state.get('runner_binding')
+        if binding and str(owner) != binding['run_id']:
+            raise PermissionError('Task sandbox run binding mismatch')
+        await self.task.admit()
         call = uuid4().hex
         control = f'/tmp/chagent-run-{owner}/calls/{call}'
         relative = (workdir or workspace).relative_to(workspace)
@@ -339,7 +343,11 @@ class TaskEnvironment:
             raise RuntimeError('Task container identity or execution policy changed')
         return details
 
-    async def run(self, command, *, timeout=120):
+    async def run(self, command, *, timeout=120, context=None, tool_call_id=None):
+        binding = self.state.get('runner_binding')
+        if binding and (context is None or str(context.run_id) != binding['run_id']
+                or str(context.session_id) != binding['session_id'] or context.task_id != self.state['id']):
+            raise PermissionError('Task invocation binding mismatch')
         if self.state['phase'] != 'ready':
             raise RuntimeError('Task environment is not ready')
         if not math.isfinite(timeout) or not .1 <= timeout <= 600:
@@ -358,14 +366,21 @@ class TaskEnvironment:
                 control = Path(directory).resolve()
                 result = await ExecCommandTool(self.sandbox).execute(uuid4().hex,
                     {'cmd': command, 'timeout_ms': round(timeout * 1000), 'max_output_chars': 64000},
-                    context=ToolContext(control, run_id=uuid4()))
-            self.state['commands'].append({'command': command, **result.details})
-            self.state['phase'] = 'ready'
+                    context=context or ToolContext(control, run_id=uuid4()))
+            self.state['commands'].append({'command': command,
+                'run_id': str(context.run_id) if context else None, 'tool_call_id': tool_call_id,
+                **result.details})
+            self.state['phase'] = ('ready' if result.details.get('boundary', {}).get('cleanup_confirmed')
+                                   else 'execution_interrupted')
             self.save()
             return result
         except BaseException as error:
             self.state['error'] = f'{type(error).__name__}: {error}'[:1000]
             self.state['phase'] = 'execution_interrupted'
+            self.state['commands'].append({'command': command,
+                'run_id': str(context.run_id) if context else None, 'tool_call_id': tool_call_id,
+                'interrupted': True, 'error': self.state['error'],
+                'boundary': self.state.get('invocation')})
             self.save()
             raise
 
