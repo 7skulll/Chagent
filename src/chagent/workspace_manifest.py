@@ -247,10 +247,15 @@ def snapshot(root: Path, cache: ManifestCache | None = None) -> dict:
 
 
 def diff(before: dict, after: dict) -> dict:
+    """Only a complete opposing scan can prove that an observed path was absent.
+
+    Partial inventories still prove content changes for files seen on both sides.
+    A path omitted by a limit or read failure is not an addition/deletion fact.
+    """
     old = {item["path"]: item for item in before["files"]}
     new = {item["path"]: item for item in after["files"]}
-    added = [new[path] for path in sorted(new.keys() - old.keys())]
-    deleted = [old[path] for path in sorted(old.keys() - new.keys())]
+    added = [new[path] for path in sorted(new.keys() - old.keys())] if before["complete"] else []
+    deleted = [old[path] for path in sorted(old.keys() - new.keys())] if after["complete"] else []
     modified = [{"path": path, "before": old[path], "after": new[path]}
                 for path in sorted(old.keys() & new.keys()) if old[path]["sha256"] != new[path]["sha256"]]
     return {"complete": before["complete"] and after["complete"],

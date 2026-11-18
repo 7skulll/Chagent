@@ -41,6 +41,55 @@ class WorkspaceManifestTests(unittest.TestCase):
             self.assertEqual(partial["issues"][0]["reason"], "scan_limit")
             self.assertFalse(diff(partial, snapshot(root))["complete"])
 
+    def test_after_limit_does_not_report_existing_file_as_deleted(self):
+        for limit in ('MAX_FILES', 'MAX_HASH_BYTES'):
+            with self.subTest(limit=limit), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / 'z-keep').write_text('keep')
+                before = snapshot(root)
+                (root / 'a-new').write_text('larger-than-budget')
+                with patch('chagent.workspace_manifest.' + limit, 1):
+                    after = snapshot(root)
+                changes = diff(before, after)
+                self.assertFalse(changes['complete'])
+                self.assertEqual(changes['deleted'], [])
+                self.assertTrue((root / 'z-keep').is_file())
+
+    def test_partial_before_does_not_invent_additions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'a').write_text('one')
+            (root / 'b').write_text('two')
+            with patch('chagent.workspace_manifest.MAX_FILES', 1):
+                before = snapshot(root)
+            changes = diff(before, snapshot(root))
+            self.assertFalse(changes['complete'])
+            self.assertEqual(changes['added'], [])
+
+    def test_partial_scans_keep_observed_modifications(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'a').write_text('old')
+            (root / 'b').write_text('unchanged')
+            with patch('chagent.workspace_manifest.MAX_FILES', 1):
+                before = snapshot(root)
+                (root / 'a').write_text('new')
+                after = snapshot(root)
+            changes = diff(before, after)
+            self.assertEqual(changes['counts'], {'added': 0, 'modified': 1, 'deleted': 0})
+            self.assertFalse(changes['complete'])
+
+    def test_partial_side_still_proves_changes_against_complete_opposing_scan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'z').write_text('old')
+            before = snapshot(root)
+            (root / 'a').write_text('new')
+            with patch('chagent.workspace_manifest.MAX_FILES', 1):
+                after = snapshot(root)
+            self.assertEqual([x['path'] for x in diff(before, after)['added']], ['a'])
+            self.assertEqual([x['path'] for x in diff(after, before)['deleted']], ['a'])
+
 
 class ManifestCacheTests(unittest.TestCase):
     """An unchanged file is settled by a stat, not by reading it again."""

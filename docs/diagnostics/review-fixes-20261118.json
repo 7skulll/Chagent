@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-18",
+  "scope": [
+    "confirmed differences for partial inventories",
+    "partial UI hides historical unproven counts",
+    "explicit rejection of unsupported runner environment formats; legacy cleanup retained",
+    "E1 image preflight and reproducible README commands; no auto skip/fallback"
+  ],
+  "tests": {
+    "targeted": {
+      "run": 55,
+      "passed": 55,
+      "skipped": 0,
+      "seconds": 43.162
+    },
+    "image_negative_probe": "expected failed precondition before DB/task creation"
+  },
+  "evidence": "eval/results/review-fixes-20261118",
+  "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+  "environment_note": "Default tag resolved earlier and failed later on this machine; cause not attributed to Docker version. Explicit verified ID used for passing tests.",
+  "source_sha256": {
+    "src/chagent/workspace_manifest.py": "620364139eb874f5c60d4b1379d8c11d1ea797153d0e349fe164698b07b6309c",
+    "src/chagent/hostexec/task_runner.py": "60ea1cc229fbe40941cbbd8da4afd4a3fb7932aa2f80934b952abecb5a121653",
+    "src/chagent/web/static/core/format.js": "270666973e6744adb250ceead519f659ba7c827f1a6a9f85b48bf8ee0056c487",
+    "src/chagent/web/static/run/run-reducer.js": "5bc137cbfbfff32662e74b82f22761a717cf33ebf3f2e5128df38c18f3c04072",
+    "tests/test_workspace_manifest.py": "df1866fce0711b14912075a23f2e8d0065c9d95c83427920627bee92b1b6830d",
+    "tests/test_task_runner.py": "3b9b008b8f62f7b325a45b2aeb38f1f6a29adf9ab9dd14b32ed1b7b009ad9b9f",
+    "tests/js/pure.test.mjs": "5eb228ffdd847b0f7adf10e7ee7c22f6e1f906694cd749a3597e00c8031d8d8a"
+  },
+  "paid_calls": 0,
+  "full_suite_rerun": false,
+  "task_and_verifier_resource_residue": false
+}

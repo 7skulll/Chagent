@@ -161,6 +161,9 @@ export function reduce(state, event) {
     case "workspace_manifest_after": {
       const changes = payload?.diff;
       if (!changes) return notice(state, "工作区结束清单已记录；起始清单不可用，无法计算差异。", true);
+      // Historical partial diffs can contain unproven deletion counts too.
+      if (changes.complete === false) return notice(state,
+        "工作区扫描不完整，无法确认全部改动，请查看运行记录。", true);
       const {added, modified, deleted} = changes.counts;
       const paths = [...changes.added, ...changes.modified, ...changes.deleted]
         .slice(0, 12).map(item => item.path).join("、");

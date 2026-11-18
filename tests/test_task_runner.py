@@ -38,10 +38,49 @@ class ScriptedClient(FakeModelClient):
         yield DoneEvent(reason=message.stop_reason, message=message)
 
 
+class TaskFormatTests(unittest.TestCase):
+    def test_legacy_and_unsupported_specs_are_rejected_without_mutation(self):
+        from copy import deepcopy
+        from types import SimpleNamespace
+        from chagent.hostexec.task_runner import TaskExecution
+        for spec in (None, {}, {'version': 2, 'network': 'none'}, {'version': 1, 'network': 'unexpected'}):
+            state = {'id': uuid4().hex, 'phase': 'ready', 'network': 'none'}
+            if spec is not None:
+                state['environment_spec'] = spec
+            original = deepcopy(state)
+            with self.subTest(spec=spec), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(ValueError, 'task-env cleanup'):
+                    TaskExecution(SimpleNamespace(state=state), uuid4(), Path(directory))
+                self.assertEqual(state, original)
+
+    def test_legacy_environment_still_loads_for_cleanup(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            state = {'version': 1, 'id': uuid4().hex, 'phase': 'execution_interrupted', 'network': 'none'}
+            (Path(directory) / 'environment.json').write_text(json.dumps(state))
+            task = TaskEnvironment(directory)
+            self.assertEqual(task.state, state)
+            self.assertEqual(task.services.services, [])
+            self.assertEqual(len(task.volumes), 2)
+            from unittest.mock import AsyncMock
+            from chagent.tools.sandbox import Sandbox
+            with patch.object(Sandbox, '_docker', new=AsyncMock(return_value=(1, 'No such resource'))):
+                asyncio.run(task.cleanup())
+            self.assertEqual(task.state['cleanup'], 'confirmed')
+
+
 @unittest.skipUnless(os.environ.get('CHAGENT_TEST_DATABASE_URL') and os.environ.get('CHAGENT_TEST_DOCKER') == '1',
                      'Set CHAGENT_TEST_DATABASE_URL and CHAGENT_TEST_DOCKER=1')
 class TaskRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        image = os.environ.get('CHAGENT_EXECUTOR_IMAGE', 'chagent:local')
+        try:
+            await TaskEnvironment.docker('image', 'inspect', image, '--format', '{{.Id}}')
+        except (OSError, RuntimeError) as error:
+            raise RuntimeError(
+                f'Executor image {image!r} unavailable. Build it with docker build -t chagent:local . '
+                'or explicitly set CHAGENT_EXECUTOR_IMAGE to an inspected image ID. '
+                'Docker tests were requested; this is a failed precondition, not a skipped test.') from error
         self.schema = 'chagent_test_' + uuid4().hex
         self.admin = await AsyncConnection.connect(os.environ['CHAGENT_TEST_DATABASE_URL'], autocommit=True)
         await self.admin.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(self.schema)))
@@ -89,7 +128,7 @@ class TaskRunnerTests(unittest.IsolatedAsyncioTestCase):
                                   session_id=self.session, control_workspace=self.control, **kwargs)
 
     async def test_read_modify_read_and_remote_evidence(self):
-        runner = self.runner([{'cmd': 'cat input.txt'}, {'cmd': 'printf changed > input.txt'}, {'cmd': 'cat input.txt'}])
+        runner = self.runner([{'cmd': 'cat /workspace/input.txt'}, {'cmd': 'printf changed > /workspace/input.txt'}, {'cmd': 'cd /workspace && cat input.txt'}])
         self.assertEqual([t.name for t in runner.tools.registry.definitions()], ['exec_command'])
         result = await runner.run(self.session, 'read, change, read')
         commands = self.task.state['commands']
@@ -108,6 +147,18 @@ class TaskRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Network mode: none', runner.client.requests[0].messages[0].text())
         await self.task.collect()
         self.assertEqual((self.task.output / 'artifacts/input.txt').read_text(), 'changed')
+
+    async def test_remote_scan_limit_does_not_invent_deletions(self):
+        runner = self.runner([{'cmd': "python3 -c \"open('a-large.bin','wb').truncate(101*1024**2)\""}])
+        result = await runner.run(self.session, 'create large task output')
+        events = await runner.runs.events(result.run_id)
+        after = next(e['payload'] for e in events if e['type'] == 'workspace_manifest_after')
+        self.assertFalse(after['complete'])
+        self.assertEqual(after['diff']['deleted'], [])
+        self.assertEqual(after['diff']['counts']['deleted'], 0)
+        self.assertEqual(after['issues'][0]['reason'], 'scan_limit')
+        await self.task.collect()
+        self.assertEqual((self.task.output / 'artifacts/input.txt').read_text(), 'frozen')
 
     async def test_wrong_session_and_consumed_task_rejected(self):
         runner = self.runner([])

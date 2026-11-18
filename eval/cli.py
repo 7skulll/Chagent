@@ -171,18 +171,66 @@ def main(argv: list[str] | None = None) -> int:
     verify_cleanup.add_argument('--out', type=Path, required=True)
 
 
+    container = commands.add_parser('container-trial', help='frozen artifact-task diagnostic slots')
+    container_commands = container.add_subparsers(dest='container_action', required=True)
+    freeze = container_commands.add_parser('freeze')
+    freeze.add_argument('--spec', type=Path, required=True)
+    freeze.add_argument('--out', type=Path, required=True)
+    execute = container_commands.add_parser('run')
+    execute.add_argument('--task', type=Path, required=True)
+    execute.add_argument('--protocol', type=Path, required=True)
+    execute.add_argument('--arm', required=True)
+    execute.add_argument('--repeat', type=int, default=0)
+    execute.add_argument('--out', type=Path, default=RESULTS)
+    execute.add_argument('--db')
+    execute.add_argument('--schema', default='chagent_eval_container')
+    summary = container_commands.add_parser('report')
+    summary.add_argument('--protocol', type=Path, required=True)
+    summary.add_argument('--out', type=Path, default=RESULTS)
+    clean = container_commands.add_parser('cleanup')
+    clean.add_argument('--trial-dir', type=Path, required=True)
+
     args = parser.parse_args(argv)
     try:
         return {"manifest": _manifest, "export": _export, "timeline": _timeline,
                 "attribute": _attribute, "annotate": _annotate, "labels": _labels,
                 "case": _case, "replay": _replay, "prereg": _prereg,
-                "trial": _trial, "report": _report, "task-env": _task_environment}[args.command](args)
+                "trial": _trial, "report": _report, "task-env": _task_environment,
+                "container-trial": _container_trial}[args.command](args)
     except (casefile.CaseInvalid, annotations.AnnotationInvalid) as error:
         print(f"invalid input: {error}", file=sys.stderr)
         return 1
     except (LookupError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
+
+
+def _container_trial(args):
+    from eval import container_trial, prereg
+    if args.container_action == 'freeze':
+        case, _, digest = run(container_trial.freeze_task(json.loads(args.spec.read_text()), args.out))
+        _emit({'case': case.key, 'task_sha256': digest, 'case_file': str(args.out / 'case.json')}, None)
+        return 0
+    if args.container_action == 'cleanup':
+        run(container_trial.cleanup_trial(args.trial_dir))
+        return 0
+    protocol = prereg.load(_protocol_dir(args.protocol))
+    if args.container_action == 'report':
+        _emit(container_trial.build_report(args.out, protocol), None)
+        return 0
+    import re
+    if not re.fullmatch(r'chagent_eval[a-z0-9_]*', args.schema):
+        raise ValueError('Container trials require a separate chagent_eval* schema')
+    arms = [arm for arm in protocol.arms if arm.name == args.arm]
+    if len(arms) != 1:
+        raise ValueError('Arm is not preregistered')
+    async def execute():
+        async with _eval_database(args.db or os.environ.get('CHAGENT_EVAL_DATABASE_URL'), args.schema) as database:
+            return await container_trial.execute_slot(args.task, protocol, arms[0], args.repeat,
+                database=database, root=args.out, env=_evaluation_env())
+    record = run(execute())
+    _emit(record.to_json(), None)
+    return 0 if record.verdict == 'pass' else 1 if record.verdict == 'fail' else 2
 
 
 def _task_environment(args):

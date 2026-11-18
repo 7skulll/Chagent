@@ -1,0 +1,112 @@
+{
+  "date": "2026-11-18",
+  "scope": "E2 implementation and deterministic acceptance; live diagnostic failed, fixed paths verified deterministically without paid rerun",
+  "tests": {
+    "synthetic_E2": {
+      "run": 12,
+      "passed": 12,
+      "seconds": 25.558
+    },
+    "full_before_path_fix": {
+      "run": 1527,
+      "passed": 1526,
+      "skipped": 1,
+      "seconds": 259.974
+    },
+    "path_fix_E1_E2": {
+      "run": 19,
+      "passed": 19,
+      "seconds": 36.293
+    },
+    "default_path_outbound_after_fix": {
+      "run": 10,
+      "passed": 10,
+      "seconds": 0.228
+    },
+    "freeze_output_boundary": {
+      "run": 1,
+      "passed": 1
+    }
+  },
+  "live": {
+    "directory": "eval/results/e2-live-20261118",
+    "schema": "chagent_eval_e2_diag_20261118",
+    "run_id": "2239a819-adef-4185-bc9a-26187d4411c9",
+    "status": "failed",
+    "verdict": "fail",
+    "graders": [
+      {
+        "evidence": [],
+        "grader_id": "independent_verifier",
+        "notes": "RunFailedError: BudgetExceeded: tool call budget exhausted; batch was not executed",
+        "result": "inconclusive"
+      }
+    ],
+    "usage": {
+      "cost": {
+        "source": "estimated upper bound from preregistered rates, including cached input",
+        "usd": 0.001632
+      },
+      "model_call_rows": 4,
+      "model_calls": 4,
+      "token_known_subtotal": {
+        "cache_read": 2688,
+        "cache_write": 0,
+        "input": 1896,
+        "output": 214,
+        "reasoning": 0,
+        "total_tokens": 4798
+      },
+      "tokens": {
+        "cache_read": 2688,
+        "cache_write": 0,
+        "input": 1896,
+        "output": 214,
+        "reasoning": 0,
+        "total_tokens": 4798
+      },
+      "tool_calls": 3,
+      "tool_requests": 3,
+      "wall_seconds": 5.476
+    },
+    "cap_usd": 0.05,
+    "planned": 6,
+    "recorded": 1,
+    "missing": 5,
+    "paid_reruns": 0,
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "checked": "2026-11-18",
+    "pricing_ceiling": {
+      "input_usd_per_mtok": 0.3,
+      "output_usd_per_mtok": 1.2
+    }
+  },
+  "repair": "Keep remote /workspace in disposable-task commands; restore paths only for default local tools. Initial real slot retained as budget fail, no C verification. Post-fix absolute-path synthetic Docker chain passed.",
+  "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+  "evidence": {
+    "logs": "eval/results/e2-validation-20261118",
+    "synthetic": "eval/results/e2-synthetic-final-20261118",
+    "path_fix": "eval/results/e2-path-fix-20261118"
+  },
+  "source_sha256": {
+    "eval/container_trial.py": "367c7f53bee0bb823eac21234e89431ba260f0cea72b92490c20d065f35d4abd",
+    "eval/cli.py": "ceea62f7c9f085ce1e32b2e4cf0acc2c2d5a4645f1181b14244b68c5e3d44e00",
+    "src/chagent/agent/runner.py": "6897e065bc6e830f079808a8bf510d0704548b0fa0137ea0cfd9b97888408085",
+    "tests/test_container_trial.py": "c874e244b01dd3237de6b59b9458bba0e3c860d0b28384fcb1a17ed0daac6c59",
+    "tests/test_task_runner.py": "c58ee9386df1b09400890bf0669fd26a1ba1b38cc717947417d55a5b2aadace9"
+  },
+  "residual_resources": {
+    "task_containers": [],
+    "task_volumes": [],
+    "task_networks": [],
+    "verifier_containers": [],
+    "verifier_volumes": []
+  },
+  "limitations": [
+    "No post-fix paid diagnostic or live C pass claimed",
+    "E3 worker/Web and E4 remain unimplemented",
+    "No business schema migration or product restart",
+    "Single-task diagnostic uses existing two-arm preregistration; missing slots stay missing",
+    "Synthetic copied evidence retains original temporary absolute paths; not a live replay workspace"
+  ]
+}

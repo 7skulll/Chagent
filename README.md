@@ -1,5 +1,7 @@
 # Chagent
 
+**2026-11-18 E2**：新增冻结容器 trial 的 CLI、逐请求预算/槽位、采集→清理→独立验证→报告。确定性 Docker 闭环已验；真实单题诊断暴露并补修 /workspace 路径接缝，原失败槽位保留、未付费重跑，不宣称真实完整判分链通过。见[验收第 83 节](docs/验收记录汇总.md#83-冻结容器-trial-e22026-11-18)。
+
 **2026-11-18 E1**：独立任务已接入真实 AgentRunner 的 command-only 配置，带任务/run 绑定、容器文件差异与收尾审计；假模型 + 真实 Docker 7 项、A–D Docker 回归 41 项通过。trial/平台贯通仍待 E2/E3，见[验收第 82 节](docs/验收记录汇总.md#82-独立任务真实-agentrunner-接入-e12026-11-18)。
 
 **2026-11-17 容器边界 D 批**：独立任务支持可冻结的资源/镜像/网络配置、按依赖和健康检查启动的多服务、任务专属服务网络及整个拓扑的恢复清理；可接 C 批独立验证。入口 `task-env run --environment-spec`，见[复杂环境契约](docs/宿主执行方案.md#13-资源网络与多服务-d-批2026-11-17)。
@@ -152,6 +154,17 @@ CHAGENT_WEB_ACCESS=deepseek
 env -u NODE_OPTIONS NO_PROXY=127.0.0.1,localhost CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
   PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -q
 ```
+
+Docker 专项还需本机可用的执行镜像，普通全量命令不会自动启用这些用例。首次先构建镜像并预检（构建成功才继续）：
+
+```sh
+docker build -t chagent:local .
+docker image inspect "${CHAGENT_EXECUTOR_IMAGE:-chagent:local}" --format '{{.Id}}'
+env -u NODE_OPTIONS CHAGENT_TEST_DOCKER=1 CHAGENT_TEST_DATABASE_URL=postgresql:///chagent \
+  PYTHONPATH=src:.:tests .venv/bin/python -m unittest test_task_runner test_container_trial -q
+```
+
+若标签 inspect 失败，先核实 daemon 与镜像状态；本机曾出现标签查询间歇失败、完整 ID 可查的情况，不能仅凭 Docker 版本判断原因。可手动 `docker image inspect <完整镜像ID>` 核实后，将 `CHAGENT_EXECUTOR_IMAGE` 显式设为该 ID，再运行同一命令。不会自动换镜像或把缺镜像算作通过；E1 用例会在数据库/任务资源创建前报明确的镜像前置错误。跳过不等于验证。本机历史验收使用的完整 ID 见验收记录第 82–84 节，不能当作其他机器已存在的镜像。
 
 数据库测试用独立临时 schema，不读写业务表。未设置测试数据库时集成测试跳过，跳过不是通过。若宿主注入了 `NODE_OPTIONS`（node 代理 shim），前端相关用例会假失败——报错来自 shim 自己（`node-brokered-fs-shim.cjs` 里 `instanceof URL` 不可调用），不是项目缺陷，加 `env -u NODE_OPTIONS` 即恢复。
 

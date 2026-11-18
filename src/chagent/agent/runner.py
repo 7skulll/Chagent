@@ -586,9 +586,12 @@ class AgentRunner:
                 raise RunExecutionError("Tool calls require toolUse stop reason", "model_protocol_error")
             if len({call.id for call in calls}) != len(calls):
                 raise RunExecutionError("Duplicate tool call IDs in one response", "model_protocol_error")
-            from chagent.models.outbound import invocation_to_host
-            for call in calls:
-                call.arguments = invocation_to_host(call.arguments, state.session.workspace)
+            # Disposable task commands already address the remote /workspace.
+            # Only local tools need virtual paths restored to their host root.
+            if self.task_execution is None:
+                from chagent.models.outbound import invocation_to_host
+                for call in calls:
+                    call.arguments = invocation_to_host(call.arguments, state.session.workspace)
             batch = await self.scheduler.execute_batch(calls, context=tool_context, model_call_id=model_call_id,
                                                         executor=executor, on_committed=state.append_committed,
                                                         budget=budget)

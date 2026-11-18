@@ -209,6 +209,17 @@ test("the final file notice uses persisted diff counts and paths", () => {
   assert.match(state.items[0].text, /新增 1，修改 0，删除 0：index.html/);
 });
 
+test("partial historical diffs never display unproven deletions", () => {
+  const diff = {complete: false, counts: {added: 0, modified: 0, deleted: 1},
+    added: [], modified: [], deleted: [{path: "still-exists.txt"}]};
+  const text = diffSummary(diff);
+  const state = reduce(initialRunState("r1"), event("workspace_manifest_after", {diff}));
+  for (const message of [text, state.items[0].text]) {
+    assert.match(message, /扫描不完整/);
+    assert.doesNotMatch(message, /删除|still-exists/);
+  }
+});
+
 test("network notice reads observed destinations and bytes", () => {
   const state = reduce(initialRunState("r1"), event("network_observed", {
     complete: true, sent_bytes: 2723, targets: [{ip: "104.20.23.154", port: 443}],
@@ -220,7 +231,7 @@ test("the closing record names the changed files", () => {
   const diff = {complete: true, added: [{path: "a.txt"}], modified: [{path: "b.txt"}], deleted: [],
                 counts: {added: 1, modified: 1, deleted: 0}};
   assert.equal(diffSummary(diff), "工作区改动：新增 1，修改 1，删除 0：a.txt、b.txt");
-  assert.equal(diffSummary({...diff, complete: false}).endsWith("；扫描不完整"), true);
+  assert.match(diffSummary({...diff, complete: false}), /扫描不完整/);
   assert.equal(diffSummary(null), "");
 });
 

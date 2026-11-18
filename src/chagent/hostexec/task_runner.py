@@ -12,6 +12,12 @@ from chagent.tools.registry import ToolRegistry
 
 class TaskExecution:
     def __init__(self, task, session_id, workspace):
+        spec = task.state.get('environment_spec')
+        if not isinstance(spec, dict) or spec.get('version') != 1 or spec.get('network') not in {'none', 'bridge', 'internal'}:
+            raise ValueError(
+                'Unsupported task environment format for AgentRunner. '
+                'Create a new task from the frozen snapshot with a version 1 environment specification. '
+                'Existing resources can still be recovered with eval.cli task-env cleanup --out <task-directory>.')
         self.task = task
         self.session_id = session_id
         self.workspace = Path(workspace).resolve()
@@ -24,7 +30,7 @@ class TaskExecution:
             'Task files are in /workspace; the host control directory is not task data. '
             'Commands are one-shot (at most 30 seconds); use shell cd for subdirectories. '
             'No host file tools, persistent processes, skills or cross-task memory are available. '
-            f"Network mode: {task.state['environment_spec']['network']}. "
+            f"Network mode: {spec['network']}. "
             'Only declared artifacts are collected by the controller after this run.'
         )
 

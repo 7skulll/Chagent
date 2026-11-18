@@ -199,12 +199,12 @@ export const NEAR_BOTTOM = 96;
 
 export function diffSummary(diff) {
   if (!diff) return "";
+  if (diff.complete === false) return "工作区扫描不完整，无法确认全部改动，请查看运行记录。";
   const counts = diff.counts || {added: 0, modified: 0, deleted: 0};
   const paths = [...(diff.added || []), ...(diff.modified || []), ...(diff.deleted || [])]
     .slice(0, 12).map(item => item.path);
   const suffix = paths.length ? `：${paths.join("、")}` : "";
-  const incomplete = diff.complete === false ? "；扫描不完整" : "";
-  return `工作区改动：新增 ${counts.added}，修改 ${counts.modified}，删除 ${counts.deleted}${suffix}${incomplete}`;
+  return `工作区改动：新增 ${counts.added}，修改 ${counts.modified}，删除 ${counts.deleted}${suffix}`;
 }
 
 export function networkSummary(observation) {
