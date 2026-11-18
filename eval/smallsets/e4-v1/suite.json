@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "id": "e4-v1",
+  "repeats": 3,
+  "resources": {
+    "cpus": 0.5,
+    "memory_mb": 256,
+    "pids": 64,
+    "tmpfs_mb": 64
+  },
+  "tasks": [
+    {
+      "name": "sum",
+      "id": "e4-offline-sum",
+      "title": "离线数据汇总",
+      "prompt": "Read numbers.json and write the sum as answer.txt. Verify the file.",
+      "artifacts": [
+        "answer.txt"
+      ],
+      "network": "none",
+      "services": [],
+      "controls": {
+        "correct": "python3 -c \"import json; print(sum(json.load(open('/workspace/numbers.json'))))\" > /workspace/answer.txt",
+        "incorrect": "printf 20 > /workspace/answer.txt"
+      }
+    },
+    {
+      "name": "repair",
+      "id": "e4-code-repair",
+      "title": "修复三角数函数",
+      "prompt": "Fix triangular(n) in sequence.py to sum 1 through n for nonnegative n. Preserve its name, verify and deliver sequence.py.",
+      "artifacts": [
+        "sequence.py"
+      ],
+      "network": "none",
+      "services": [],
+      "controls": {
+        "correct": "python3 -c \"from pathlib import Path; p=Path('/workspace/sequence.py'); p.write_text(p.read_text().replace('(n - 1)', '(n + 1)'))\"",
+        "incorrect": "cat /workspace/sequence.py"
+      }
+    },
+    {
+      "name": "services",
+      "id": "e4-service-chain",
+      "title": "通过依赖服务交付产物",
+      "prompt": "Read request.txt. Fetch http://frontend:8080/ and write its numeric reply to answer.txt. The frontend depends on backend; access the declared HTTP interface.",
+      "artifacts": [
+        "answer.txt"
+      ],
+      "network": "internal",
+      "services": [
+        {
+          "name": "frontend",
+          "command": [
+            "/app/.venv/bin/python",
+            "-c",
+            "import http.server, urllib.request\nclass H(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200); self.end_headers(); self.wfile.write(urllib.request.urlopen('http://backend:8080/',timeout=2).read())\n def log_message(self,*a): pass\nhttp.server.HTTPServer(('0.0.0.0',8080),H).serve_forever()\n"
+          ],
+          "depends_on": [
+            "backend"
+          ],
+          "healthcheck": [
+            "/app/.venv/bin/python",
+            "-c",
+            "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/',timeout=1).read()==b'42'"
+          ],
+          "resources": {
+            "cpus": 0.5,
+            "memory_mb": 256,
+            "pids": 64,
+            "tmpfs_mb": 64
+          },
+          "startup_timeout": 20
+        },
+        {
+          "name": "backend",
+          "command": [
+            "/app/.venv/bin/python",
+            "-c",
+            "import http.server\nclass H(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200); self.end_headers(); self.wfile.write(b'42')\n def log_message(self,*a): pass\nhttp.server.HTTPServer(('0.0.0.0',8080),H).serve_forever()\n"
+          ],
+          "healthcheck": [
+            "/app/.venv/bin/python",
+            "-c",
+            "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/',timeout=1).read()==b'42'"
+          ],
+          "resources": {
+            "cpus": 0.5,
+            "memory_mb": 256,
+            "pids": 64,
+            "tmpfs_mb": 64
+          },
+          "startup_timeout": 20
+        }
+      ],
+      "controls": {
+        "correct": "python3 -c \"import urllib.request; print(urllib.request.urlopen('http://frontend:8080/',timeout=2).read().decode())\" > /workspace/answer.txt",
+        "incorrect": "python3 -c \"import urllib.request; print(int(urllib.request.urlopen('http://frontend:8080/',timeout=2).read())-1)\" > /workspace/answer.txt"
+      }
+    }
+  ]
+}

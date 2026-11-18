@@ -1,0 +1,1 @@
+Read http://frontend:8080/ and deliver its numeric response as answer.txt.

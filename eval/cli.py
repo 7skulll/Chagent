@@ -190,19 +190,41 @@ def main(argv: list[str] | None = None) -> int:
     clean = container_commands.add_parser('cleanup')
     clean.add_argument('--trial-dir', type=Path, required=True)
 
+    smallset = commands.add_parser('smallset', help='synthetic-only internal artifact calibration')
+    smallset.add_argument('--suite', type=Path, default=REPOSITORY / 'eval/smallsets/e4-v1')
+    smallset.add_argument('--out', type=Path, required=True)
+    smallset.add_argument('--db')
+    smallset.add_argument('--schema', default='chagent_eval_smallset')
+    smallset.add_argument('--image', help='explicit prepared executor/verifier image reference')
+
     args = parser.parse_args(argv)
     try:
         return {"manifest": _manifest, "export": _export, "timeline": _timeline,
                 "attribute": _attribute, "annotate": _annotate, "labels": _labels,
                 "case": _case, "replay": _replay, "prereg": _prereg,
                 "trial": _trial, "report": _report, "task-env": _task_environment,
-                "container-trial": _container_trial}[args.command](args)
+                "container-trial": _container_trial, "smallset": _smallset}[args.command](args)
     except (casefile.CaseInvalid, annotations.AnnotationInvalid) as error:
         print(f"invalid input: {error}", file=sys.stderr)
         return 1
     except (LookupError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
+
+
+def _smallset(args):
+    import re
+    from eval.smallset import run_suite
+    if not re.fullmatch(r'chagent_eval[a-z0-9_]*', args.schema):
+        raise ValueError('Smallset calibration requires a separate chagent_eval* schema')
+    async def execute():
+        async with _eval_database(args.db or os.environ.get('CHAGENT_EVAL_DATABASE_URL'), args.schema) as database:
+            return await run_suite(args.suite, args.out, database=database, image=args.image)
+    report = run(execute())
+    _emit({'calibration_passed': report['calibration_passed'], 'planned': report['planned'],
+           'observed': report['observed'], 'errors': report['errors'],
+           'report': str(args.out / 'calibration-report.json'), 'paid_calls': 0}, None)
+    return 0 if report['calibration_passed'] else 2
 
 
 def _container_trial(args):

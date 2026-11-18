@@ -1,0 +1,67 @@
+{
+  "date": "2026-11-18",
+  "scope": "E4 internal command-only calibration, not model quality or official benchmark",
+  "suite_id": "e4-v1",
+  "suite_sha256": "5d46de4da1f7c62d5d0f8a3f8d58c43b8f738fe6fc2bf70c1873d38f80702710",
+  "suite_files": {
+    "repair/input/sequence.py": "d18dde73b9a386ee57ae2595c388434b52ebdfc79f3e564a1c13bf6f22edb044",
+    "repair/verifier/check.py": "e909b86bc7dc710ec1a903dd3d29eabcbfc83ced1f220b7b8970b9f124175fff",
+    "services/input/request.txt": "d5d8fe3f1c4006a11af5db617a6a62fc7f85358341901aa2ffbec49082551e0a",
+    "services/verifier/check.py": "d32ff781b9ae9784ac8d4e985550e9639af8e689415f69dc8a1bc9f411f4237b",
+    "suite.json": "605863b4f108a4daccfb158b3f1a76d7b371c52159414f13385315a54b891cae",
+    "sum/input/numbers.json": "08e3a5e8430e95f9e6547c835f5298bdbfce19220c5db83ea1f5f2bcf7070769",
+    "sum/verifier/check.py": "ddda03f3e6e636da577dcd998fa95977b49b2bcce7ddfb9791b61b4fe3171b26"
+  },
+  "calibration": {
+    "passed": true,
+    "planned": 18,
+    "observed": 18,
+    "verified_observations": 18,
+    "missing": 0,
+    "outcomes": {
+      "fail": 9,
+      "inconclusive": 0,
+      "infra_error": 0,
+      "pass": 9
+    },
+    "binding_errors": []
+  },
+  "tests": {
+    "full_before_extra_guards": {
+      "run": 1558,
+      "passed": 1557,
+      "skipped": 1,
+      "seconds": 401.976
+    },
+    "final_contract_guards": {
+      "run": 5,
+      "passed": 5
+    },
+    "final_saved_trace_audit": {
+      "trials": 18,
+      "requests": 36,
+      "passed": true
+    }
+  },
+  "evidence": "eval/results/e4-acceptance-20261118",
+  "report": "eval/results/e4-acceptance-20261118/calibration-report.json",
+  "context_audit": "eval/results/e4-acceptance-20261118/request-context-audit.json",
+  "task_identities": 18,
+  "verifier_identities": 18,
+  "service_network_identities": 6,
+  "source_sha256": {
+    "eval/smallset.py": "556ac15eea78c56c190a3b455d08ee01318e9947920771c8f391307d000ad845",
+    "eval/cli.py": "ad6d8a101b16bf1561a6e36bda99674cad9a445d9b9b806487f868b76ba1740b",
+    "tests/test_smallset.py": "f4e3740272700daa27b71c54bdd62b273fad1b2d8b8f33256f6a1c175a915c66"
+  },
+  "paid_calls": 0,
+  "production_restarted": false,
+  "business_schema_migrated": false,
+  "task_service_verifier_resource_residue": false,
+  "limitations": [
+    "Synthetic controls calibrate the instrument, not model capability or stability.",
+    "Only exec_command; no remote file/process/skill/memory/compaction surface.",
+    "No Harbor or official benchmark execution.",
+    "Post-full-run stricter prompt/context and absence checks verified separately against saved requests and negative unit cases."
+  ]
+}
