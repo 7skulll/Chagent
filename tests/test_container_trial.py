@@ -8,7 +8,7 @@ import shutil
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from psycopg import AsyncConnection, sql
@@ -197,6 +197,129 @@ class ContainerTrialTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report['outcomes']['pass'], 0)
         with self.assertRaisesRegex(ValueError, 'invalid bindings'):
             await self.execute(repeat=1)
+
+    async def refreeze(self, *, wall=4, verifier_timeout=10):
+        self.taskdir = self.root / 'timeout-frozen'
+        spec = {**self.spec, 'budget': {**self.spec['budget'], 'wall_seconds': wall},
+                'verifier_timeout': verifier_timeout}
+        self.case, _, _ = await ct.freeze_task(spec, self.taskdir)
+        self.protocol = self.protocol_for(self.case)
+
+    async def assert_instrument_timeout(self, stage, *, outer):
+        await self.refreeze()
+        async def slow(resource, *args, **kwargs):
+            if outer:
+                await asyncio.sleep(15)
+            raise TimeoutError('injected operation timeout')
+        target, method = {'collection': (ct.TaskEnvironment, 'collect'),
+            'verification': (ct.Verification, 'run'),
+            'verification_preparation': (ct.Verification, 'create'),
+            'preparation': (ct.TaskEnvironment, 'create')}[stage]
+        context = (patch.object(target, method, new=slow) if method not in {'create'} else
+                   patch.object(target, method, new=AsyncMock(side_effect=TimeoutError('injected preparation timeout'))))
+        with context:
+            record = await self.execute()
+        self.assertEqual(record.status, 'infra_error')
+        self.assertEqual(record.verdict, 'infra_error')
+        self.assertEqual(record.graders[0].result, 'infra_error')
+        harness = record.manifest['harness']
+        self.assertIsNone(harness['budget_violation'])
+        self.assertEqual(harness['timeout_stage'], stage)
+        self.assertEqual(harness['timeout_scope'], 'trial_wall' if outer else 'operation')
+        self.assertEqual(harness['end_reason'], None if stage == 'preparation' else 'model_stop')
+        if stage != 'preparation':
+            self.assertTrue(harness['cleanup_verified'])
+            from uuid import UUID
+            async with self.database.connection() as connection:
+                cursor = await connection.execute('SELECT status,end_reason FROM runs WHERE id=%s', (UUID(record.run_id),))
+                self.assertEqual(await cursor.fetchone(), {'status': 'completed', 'end_reason': 'model_stop'})
+        from eval.report import build
+        measured = build(self.protocol, [record])['cases'][0]['arms']['baseline']
+        self.assertEqual(measured['denominator'], 0)
+        self.assertEqual(measured['fail'], 0)
+        self.assertEqual(measured['infra_error'], 1)
+
+    async def test_outer_wall_during_collection_is_not_candidate_failure(self):
+        await self.assert_instrument_timeout('collection', outer=True)
+
+    async def test_outer_wall_during_verification_is_not_candidate_failure(self):
+        await self.assert_instrument_timeout('verification', outer=True)
+
+    async def test_prepare_timeout_is_infrastructure(self):
+        await self.assert_instrument_timeout('preparation', outer=False)
+
+    async def test_verifier_prepare_timeout_preserves_model_stop(self):
+        await self.assert_instrument_timeout('verification_preparation', outer=False)
+
+    async def test_operation_timeout_during_collection_is_infrastructure(self):
+        await self.assert_instrument_timeout('collection', outer=False)
+
+    async def test_task_cleanup_timeout_is_infrastructure(self):
+        original = ct.TaskEnvironment.cleanup
+        calls = 0
+        async def timeout_once(task):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise TimeoutError('injected cleanup timeout')
+            return await original(task)
+        with patch.object(ct.TaskEnvironment, 'cleanup', new=timeout_once):
+            record = await self.execute()
+        self.assertEqual(record.verdict, 'infra_error')
+        self.assertTrue(record.manifest['harness']['cleanup_verified'])
+        self.assertEqual(record.manifest['harness']['end_reason'], 'model_stop')
+        self.assertEqual(record.manifest['harness']['timeout_stage'], 'task_cleanup')
+        self.assertIsNone(record.manifest['harness']['budget_violation'])
+
+    async def test_candidate_outer_wall_still_counts_as_budget_failure(self):
+        await self.refreeze()
+        class WaitingClient(FakeModelClient):
+            async def stream(inner, request):
+                await asyncio.sleep(15)
+                async for event in super(WaitingClient, inner).stream(request):
+                    yield event
+        record = await self.execute(client=WaitingClient())
+        self.assertEqual((record.status, record.verdict), ('failed', 'fail'))
+        self.assertEqual(record.manifest['harness']['budget_violation'], 'run_timeout')
+        self.assertEqual(record.manifest['harness']['timeout_stage'], 'candidate')
+        self.assertTrue(record.manifest['harness']['cleanup_verified'])
+
+    async def test_wall_during_completed_runner_release_is_infrastructure(self):
+        from chagent.hostexec.task_runner import TaskExecution
+        await self.refreeze()
+        original = TaskExecution.release
+        async def slow_release(execution, run_id):
+            await original(execution, run_id)
+            await asyncio.sleep(15)
+        with patch.object(TaskExecution, 'release', new=slow_release):
+            record = await self.execute()
+        self.assertEqual((record.status, record.verdict), ('infra_error', 'infra_error'))
+        self.assertEqual(record.manifest['harness']['timeout_stage'], 'candidate_cleanup')
+        self.assertEqual(record.manifest['harness']['end_reason'], 'model_stop')
+        self.assertIsNone(record.manifest['harness']['budget_violation'])
+        self.assertTrue(record.manifest['harness']['cleanup_verified'])
+
+    async def test_reported_cost_violation_still_counts_as_budget_failure(self):
+        from chagent.models.events import DoneEvent
+        original = ct.BudgetClient.stream
+        async def reported_overcharge(guard, request):
+            async for event in original(guard, request):
+                if isinstance(event, DoneEvent):
+                    guard.violation = 'reported charge exceeded the conservative reservation'
+                yield event
+        with patch.object(ct.BudgetClient, 'stream', new=reported_overcharge):
+            record = await self.execute()
+        self.assertEqual((record.status, record.verdict), ('failed', 'fail'))
+        self.assertIn('reported charge', record.manifest['harness']['budget_violation'])
+        self.assertEqual(record.manifest['harness']['end_reason'], 'model_stop')
+
+    async def test_verifier_own_timeout_remains_infrastructure(self):
+        (self.verifier / 'check.py').write_text('import time\ndef verify(artifacts):\n    time.sleep(2)\n    return True\n')
+        await self.refreeze(wall=60, verifier_timeout=.1)
+        record = await self.execute()
+        self.assertEqual(record.verdict, 'infra_error')
+        self.assertEqual(record.manifest['harness']['end_reason'], 'model_stop')
+        self.assertIsNone(record.manifest['harness']['budget_violation'])
 
     async def test_crashed_process_claim_cleanup_and_no_replay(self):
         frozen_protocol = prereg.freeze(self.protocol, self.root / 'protocol')

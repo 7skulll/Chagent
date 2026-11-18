@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import tarfile
 from uuid import uuid4
 
 from eval import casefile, prereg, report
@@ -75,9 +76,11 @@ def sandbox_available() -> bool:
 
 class Platform:
     def __init__(self, root=None, cases=None, *, account_id=None, account_root=None,
-                 sandbox=None):
+                 sandbox=None, container_tasks=None):
         self.root = Path(root or REPOSITORY / 'eval/results')
         self.cases = Path(cases or REPOSITORY / 'eval/cases')
+        self.container_tasks = Path(container_tasks or _evaluation_env().get(
+            "CHAGENT_EVAL_CONTAINER_TASKS") or REPOSITORY / "eval/container-tasks")
         self.account_id = account_id
         self.account_root = Path(account_root) if account_root else None
         self.sandbox = sandbox or sandbox_available
@@ -114,20 +117,39 @@ class Platform:
             result.append({'key': case.key, 'title': case.title, 'capability': case.capability,
                 'sha256': case.sha256, 'supported': supported, 'requires_sandbox': needs_sandbox,
                 'reason': reason})
-        return result
+        from eval.container_catalog import catalog
+        container_rows = catalog(self.container_tasks)
+        overlap = {r['key'] for r in result} & {r['key'] for r in container_rows}
+        if overlap:
+            raise ValueError('宿主与容器目录存在重复用例版本')
+        for row in result:
+            row['backend'] = 'host'
+        return result + container_rows
 
     def plan(self, request):
+        from eval.container_catalog import BACKEND, freeze_selected
         selected = set(request['cases'])
-        cases = [c for c in casefile.load_all(self.cases) if c.key in selected]
-        if len(cases) != len(selected) or not selected:
+        catalog_rows = {r['key']: r for r in self.catalog()}
+        if not selected or not selected <= catalog_rows.keys():
             raise ValueError('请选择可执行且版本匹配的用例')
-        # The sandbox is asked about before the generic filter so the operator
-        # gets the reason the case is unavailable, not "pick an executable case".
-        if any(requires_sandbox(case) for case in cases) and not self.sandbox():
-            raise ValueError('当前主机无法启动控制器沙箱，尚未调用模型')
-        runnable = {c['key'] for c in self.catalog() if c['supported']}
-        if not selected <= runnable:
-            raise ValueError('请选择可执行且版本匹配的用例')
+        blocked = [catalog_rows[k]['reason'] for k in selected if not catalog_rows[k]['supported']]
+        if blocked:
+            raise ValueError('；'.join(blocked))
+        backends = {catalog_rows[k]['backend'] for k in selected}
+        if len(backends) != 1:
+            raise ValueError('宿主用例与容器任务请分别创建实验，工具范围不能混报')
+        backend = next(iter(backends))
+        identifier = 'web-' + datetime.now(timezone.utc).strftime('%Y%m%d') + '-' + uuid4().hex[:12]
+        folder = self.directory(identifier)
+        task_bindings = {}
+        if backend == BACKEND:
+            cases, task_bindings = freeze_selected(self.container_tasks, selected, folder)
+        else:
+            cases = [c for c in casefile.load_all(self.cases) if c.key in selected]
+            if len(cases) != len(selected):
+                raise ValueError('用例已变化，请刷新目录')
+            if any(requires_sandbox(case) for case in cases) and not self.sandbox():
+                raise ValueError('当前主机无法启动控制器沙箱，尚未调用模型')
         arms = [prereg.Arm('baseline', request['provider'], request['baseline']),
                 prereg.Arm('candidate', request['provider'], request['candidate'])]
         if arms[0].model == arms[1].model:
@@ -139,11 +161,11 @@ class Platform:
             _, settings, _, pinned = resolved(overrides, arm)
             identities.append(pinned)
             for case in cases:
-                assert_axes(case, settings)
-                fixture_for(case)
+                if backend == 'host':
+                    assert_axes(case, settings)
+                    fixture_for(case)
         if identities[0] != identities[1]:
             raise ValueError('两臂的执行配置不一致')
-        identifier = 'web-' + datetime.now(timezone.utc).strftime('%Y%m%d') + '-' + uuid4().hex[:12]
         protocol = prereg.build(experiment=identifier, question=request['question'],
             hypothesis='按固定预算和用例比较两臂，不按试验结果调整重复或阈值。', cases=cases, arms=arms,
             repeats=request['repeats'], min_repeats_for_stability=3, order='interleaved',
@@ -160,7 +182,7 @@ class Platform:
         publish(folder / '.platform' / 'plan.json', {'created_at': now(), 'overrides': overrides,
             'schema': ('chagent_eval_' + self.account_id if self.account_id else 'chagent_eval_platform'),
             'account_id': self.account_id, 'account_root': str(self.account_root) if self.account_root else None,
-            'expected_execution': identities[0],
+            'expected_execution': identities[0], 'backend': backend, 'container_tasks': task_bindings,
             'protocol_sha256': protocol.sha256, 'pricing_confirmed': request['pricing_confirmed']})
         save(folder / '.platform' / 'status.json', {'state': 'planned', 'created_at': now(),
                                                   'updated_at': now(), 'error': None})
@@ -187,6 +209,7 @@ class Platform:
                     with (folder / '.platform/worker.log').open('a') as log:
                         child = subprocess.Popen([sys.executable, '-m', 'eval.platform_worker',
                             '--root', str(self.root.resolve()), '--cases', str(self.cases.resolve()),
+                            '--container-tasks', str(self.container_tasks.resolve()),
                             '--id', identifier, '--lease', str(global_lease.fileno()),
                             '--job-lease', str(job_lease.fileno())], cwd=REPOSITORY,
                             env={**os.environ, 'PYTHONPATH': str(REPOSITORY / 'src') + os.pathsep + str(REPOSITORY)},
@@ -229,10 +252,42 @@ class Platform:
                 pass
         trials = TrialStore(self.root).read(identifier, ignore=('protocol.json',))
         document = report.build(protocol, trials)
+        plan_path = folder / '.platform/plan.json'
+        plan = json.loads(plan_path.read_text()) if plan_path.is_file() else {}
+        backend = plan.get('backend', 'host')
+        container = None
+        if backend == 'container-task-v1':
+            from eval.container_trial import evidence_errors
+            from eval.container_catalog import frozen_cases
+            errors = [e for trial in trials for e in evidence_errors(trial)]
+            try:
+                frozen_cases(folder, plan['container_tasks'])
+            except (OSError, ValueError, KeyError, tarfile.TarError) as error:
+                errors.append({'trial': '*', 'reason': str(error)})
+            document['invalid'].extend(errors)
+            if errors:
+                document['claim'] = 'incomparable'
+            completed = {t.trial_id for t in trials}
+            pending = [p.stem for p in sorted((folder / '.claims').glob('*.claim')) if p.stem not in completed]
+            if pending:
+                document['budget']['cost']['estimated_usd'] = None
+                document['budget']['cost']['unknown_trials'] += len(pending)
+            container = {'tasks': {k: v['execution'] for k, v in plan['container_tasks'].items()},
+                         'unfinished_claims': pending, 'progress': status.get('current')}
+            current = status.get('current') or {}
+            trial_id = current.get('trial_id')
+            if isinstance(trial_id, str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}', trial_id):
+                for name, filename in [('task', 'environment.json'), ('verification', 'verification.json')]:
+                    state_path = folder / 'container-trials' / trial_id / name / filename
+                    if state_path.is_file():
+                        container[name + '_phase'] = json.loads(state_path.read_text()).get('phase')
         return {'id': identifier, 'status': status, 'protocol': protocol.to_json(),
             'stop_requested': (folder / '.platform/stop.json').exists(), 'report': document,
+            'backend': backend, 'container': container,
             'trials': [{'trial_id': t.trial_id, 'case': f'{t.case_id}@{t.case_version}',
                 'arm': t.manifest.get('arm'), 'verdict': t.verdict, 'run_id': t.run_id,
+                'tool_profile': t.manifest.get('container_task', {}).get('profile'),
+                'task_id': t.manifest.get('container_task', {}).get('task_id'),
                 'usage': t.usage, 'graders': [g.to_json() for g in t.graders], 'notes': t.notes,
                 'diagnosis': ('测量失败，先检查基础设施' if t.verdict == 'infra_error' else
                     '预算限制' if t.manifest.get('harness', {}).get('budget_violation') else

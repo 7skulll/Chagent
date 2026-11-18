@@ -130,7 +130,7 @@ def records(store, protocol):
     return store.read(protocol.experiment, ignore=(prereg.PROTOCOL_FILE,))
 
 
-async def execute_slot(task_directory, protocol, arm, repeat, *, database, root, env, client=None):
+async def execute_slot(task_directory, protocol, arm, repeat, *, database, root, env, client=None, expected_identity=None):
     """Claim exactly one preregistered slot. The lock and claim precede paid calls."""
     case, frozen, task_hash = load_task(task_directory)
     plan = TrialPlan(protocol, case, arm, repeat)
@@ -156,7 +156,9 @@ async def execute_slot(task_directory, protocol, arm, repeat, *, database, root,
             raise ValueError('Slot already consumed; no rerun')
         for trial in existing:
             if (trial.manifest.get('protocol_sha256') != protocol.sha256
-                    or trial.manifest.get('container_task', {}).get('task_sha256') != task_hash
+                    or (trial.case_id == case.id and trial.case_version == case.version
+                        and trial.manifest.get('container_task', {}).get('task_sha256') != task_hash)
+                    or trial.manifest.get('container_task', {}).get('profile') != PROFILE
                     or trial.manifest.get('harness', {}).get('client_kind') != ('synthetic' if synthetic else 'live')):
                 raise ValueError('Prior trial input or client binding mismatch')
         from eval.report import _invalid_trials
@@ -171,6 +173,8 @@ async def execute_slot(task_directory, protocol, arm, repeat, *, database, root,
             raise ValueError('Prior trial spend unknown; experiment stopped')
         account = CostAccount(protocol.budget['total_cost_usd'], sum(costs))
         current = pin(model_settings, env)
+        if expected_identity is not None and sha256_json(current) != expected_identity:
+            raise ValueError('Execution identity differs from frozen platform plan; no call was made')
         publish(directory / 'execution.anchor', {'protocol_sha256': protocol.sha256, **execution(current)}, identical_ok=True)
         publish(directory / '.claims' / (plan.trial_id + '.claim'), {
             'protocol_sha256': protocol.sha256, 'case_sha256': case.sha256,
@@ -201,7 +205,10 @@ async def run_container_trial(plan, task_directory, frozen, task_hash, *, databa
     run_id = None
     error = None
     status = 'infra_error'
-    end_reason = None
+    end_reason = None  # Candidate run's conclusion; never replaced by measurement failures.
+    stage = 'preparation'
+    timeout_stage = timeout_scope = budget_violation = None
+    deadline = asyncio.timeout(wall)
     grader = GraderResult('independent_verifier', 'inconclusive', notes='No completed verification')
     rows = {'tools': [], 'calls': [], 'approvals': []}
     runner = None
@@ -210,7 +217,7 @@ async def run_container_trial(plan, task_directory, frozen, task_hash, *, databa
         nonlocal run_id
         run_id = value
     try:
-        async with asyncio.timeout(wall):
+        async with deadline:
             # A private copy is the only verifier/input source after this point.
             shutil.copytree(task_directory, output / 'inputs')
             _, inputs, copied_hash = load_task(output / 'inputs')
@@ -226,10 +233,12 @@ async def run_container_trial(plan, task_directory, frozen, task_hash, *, databa
                 timeout=min(model_settings.run_timeout, wall), wall_timeout=wall)
             if expected_preamble is not None:
                 runner.context.instructions = expected_preamble
+            stage = 'candidate'
             result = await runner.run(session, plan.case.prompt, on_started=remember)
             end_reason = result.end_reason
             if result.end_reason != 'model_stop' or guard.violation or guard.unknown_cost:
                 raise RuntimeError('Agent stopped without a complete, budgeted answer')
+            stage = 'collection'
             if task.state.get('run_cleanup') != 'confirmed':
                 raise RuntimeError('Agent invocation cleanup is not confirmed')
             if time.monotonic() - started > wall:
@@ -238,17 +247,45 @@ async def run_container_trial(plan, task_directory, frozen, task_hash, *, databa
             if load_task(task_directory)[2] != task_hash or load_task(output / 'inputs')[2] != task_hash:
                 raise ValueError('Frozen inputs changed during trial')
             await task.collect()
+            stage = 'task_cleanup'
             await task.cleanup()
+            stage = 'verification_preparation'
             verifier = await Verification.create(task.output, output / 'inputs/verifier', output / 'verification')
+            stage = 'verification'
             await verifier.run()
             grader = GraderResult(**verifier.publish()['grader'])
             status = 'completed' if grader.result in ('pass', 'fail') else 'infra_error'
+            if status == 'completed':
+                stage = 'complete'
     except asyncio.CancelledError:
         status, error = 'cancelled', 'Trial cancelled; no verification authorized'
     except Exception as failure:
         error = f'{type(failure).__name__}: {failure}'[:1000]
-        end_reason = 'run_timeout' if isinstance(failure, TimeoutError) else getattr(failure, 'end_reason', end_reason)
-        status = 'failed' if guard.violation or end_reason in {'run_timeout', 'turn_limit', 'context_budget_exhausted'} else 'infra_error'
+        if isinstance(failure, TimeoutError):
+            # AgentRunner commits its conclusion before its finally/scratch release.
+            # An expired caller deadline during that release is not a failed candidate.
+            if stage == 'candidate' and run_id is not None:
+                try:
+                    async with asyncio.timeout(5):
+                        async with database.connection() as connection:
+                            cursor = await connection.execute(
+                                'SELECT status,end_reason FROM runs WHERE id=%s', (run_id,))
+                            terminal = await cursor.fetchone()
+                    if terminal is not None and terminal['status'] == 'completed':
+                        end_reason = terminal['end_reason']
+                        stage = 'candidate_cleanup'
+                except Exception:
+                    stage = 'candidate_outcome_unknown'
+            timeout_stage = stage
+            timeout_scope = 'trial_wall' if deadline.expired() else 'operation'
+            error = f'{timeout_scope} timeout during {stage}'
+        if stage == 'candidate':
+            end_reason = ('run_timeout' if isinstance(failure, TimeoutError)
+                          else getattr(failure, 'end_reason', end_reason))
+            budget_violation = guard.violation or (end_reason if end_reason in {
+                'run_timeout', 'turn_limit', 'context_budget_exhausted', 'output_limit'} else None)
+        # Setup, export and verification are the instrument, not the candidate.
+        status = 'failed' if budget_violation else 'infra_error'
         grader = GraderResult('independent_verifier', 'infra_error' if status == 'infra_error' else 'inconclusive', notes=error)
     finally:
         # Also recover resources when create() failed after persisting its recovery file.
@@ -300,9 +337,9 @@ async def run_container_trial(plan, task_directory, frozen, task_hash, *, databa
             'verifier_sha256': frozen['verifier']['snapshot']['archive_sha256'],
             'environment_sha256': sha256_json(frozen['environment'])},
         harness={'cleanup_verified': bool(cleanup), 'error': error, 'end_reason': end_reason,
+            'stage': stage, 'timeout_stage': timeout_stage, 'timeout_scope': timeout_scope,
             'client_kind': 'synthetic' if guard.synthetic else 'live', 'memory': 'off', 'compaction': 'off',
-            'budget_violation': guard.violation or (end_reason if end_reason in {
-                'run_timeout', 'turn_limit', 'context_budget_exhausted', 'output_limit'} else None)})
+            'budget_violation': budget_violation})
     if plan.arm.prompt is not None:
         manifest['prompt_arm'] = binding(plan.arm, guard.verified_requests)
     manifest['container_task']['evidence_hashes'] = {

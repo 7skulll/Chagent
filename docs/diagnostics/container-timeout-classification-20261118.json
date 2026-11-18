@@ -1,0 +1,23 @@
+{
+  "date": "2026-11-18",
+  "fix": "Stage-aware classification of outer wall/operation timeouts; preserve candidate conclusion; confirmed candidate budget failures remain fail",
+  "regression": {
+    "run": 117,
+    "passed": 117,
+    "skipped": 0,
+    "seconds": 92.834
+  },
+  "new_tests": 10,
+  "evidence": "eval/results/timeout-classification-20261118",
+  "before": "eval/results/timeout-classification-20261118/before.json",
+  "after": "eval/results/timeout-classification-20261118/after.json",
+  "source_sha256": {
+    "eval/container_trial.py": "38b316f23ca64d22522ed5a13d1bfe8bbbe5588bf9a61b97a94fbda1db7b78c9",
+    "tests/test_container_trial.py": "72d2d92cfebb3fc10bc3dc1e8e417213407e059c005681135b5b42867531c12c"
+  },
+  "paid_calls": 0,
+  "full_suite_rerun": false,
+  "historical_records_rewritten": false,
+  "task_and_verifier_resource_residue": false,
+  "candidate_cleanup_checked": true
+}

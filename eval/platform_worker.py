@@ -13,7 +13,6 @@ from eval.records import TrialStore
 
 
 async def execute(platform, identifier, executor=None):
-    executor = executor or _run_plans
     folder = platform.directory(identifier)
     status_path = folder / '.platform/status.json'
     status = json.loads(status_path.read_text())
@@ -34,7 +33,13 @@ async def execute(platform, identifier, executor=None):
         env, _, _, pinned = resolved(plan['overrides'], protocol.baseline)
         if pinned != plan['expected_execution']:
             raise ValueError('代码或执行配置已变化；请新建计划，尚未调用模型')
-        cases = {c.key: c for c in casefile.load_all(platform.cases)}
+        container = plan.get('backend') == 'container-task-v1'
+        if container:
+            from eval.container_catalog import frozen_cases
+            cases = frozen_cases(folder, plan['container_tasks'], inspect_images=True)
+        else:
+            cases = {c.key: c for c in casefile.load_all(platform.cases)}
+        slot_executor = executor or (_run_container_plans if container else _run_plans)
         chosen = [cases[f"{c['id']}@{c['version']}"] for c in protocol.cases]
         if prereg.check(protocol, chosen, list(protocol.arms)):
             raise ValueError('用例已变化；请新建计划')
@@ -45,7 +50,8 @@ async def execute(platform, identifier, executor=None):
                 raise ValueError('控制器沙箱不可用，尚未调用模型')
         args = SimpleNamespace(only=[], arm=None, all=True,
             db=env.get('CHAGENT_EVAL_DATABASE_URL') or env.get('CHAGENT_DATABASE_URL'),
-            schema=plan['schema'])
+            schema=plan['schema'], container_tasks=plan.get('container_tasks'),
+            expected_identity=plan['expected_execution']['identity_sha256'])
         store = TrialStore(platform.root)
         existing = store.read(identifier, ignore=('protocol.json',))
         if existing or (folder / '.claims').exists():
@@ -61,7 +67,12 @@ async def execute(platform, identifier, executor=None):
             if (folder / '.platform/stop.json').exists():
                 state = 'stopped'
                 break
-            await executor([trial_plan], args, platform.root, store, env, existing)
+            if container:
+                frozen_cases(folder, plan['container_tasks'], inspect_images=True)
+            status.update(current={'trial_id': trial_plan.trial_id, 'case': trial_plan.case_key,
+                                   'arm': trial_plan.arm.name, 'repeat': trial_plan.repeat}, updated_at=now())
+            save(status_path, status)
+            await slot_executor([trial_plan], args, platform.root, store, env, existing)
             existing = store.read(identifier, ignore=('protocol.json',))
             costs = [t.usage.get('cost', {}).get('usd') for t in existing]
             if any(not known_cost(cost) for cost in costs):
@@ -78,11 +89,22 @@ async def execute(platform, identifier, executor=None):
                 break
             status.update(updated_at=now())
             save(status_path, status)
-        status.update(state=state, updated_at=now())
+        status.update(state=state, current=None, updated_at=now())
     except Exception as error:
         status.update(state='failed', updated_at=now(), error=f'{type(error).__name__}: {error}'[:500])
     finally:
         save(status_path, status)
+
+
+async def _run_container_plans(plans, args, root, store, env, trials):
+    from eval.cli import _eval_database
+    from eval.container_trial import execute_slot
+    async with _eval_database(args.db, args.schema) as database:
+        for plan in plans:
+            binding = args.container_tasks[plan.case_key]
+            await execute_slot(store.directory(plan.protocol.experiment) / binding['path'],
+                plan.protocol, plan.arm, plan.repeat, database=database, root=root, env=env,
+                expected_identity=args.expected_identity)
 
 
 def main():
@@ -90,6 +112,7 @@ def main():
     parser.add_argument('--root', required=True)
     parser.add_argument('--cases', required=True)
     parser.add_argument('--id', required=True)
+    parser.add_argument('--container-tasks')
     parser.add_argument('--lease', type=int, required=True)
     parser.add_argument('--job-lease', type=int, required=True)
     args = parser.parse_args()
@@ -97,7 +120,7 @@ def main():
         # The parent passes *owned* open file descriptions, without an unlock gap.
         os.fstat(args.lease)
         os.fstat(args.job_lease)
-        asyncio.run(execute(Platform(args.root, args.cases), args.id))
+        asyncio.run(execute(Platform(args.root, args.cases, container_tasks=args.container_tasks), args.id))
     finally:
         os.close(args.lease)
         os.close(args.job_lease)

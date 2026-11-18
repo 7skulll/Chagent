@@ -1,0 +1,108 @@
+{
+  "date": "2026-11-18",
+  "scope": "E3 platform integration; E4/Harbor not implemented",
+  "tests": {
+    "platform": {
+      "run": 42,
+      "passed": 42,
+      "skipped": 0,
+      "seconds": 33.001
+    },
+    "full": {
+      "run": 1543,
+      "passed": 1542,
+      "skipped": 1,
+      "seconds": 291.383
+    }
+  },
+  "browser": [
+    {
+      "file": "eval/results/e3-browser-20261118/browser-result.json",
+      "browser": "157.0.8103.79",
+      "plan_id": "web-20261118-d86898686f21",
+      "state": "completed",
+      "planned": 6,
+      "observed": 6,
+      "verdicts": [
+        "pass",
+        "pass",
+        "pass",
+        "fail",
+        "fail",
+        "fail"
+      ],
+      "comparison_claim": "incomparable",
+      "cost_estimate_usd": 0,
+      "page_errors": []
+    },
+    {
+      "file": "eval/results/e3-browser-20261118/multi-browser-result.json",
+      "browser": "157.0.8103.79",
+      "plan_id": "web-20261118-985dd64eaba3",
+      "state": "completed",
+      "planned": 12,
+      "observed": 12,
+      "verdicts": [
+        "pass",
+        "pass",
+        "pass",
+        "fail",
+        "fail",
+        "fail",
+        "pass",
+        "pass",
+        "pass",
+        "fail",
+        "fail",
+        "fail"
+      ],
+      "comparison_claim": "incomparable",
+      "cost_estimate_usd": 0,
+      "page_errors": []
+    },
+    {
+      "file": "eval/results/e3-browser-20261118/stop-browser-result.json",
+      "browser": "157.0.8103.79",
+      "plan_id": "web-20261118-9175380d3d73",
+      "state": "stopped",
+      "planned": 6,
+      "observed": 1,
+      "verdicts": [
+        "pass"
+      ],
+      "comparison_claim": "incomparable",
+      "cost_estimate_usd": 0,
+      "page_errors": []
+    }
+  ],
+  "paid_calls": 0,
+  "browser_method": "Local Chrome + temporary Playwright after CUA timed out; isolated admin/server; real Popen lease handoff and Docker/verification, explicit FakeModelClient only in ignored acceptance worker wrapper",
+  "evidence": "eval/results/e3-validation-20261118",
+  "browser_evidence": "eval/results/e3-browser-20261118",
+  "image_id": "sha256:404f5bcb8f62862fc31fcc75c8d9e5f58d8581f42db45cffe35ce63581b16f5e",
+  "source_sha256": {
+    "eval/container_catalog.py": "17ede406adb0479370dda2e0b2bf5da1b8ca694c44846c58b83f9342f856612d",
+    "eval/container_trial.py": "d5c05c8934dcb80166d45f5184f18ae950da16fd201516fd41fb26dc7392960a",
+    "eval/platform.py": "529d2572d59834eb99c11d3a44334a2a883b2f0a197ff6b1693786e5c2589085",
+    "eval/platform_worker.py": "ccce6bc89c04bb45ac5617f3bb76550735b0e6b09d295ba351b17c7a92c3a447",
+    "eval/platform_ui.html": "250b98f7bfb0d2eec98746696068b659eff3569a8977b43c9cae67241e372d78",
+    "eval/web.py": "46c12dee883b5f5a4921062e2f3bb74d2a51d567701cb233230585148da70255",
+    "tests/test_eval_container_platform.py": "3307c18045b2259159828b03c30dc7bd453a4c99f111534c87a11df700a3d969"
+  },
+  "residual_resources": {
+    "task_containers": [],
+    "task_volumes": [],
+    "task_networks": [],
+    "verifier_containers": [],
+    "verifier_volumes": []
+  },
+  "production_restarted": false,
+  "business_schema_migration": false,
+  "acceptance_server_stopped": true,
+  "limitations": [
+    "Synthetic traces are incomparable, not model-quality evidence",
+    "No E2 paid-slot rerun",
+    "Default trusted catalog may be empty; operator must configure and freeze tasks",
+    "Image preflight checks availability; operator must prepare Chagent-compatible executor/verifier dependencies"
+  ]
+}
