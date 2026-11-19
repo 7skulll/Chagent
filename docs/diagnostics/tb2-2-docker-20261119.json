@@ -1,0 +1,326 @@
+{
+  "controls": {
+    "cancel": {
+      "cancel_exec_start_ns": 1795064454846530084,
+      "candidate": {
+        "candidate_cost": {
+          "source": "synthetic client; no paid call",
+          "usd": 0.0
+        },
+        "end_reason": "user_cancelled",
+        "execution": {
+          "adapter_released": true,
+          "cleanup": "harbor_unverified",
+          "command_outcome_unknown": true,
+          "harbor_trial_id": "47dcbbae-90bb-4ef5-91c6-9d4e4f727bdd",
+          "interruption": {
+            "main_stop": "returned",
+            "reason": "cancelled"
+          },
+          "run_id": "c50e6af1-b688-4be7-acd7-3d197644b5b4",
+          "task_id": "47dcbbae-90bb-4ef5-91c6-9d4e4f727bdd",
+          "tool_profile": "chagent-terminal-v1"
+        },
+        "model_calls": 1,
+        "tool_calls": 1,
+        "verified_preambles": 1
+      },
+      "cleanup": {
+        "command_started_ns": 1795064454846530084,
+        "destroyed": {
+          "459b0b2c0d6f9362fd4e5b847862f5c4a85348c28278fbb956172af9bdd97509": "network",
+          "4f8eb3fb69db1121bca85cb78c4795fc6e96a114d60ee50cae471d22732c983b": "container"
+        },
+        "main_stop_ns": 1795064456031446209
+      },
+      "db": {
+        "run": {
+          "end_reason": "user_cancelled",
+          "status": "cancelled"
+        },
+        "schema": "chagent_eval_tb2_faf1fe4ab2f1c244"
+      },
+      "db_evidence_sha256": "6e9a9fb67d1c16bc4e20be8f48edadb64b6a4399f7ca400d09808b4681bd1000",
+      "events_sha256": "eecd73e9dc0ec578609641c66a42a370e63d1bae65ab07d8c76bf7e8edc31a32",
+      "plan_sha256": "f82bfb73e14664492c4ee30ce384bb2318676e1e50959ddb923df91bf81875d0",
+      "raw_result_sha256": "18f5803105293f6e674c2a86f3f9d0b5fc41734ef21d961aef44950882c65d9a",
+      "reward": null,
+      "slot_id": "9a229540-750b-48ab-8284-d69db63b92e0",
+      "trial": {
+        "harbor_trial_id": "47dcbbae-90bb-4ef5-91c6-9d4e4f727bdd",
+        "slot_id": "9a229540-750b-48ab-8284-d69db63b92e0",
+        "trial_name": "music-harmony__Z3FrihJ"
+      },
+      "binding": {
+        "harbor_trial_id": "47dcbbae-90bb-4ef5-91c6-9d4e4f727bdd",
+        "profile": "chagent-terminal-v1",
+        "run_id": "c50e6af1-b688-4be7-acd7-3d197644b5b4",
+        "session_id": "ed7a2293-c418-4543-aa5f-355809ca9c4e",
+        "slot_id": "9a229540-750b-48ab-8284-d69db63b92e0"
+      },
+      "profile_sha256": "a46c1c318a86ea14e7e18c239b81345bec661c67a4f3124cff87e902400920d0",
+      "harbor_exception_type": "CancelledError",
+      "seconds_command_start_to_main_stop": 1.185
+    },
+    "missing": {
+      "candidate": {
+        "candidate_cost": {
+          "source": "synthetic client; no paid call",
+          "usd": 0.0
+        },
+        "end_reason": "model_stop",
+        "execution": {
+          "adapter_released": true,
+          "cleanup": "harbor_unverified",
+          "command_outcome_unknown": false,
+          "harbor_trial_id": "ccf1fb5e-a6b4-4c52-9963-ef137b6da5e1",
+          "run_id": "23caa8ca-4998-4795-9d45-13a013fe07a8",
+          "task_id": "ccf1fb5e-a6b4-4c52-9963-ef137b6da5e1",
+          "tool_profile": "chagent-terminal-v1"
+        },
+        "model_calls": 2,
+        "tool_calls": 1,
+        "verified_preambles": 2
+      },
+      "cleanup": {
+        "destroyed": {
+          "0c46d503d0b81116bd000397876e69e3484cf9a1bd98f21da8bce2ddd61b1d5a": "container",
+          "511c1d589c31c29473e0bab9791bdef86ba28a18ed5c8840da62c6eea133f8cc": "network",
+          "825038356df8c8a227fc54d1aa2868b623f4f3d973f59da73113e1a3425e6bef": "network",
+          "e197907ae9372d4c085971163a93a0fc87a2111349c94776542f4c953f2bfeb6": "container"
+        }
+      },
+      "db": {
+        "run": {
+          "end_reason": "model_stop",
+          "status": "completed"
+        },
+        "schema": "chagent_eval_tb2_8514aab6a96df3b7"
+      },
+      "db_evidence_sha256": "57f3ca1e48aca2af004eb493842700f0e66acda363f239f68f07317b0963bbe7",
+      "events_sha256": "1ff42dc4aadf0873b69af42b89beba5adce35211cf729abb96f67cfa51b13251",
+      "plan_sha256": "a38eea624f627fef3dec81ced3252bf38e81ae3ee3859cdeb8e5f00c1577b83b",
+      "raw_result_sha256": "643e16d2977d6e5fac07525c2974bf4e792f691c4971d2942ab791ac6b77f4ca",
+      "reward": {
+        "rewards": {
+          "reward": 0.0
+        }
+      },
+      "slot_id": "9a9ae670-d45d-48a1-91eb-e88298243712",
+      "trial": {
+        "harbor_trial_id": "ccf1fb5e-a6b4-4c52-9963-ef137b6da5e1",
+        "slot_id": "9a9ae670-d45d-48a1-91eb-e88298243712",
+        "trial_name": "music-harmony__qyE6Bum"
+      },
+      "binding": {
+        "harbor_trial_id": "ccf1fb5e-a6b4-4c52-9963-ef137b6da5e1",
+        "profile": "chagent-terminal-v1",
+        "run_id": "23caa8ca-4998-4795-9d45-13a013fe07a8",
+        "session_id": "10f037ca-e0dc-4689-878a-669eb5d4ec41",
+        "slot_id": "9a9ae670-d45d-48a1-91eb-e88298243712"
+      },
+      "profile_sha256": "a46c1c318a86ea14e7e18c239b81345bec661c67a4f3124cff87e902400920d0",
+      "harbor_exception_type": null
+    },
+    "positive": {
+      "candidate": {
+        "candidate_cost": {
+          "source": "synthetic client; no paid call",
+          "usd": 0.0
+        },
+        "end_reason": "model_stop",
+        "execution": {
+          "adapter_released": true,
+          "cleanup": "harbor_unverified",
+          "command_outcome_unknown": false,
+          "harbor_trial_id": "a77074d4-9aa1-4f58-982d-95945bd469bc",
+          "run_id": "a9f72168-948e-4714-8489-70ee426a0bc3",
+          "task_id": "a77074d4-9aa1-4f58-982d-95945bd469bc",
+          "tool_profile": "chagent-terminal-v1"
+        },
+        "model_calls": 2,
+        "tool_calls": 1,
+        "verified_preambles": 2
+      },
+      "cleanup": {
+        "destroyed": {
+          "099b8bebb1265f57fa3dd249acacb617b74586ce0ac086d7611de3ed893cb5af": "container",
+          "172a8672e4c45fd4871fd3fd9747858dd870546dd646331147094e06a1a4c322": "network",
+          "2392b569e9a4a9c9c9d706f215461deff81bfdd81549c4c2210e1ea70e6ec7ae": "network",
+          "7d0e4d4c5fe0649304c434b5ac02eac47fbe2df04b03472592011118206d7e95": "container"
+        }
+      },
+      "db": {
+        "run": {
+          "end_reason": "model_stop",
+          "status": "completed"
+        },
+        "schema": "chagent_eval_tb2_a573a328ec38d4b8"
+      },
+      "db_evidence_sha256": "d12c36ca65eb8312042203efba198c77b6dca589a9db836f198c11345dafdd92",
+      "events_sha256": "6f86e7e08e0ead217fe08418cd2baa323ff8697cb01036fe6917c3f045c70893",
+      "plan_sha256": "6c08f4a8c19db06c7090fcfa46a5f4e26c8dd6e581ecab277952dbdb0523b2a4",
+      "raw_result_sha256": "393c948715673e1fe1fb3a375e548295d1e3ae0d8e3641f49a6fc47dbbd2e0a2",
+      "reward": {
+        "rewards": {
+          "reward": 1.0
+        }
+      },
+      "slot_id": "9a3201cc-4a0e-4209-9044-8ece877caac6",
+      "trial": {
+        "harbor_trial_id": "a77074d4-9aa1-4f58-982d-95945bd469bc",
+        "slot_id": "9a3201cc-4a0e-4209-9044-8ece877caac6",
+        "trial_name": "music-harmony__kFJah52"
+      },
+      "binding": {
+        "harbor_trial_id": "a77074d4-9aa1-4f58-982d-95945bd469bc",
+        "profile": "chagent-terminal-v1",
+        "run_id": "a9f72168-948e-4714-8489-70ee426a0bc3",
+        "session_id": "c60b8fa4-334d-4fdc-ac5e-22b7112bf73f",
+        "slot_id": "9a3201cc-4a0e-4209-9044-8ece877caac6"
+      },
+      "profile_sha256": "a46c1c318a86ea14e7e18c239b81345bec661c67a4f3124cff87e902400920d0",
+      "harbor_exception_type": null
+    },
+    "service": {
+      "candidate": {
+        "candidate_cost": {
+          "source": "synthetic client; no paid call",
+          "usd": 0.0
+        },
+        "end_reason": "model_stop",
+        "execution": {
+          "adapter_released": true,
+          "cleanup": "harbor_unverified",
+          "command_outcome_unknown": false,
+          "harbor_trial_id": "14eefc66-cb31-41a9-b72a-a23555f6dd18",
+          "run_id": "c9bf3df6-7adf-4f66-b232-e27db6c57ec2",
+          "task_id": "14eefc66-cb31-41a9-b72a-a23555f6dd18",
+          "tool_profile": "chagent-terminal-v1"
+        },
+        "model_calls": 2,
+        "tool_calls": 1,
+        "verified_preambles": 2
+      },
+      "cleanup": {
+        "destroyed": {
+          "25c4502af10ad1fad46469239ec0156790f415ed3211bbc0ea69bea9c46007bd": "network",
+          "27d771e401800c0722a596f599d61391b2819e738b0835fe84ddf93a3851d17e": "container",
+          "727d3388f7f78151a03c04306fad64a8d4e1fc07613085d8a4706b1da61c9ec1": "container",
+          "8419b46508eebf164ccf24ff365d342f985eb823e6f5e7bb778f93be371dd4c3": "container",
+          "de25f0444a5eab51282c8b2c2fcd2dcf7f61a24e9402123da0c821f4b6bef2e0": "network"
+        },
+        "event_feed_healthy_ns": 1795064427759439210,
+        "main_started_ns": 1795064428082815210
+      },
+      "db": {
+        "run": {
+          "end_reason": "model_stop",
+          "status": "completed"
+        },
+        "schema": "chagent_eval_tb2_f1f295ae11fa044a"
+      },
+      "db_evidence_sha256": "440842e21beb05ead534574cd8049aca388cb5b1a973c121a3a530111d8cc8a8",
+      "events_sha256": "3556131c69b679ad28ef58c251d33c24f941cc28fe84f707ad6bbca11cd439ca",
+      "plan_sha256": "f15af747138d18fc9b2580acc2270976f2d55351aee46a9a389e8c7a1634641c",
+      "raw_result_sha256": "dc65a17f080d6b9197e91c8428016c96cce3452313d0247ae9ad2a17d1179942",
+      "reward": {
+        "rewards": {
+          "reward": 0.0
+        }
+      },
+      "slot_id": "6a43f655-e69b-47cd-a74d-1ebc987aa954",
+      "trial": {
+        "harbor_trial_id": "14eefc66-cb31-41a9-b72a-a23555f6dd18",
+        "slot_id": "6a43f655-e69b-47cd-a74d-1ebc987aa954",
+        "trial_name": "freight-dispatch-shift__9Uh4t3H"
+      },
+      "binding": {
+        "harbor_trial_id": "14eefc66-cb31-41a9-b72a-a23555f6dd18",
+        "profile": "chagent-terminal-v1",
+        "run_id": "c9bf3df6-7adf-4f66-b232-e27db6c57ec2",
+        "session_id": "c17d74e9-401d-45f5-9dee-b7dfb2c2475b",
+        "slot_id": "6a43f655-e69b-47cd-a74d-1ebc987aa954"
+      },
+      "profile_sha256": "a46c1c318a86ea14e7e18c239b81345bec661c67a4f3124cff87e902400920d0",
+      "harbor_exception_type": null
+    },
+    "timeout": {
+      "candidate": {
+        "candidate_cost": {
+          "source": "synthetic client; no paid call",
+          "usd": 0.0
+        },
+        "end_reason": "tool_requested_stop",
+        "execution": {
+          "adapter_released": true,
+          "cleanup": "harbor_unverified",
+          "command_outcome_unknown": true,
+          "harbor_trial_id": "eea096fd-fae7-4072-b70b-952dc9360c89",
+          "interruption": {
+            "main_stop": "returned",
+            "reason": "timeout_or_backend_error"
+          },
+          "run_id": "da2a0d9f-ef5d-437d-9ae7-e964b5a40cd1",
+          "task_id": "eea096fd-fae7-4072-b70b-952dc9360c89",
+          "tool_profile": "chagent-terminal-v1"
+        },
+        "model_calls": 1,
+        "tool_calls": 1,
+        "verified_preambles": 1
+      },
+      "cleanup": {
+        "command_started_ns": 1795064449231280304,
+        "destroyed": {
+          "25151c0285bfe5f0d7697349a35923ad22fb028c622135723d369d2537c09db5": "container",
+          "31c5604ef115143bfd2442305fe09dd001b4283b34968f92f0cd02a5de78a9fb": "network"
+        },
+        "main_stop_ns": 1795064452381229347
+      },
+      "db": {
+        "run": {
+          "end_reason": "tool_requested_stop",
+          "status": "completed"
+        },
+        "schema": "chagent_eval_tb2_e13c13d5a04cc3f5"
+      },
+      "db_evidence_sha256": "3f15df39a610f83d9a5bc2db02dc5d3c33eb210d1908b24e9d06a3389e1d06f3",
+      "events_sha256": "72c378925b29f030bb6e6c71ed7251efac48dcf7ad7e110be70e7e5028d0d907",
+      "plan_sha256": "4855a58cd7ed6a19b9e1efa83898767cdf35352f566d6df7ec78ad76e28b6e5e",
+      "raw_result_sha256": "d981b859431b08fc77697e745af15b6f7b6625ba68507af96b564acf1319b04b",
+      "reward": null,
+      "slot_id": "ea48e923-dbba-49b4-b0da-40390b9fbc17",
+      "trial": {
+        "harbor_trial_id": "eea096fd-fae7-4072-b70b-952dc9360c89",
+        "slot_id": "ea48e923-dbba-49b4-b0da-40390b9fbc17",
+        "trial_name": "music-harmony__bwarbzf"
+      },
+      "binding": {
+        "harbor_trial_id": "eea096fd-fae7-4072-b70b-952dc9360c89",
+        "profile": "chagent-terminal-v1",
+        "run_id": "da2a0d9f-ef5d-437d-9ae7-e964b5a40cd1",
+        "session_id": "f831845b-c72f-4937-9d71-8c7c95554759",
+        "slot_id": "ea48e923-dbba-49b4-b0da-40390b9fbc17"
+      },
+      "profile_sha256": "a46c1c318a86ea14e7e18c239b81345bec661c67a4f3124cff87e902400920d0",
+      "harbor_exception_type": "RuntimeError",
+      "seconds_command_start_to_main_stop": 3.15
+    }
+  },
+  "missing_evidence_rejected": true,
+  "date": "2026-11-19",
+  "harbor": "0.25.0",
+  "paid_candidate_model_calls": 0,
+  "local_artifacts": "eval/results/tb22-attempt.INdxK1/controls",
+  "result_sha256": "55c0dc89aa453aa60ceba529a622fdfe86b01566f24004ffed402d6f66da3360",
+  "unique_destroyed_resources": {
+    "container": 9,
+    "network": 8,
+    "volume": 0
+  },
+  "source_sha256": {
+    "eval/benchmarks/terminal_bench/tb22.py": "f65ef7d6e6017c5bd23bb0e57e19f0b75ec8bd6e7ed2ab6379ecc664a24a6e14",
+    "eval/benchmarks/terminal_bench/tb2.py": "970023323dd0df2fd3f488fa443601f5a68e6d98376f6726e46e146765090af9",
+    "eval/benchmarks/terminal_bench/harbor_agent.py": "0f24ddb9efdd8c465af1b9935a5f781040d70305d511d2bb1b83d701f0ae68cb"
+  }
+}

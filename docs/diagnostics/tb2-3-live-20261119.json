@@ -1,0 +1,122 @@
+{
+  "date": "2026-11-19",
+  "batch": "TB2.3",
+  "status": "incomplete",
+  "local_artifacts": "eval/results/tb23-live-20261119",
+  "execution_branch": "codex/tb2-3",
+  "execution_commit": "1f38ac06faac0bd2ccb2be806b01b75445ad9eb1",
+  "clean_at_freeze": true,
+  "task": "music-harmony",
+  "published_task_digest": "sha256:b77713c760d519822ee4f0da9e555c9e124241c2544d0e759a11b52eb7d26c24",
+  "plan_sha256": "199b774392b2c0572f294997345aeac1bbab5aa6923aa4c8da86030d2eb221e5",
+  "binding": {
+    "harbor_trial_id": "5e9371c5-285b-416f-bc83-9371a32b4a24",
+    "profile": "chagent-terminal-v1",
+    "run_id": "8af8f48b-6806-4cf3-87b1-e27b84081a09",
+    "session_id": "eecbc0bd-9a2e-43f2-a5b5-f8bd7b3f678c",
+    "slot_id": "5ea91a73-79f0-47af-85ea-b23b26f84f01"
+  },
+  "profile": "chagent-terminal-v1",
+  "model_settings": {
+    "api": "openai-chat",
+    "base_url": "https://api.deepseek.com",
+    "context_window": 16384,
+    "max_tokens": 1024,
+    "model_id": "deepseek-flash",
+    "provider": "deepseek",
+    "request_timeout": 35,
+    "retry_attempts": 0,
+    "run_timeout": 180,
+    "thinking": false
+  },
+  "pricing": {
+    "cache_hit_usd_per_mtok": 0.006,
+    "input_usd_per_mtok": 0.3,
+    "listed_version": "DeepSeek-V4.1-Flash-1017",
+    "output_usd_per_mtok": 1.2,
+    "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "verified_at": "2026-11-19"
+  },
+  "budget": {
+    "max_tool_calls": 5,
+    "max_turns": 6,
+    "total_cost_usd": 0.04,
+    "wall_seconds": 180
+  },
+  "max_request_usd": 0.006144,
+  "candidate": {
+    "budget_violation": "tool call budget exhausted; batch was not executed",
+    "candidate_cost": {
+      "source": "estimated upper bound from preregistered rates, including cached input",
+      "usd": 0.0042975
+    },
+    "end_reason": "execution_error",
+    "execution": {
+      "adapter_released": true,
+      "cleanup": "harbor_unverified",
+      "command_outcome_unknown": false,
+      "harbor_trial_id": "5e9371c5-285b-416f-bc83-9371a32b4a24",
+      "run_id": "8af8f48b-6806-4cf3-87b1-e27b84081a09",
+      "task_id": "5e9371c5-285b-416f-bc83-9371a32b4a24",
+      "tool_profile": "chagent-terminal-v1"
+    },
+    "known_cost_usd": 0.0042975,
+    "model_calls": 4,
+    "tool_calls": 5,
+    "usage": {
+      "cache_read": 5248,
+      "cache_write": 0,
+      "input": 7149,
+      "output": 482,
+      "reasoning": 0,
+      "total_tokens": 12879
+    },
+    "usage_calls": 4,
+    "verified_preambles": 4
+  },
+  "official_verifier": null,
+  "harbor_exception_type": "RunFailedError",
+  "tool_calls_executed": 5,
+  "stored_response_usage_count": 3,
+  "blocked_response_usage_reconstructed_from_totals": {
+    "input": 3225,
+    "cache_read": 3584,
+    "cache_write": 0,
+    "output": 68,
+    "total_tokens": 6877
+  },
+  "cleanup": {
+    "verified": true,
+    "destroyed": {
+      "625a07aadeef4242d71d83c5051655b6141311b979a3a11c2a9b7f201ab32f07": "network",
+      "2b28fb81b8853b28e6048caa998bf550e0bfe5f860ef0172f4b9d6030920684a": "container"
+    }
+  },
+  "execution_sources_sha256": {
+    "eval/benchmarks/terminal_bench/harbor_agent.py": "361731fb4b40353307623e3eb46baf8d95a43f95f2349b1c8b8ca98837e78c81",
+    "eval/benchmarks/terminal_bench/live_policy.py": "bebf1bd19fe69583efa1a13f118e2ae2f6593d5416cecf5340bbae62bff3b559",
+    "eval/benchmarks/terminal_bench/tb2.py": "7d02930838f03b30ea78c62fbcf6b4211c33a608393ced9a93eb143e1400b8c6",
+    "eval/benchmarks/terminal_bench/tb22.py": "da6051bbe2cf6effd6c2c28247c35288f43df4310833e8049c270872ec26b9c3",
+    "eval/benchmarks/terminal_bench/tb23.py": "72e7d1bcdc5cde4c7b0c9e78a12bbadc56041ad06faf50f741a82b0fc3d56966",
+    "eval/benchmarks/terminal_bench/uv.lock": "ea8813895456a7040ebc4297b88a6e56fbdfb6f195cce4a40503ad8881591ccb",
+    "uv.lock": "68f7c6962deeba1f751e4da141de0f231d820e260f4bf25ecffeac49db37f7f5"
+  },
+  "artifact_sha256": {
+    "plan.json": "ca2f496d72411392801c7bdc731aad23c708de41d2a39110e49fc6b381c04202",
+    "claim.json": "741cafe567d71cbf3193656206226dccdb6a3ee7d3aa53f2af34717aeaecdfe3",
+    "harbor-binding.json": "b5e2f0ffed3c4129138c472de8c6bbbe14f0702fbce854849cb9f859b6fa3249",
+    "run-binding.json": "f044e2f41276ae2db39f496dde34d0c8e8baab70a414348fd4dcb3703650d0a0",
+    "candidate.json": "498ff7b86450740af8d792a9eebf59bdc51fcfe42c9aa1d9fa4827d3cef7b595",
+    "result.json": "2566c0c5ad860cd196442aa524cc314b43406c05549ae5f08cf721118fca8a12",
+    "db-evidence.json": "dede213ab3d0f22755757b799102bf8f66450d79559907747987df8bb277457c",
+    "docker-events.ndjson": "e28e0763ec69d71d8f8c45e77475b4f583d916a8adb0f01317917831921c7bfb",
+    "cleanup-evidence.json": "384ee8195e94bee9d81511bb12fa512d447360f97aeb98acef86aaa296bc7170",
+    "tb23-evidence.json": "69ca3445188f70bf5ff6762731de2316949f0cc247623dc679841863f1b348f4",
+    "harbor/tb2/music-harmony__njKvbbb/result.json": "476051173672f672f1038892086eea7020e9288088dff05d76ba340777085782"
+  },
+  "verification": {
+    "offline_tests_passed": 17,
+    "paid_slot_count": 1,
+    "automatic_retries": 0
+  }
+}

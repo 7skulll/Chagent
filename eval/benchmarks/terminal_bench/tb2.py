@@ -17,14 +17,24 @@ from harbor.trial.hooks import TrialEvent
 import yaml
 
 from chagent.models.fake import FakeModelClient
+from chagent.models.factory import create_model_client
+from eval.benchmarks.terminal_bench import live_policy
 from eval.benchmarks.terminal_bench.harbor_agent import (
     ACTIVE_SLOT,
+    LIMITS,
+    MODEL,
     Slot,
     profile_identity,
 )
 from eval.cli import _eval_database
 from eval.integrity import experiment_lock, publish
-from eval.manifests import VersionManifest, file_sha256, sha256_json, sha256_text
+from eval.manifests import (
+    VersionManifest,
+    file_sha256,
+    sha256_bytes,
+    sha256_json,
+    sha256_text,
+)
 
 DIRECTORY = Path(__file__).resolve().parent
 REPO = DIRECTORY.parents[2]
@@ -66,7 +76,7 @@ def package_identity(path):
     return sha256_json(modes)
 
 
-def identity(task_path, slot_id):
+def identity(task_path, slot_id, control=None, *, live=False):
     pins = require_harbor()
     modes = package_identity(task_path)
     task = Task(task_path)
@@ -80,6 +90,28 @@ def identity(task_path, slot_id):
             for name, config in yaml.safe_load(compose.read_text())["services"].items()
         }
     version_manifest = VersionManifest.capture(REPO)
+    profile = profile_identity()
+    protocol = None
+    if live:
+        if control is not None or task_path.name != "music-harmony":
+            raise ValueError(
+                "TB2.3 is one real music-harmony slot without synthetic controls"
+            )
+        if version_manifest.repo["dirty"] or not version_manifest.repo["commit"]:
+            raise ValueError(
+                "Freeze and run the paid slot from a committed, clean checkout"
+            )
+        protocol = live_policy.protocol()
+        profile = profile_identity(
+            live_policy.settings("unused-for-plan").model(),
+            {
+                **LIMITS,
+                **{
+                    name: protocol["budget"][name]
+                    for name in ("wall_seconds", "max_turns", "max_tool_calls")
+                },
+            },
+        )
     return {
         "schema": 1,
         "slot_id": slot_id,
@@ -92,6 +124,18 @@ def identity(task_path, slot_id):
         "harbor": pins["harbor"],
         "harbor_lock_sha256": file_sha256(DIRECTORY / "uv.lock"),
         "checkout": version_manifest.repo,
+        "execution_sources_sha256": {
+            str(path.relative_to(REPO)): file_sha256(path)
+            for path in (
+                Path(__file__).resolve(),
+                DIRECTORY / "harbor_agent.py",
+                DIRECTORY / "tb22.py",
+                DIRECTORY / "tb23.py",
+                DIRECTORY / "live_policy.py",
+                DIRECTORY / "uv.lock",
+                REPO / "uv.lock",
+            )
+        },
         "chagent_dependencies": version_manifest.dependencies,
         "platform": pins["terminal_bench"]["prebuilt_platform"],
         "images": {
@@ -99,13 +143,18 @@ def identity(task_path, slot_id):
             "verifier": task.config.verifier.environment.docker_image,
             "compose_services": service_images,
         },
-        "profile": profile_identity(),
-        "fixture_command_sha256": sha256_text(FIXTURE_COMMAND),
-        "client": "synthetic",
+        "profile": profile,
+        "client": "live" if live else "synthetic",
+        **(
+            {"live": protocol}
+            if live
+            else {"fixture_command_sha256": sha256_text(FIXTURE_COMMAND)}
+        ),
+        **({"control": control} if control is not None else {}),
     }
 
 
-def prepare(task_path, output):
+def prepare(task_path, output, *, control=None, live=False):
     task_path, output = task_path.absolute(), output.resolve()
     result_root = REPO / "eval" / "results"
     if output.is_relative_to(task_path) or (
@@ -115,26 +164,103 @@ def prepare(task_path, output):
             "Choose a new output outside the checkout or under eval/results"
         )
     slot_id = str(uuid4())
-    original = identity(task_path, slot_id)
+    original = identity(task_path, slot_id, control, live=live)
     output.mkdir(parents=True)
     frozen = output / task_path.name
     shutil.copytree(task_path, frozen, symlinks=True)
-    if identity(frozen, slot_id) != original:
+    if identity(frozen, slot_id, control, live=live) != original:
         raise ValueError("Diagnostic inputs changed during freeze")
     return publish(output / "plan.json", {**original, "sha256": sha256_json(original)})
 
 
-def load_plan(root):
+def read_plan(root):
+    """Validate the archived plan independently of the current checkout."""
     plan = read(root, "plan.json")
+    digest = plan.pop("sha256", None)
+    if plan.get("schema") != 1 or sha256_json(plan) != digest:
+        raise ValueError("Frozen plan digest or schema differs")
+    return {**plan, "sha256": digest}
+
+
+def load_plan(root):
+    plan = read_plan(root)
     if plan.get("task") not in PACKAGE_BYTES:
         raise ValueError("Plan does not name a supported diagnostic task")
-    digest = plan.pop("sha256")
+    archived = {key: value for key, value in plan.items() if key != "sha256"}
     if (
-        sha256_json(plan) != digest
-        or identity(root / plan["task"], plan["slot_id"]) != plan
+        identity(
+            root / plan["task"],
+            plan["slot_id"],
+            plan.get("control"),
+            live=plan["client"] == "live",
+        )
+        != archived
     ):
-        raise ValueError("Frozen plan, inputs or execution identity changed")
-    return {**plan, "sha256": digest}
+        raise ValueError("Frozen inputs or execution identity changed")
+    return plan
+
+
+def claim_identity(plan):
+    return {"slot_id": plan["slot_id"], "plan_sha256": plan["sha256"]}
+
+
+def summarize_result(root, plan):
+    root = root.resolve()
+    harbor = read(root, "harbor-binding.json")
+    trial_name = harbor["trial_name"]
+    if (
+        harbor["slot_id"] != plan["slot_id"]
+        or Path(trial_name).name != trial_name
+        or trial_name in {"", ".", ".."}
+    ):
+        raise ValueError("Archived Harbor binding differs from the plan")
+    trial_id = harbor["harbor_trial_id"]
+    relative = Path("harbor", "tb2", trial_name, "result.json")
+    raw_path = (root / relative).resolve()
+    if not raw_path.is_relative_to(root):
+        raise ValueError("Harbor result path is outside the slot archive")
+    raw_bytes = raw_path.read_bytes()
+    raw = json.loads(raw_bytes)
+    if raw["id"] != trial_id:
+        raise ValueError("Harbor result has an unexpected trial ID")
+    binding = (
+        read(root, "run-binding.json") if (root / "run-binding.json").exists() else None
+    )
+    candidate = (
+        read(root, "candidate.json") if (root / "candidate.json").exists() else None
+    )
+    if binding is not None and (
+        binding["slot_id"] != plan["slot_id"] or binding["harbor_trial_id"] != trial_id
+    ):
+        raise ValueError("Chagent run binding differs from the archived slot or trial")
+    if candidate is not None:
+        execution = candidate["execution"]
+        if execution["harbor_trial_id"] != trial_id or (
+            binding is not None and execution["run_id"] != binding["run_id"]
+        ):
+            raise ValueError(
+                "Candidate execution differs from the archived trial or run"
+            )
+    complete = (
+        binding is not None
+        and candidate is not None
+        and raw["exception_info"] is None
+        and raw["verifier_result"] is not None
+        and candidate["end_reason"] == "model_stop"
+        and not candidate["execution"]["command_outcome_unknown"]
+    )
+    return {
+        **claim_identity(plan),
+        "binding": binding,
+        "harbor_trial_id": trial_id,
+        "status": "observed" if complete else "incomplete",
+        "raw_verifier_result": raw["verifier_result"],
+        "exception": raw["exception_info"],
+        "harbor_result": relative.as_posix(),
+        "harbor_result_sha256": sha256_bytes(raw_bytes),
+        "candidate": candidate,
+        "cleanup": "unverified_tb2_1",
+    }
 
 
 def job_config(root, plan):
@@ -151,22 +277,37 @@ def job_config(root, plan):
     )
 
 
-async def execute(root, database, *, create_job=Job.create, client=None):
+async def execute(root, database, *, create_job=Job.create, client=None, api_key=None):
     root = root.resolve()
     if client is not None and not isinstance(client, FakeModelClient):
         raise ValueError("TB2.1 accepts only a synthetic model client")
     with experiment_lock(root):
         plan = load_plan(root)
+        paid = plan["client"] == "live"
+        if paid != (api_key is not None) or (paid and client is not None):
+            raise ValueError(
+                "Model dispatch must match the frozen live or synthetic plan"
+            )
+        provider = live_policy.settings(api_key) if paid else None
+        if "control" in plan and (
+            client is None
+            or client.tool_name != "exec_command"
+            or sha256_json(client.arguments) != plan["control"]["arguments_sha256"]
+        ):
+            raise ValueError("Scripted command does not match the frozen control")
         publish(
             root / "claim.json",
-            {"slot_id": plan["slot_id"], "plan_sha256": plan["sha256"]},
+            claim_identity(plan),
         )
-        synthetic = (
-            client
-            if client is not None
-            else FakeModelClient("exec_command", {"cmd": FIXTURE_COMMAND})
-        )
-        slot = Slot(root, plan, database, synthetic)
+        if paid:
+            model = provider.model()
+            model_client = create_model_client(provider)
+        else:
+            model = MODEL
+            model_client = client or FakeModelClient(
+                "exec_command", {"cmd": FIXTURE_COMMAND}
+            )
+        slot = Slot(root, plan, database, model_client, model=model)
         token = ACTIVE_SLOT.set(slot)
         end_event = None
 
@@ -192,40 +333,10 @@ async def execute(root, database, *, create_job=Job.create, client=None):
                 raise RuntimeError("Missing Harbor terminal evidence")
             if load_plan(root) != plan:
                 raise ValueError("Plan changed while Harbor was executing")
-            raw_path = slot.agent_dir.parent / "result.json"
-            raw = json.loads(raw_path.read_text())
-            if raw["id"] != str(slot.trial_id):
-                raise PermissionError("Harbor result has an unexpected trial ID")
-            binding_path = root / "run-binding.json"
-            binding = read(root, binding_path.name) if binding_path.exists() else None
-            candidate_path = root / "candidate.json"
-            candidate = (
-                read(root, candidate_path.name) if candidate_path.exists() else None
-            )
-            complete = (
-                binding is not None
-                and candidate is not None
-                and raw["exception_info"] is None
-                and raw["verifier_result"] is not None
-                and candidate["end_reason"] == "model_stop"
-                and not candidate["execution"]["command_outcome_unknown"]
-            )
-            return publish(
-                root / "result.json",
-                {
-                    "slot_id": plan["slot_id"],
-                    "plan_sha256": plan["sha256"],
-                    "binding": binding,
-                    "harbor_trial_id": str(slot.trial_id),
-                    "status": "observed" if complete else "incomplete",
-                    "raw_verifier_result": raw["verifier_result"],
-                    "exception": raw["exception_info"],
-                    "harbor_result": str(raw_path.relative_to(root)),
-                    "harbor_result_sha256": file_sha256(raw_path),
-                    "candidate": candidate,
-                    "cleanup": "unverified_tb2_1",
-                },
-            )
+            evidence = summarize_result(root, plan)
+            if evidence["harbor_trial_id"] != str(slot.trial_id):
+                raise PermissionError("Archived result has an unexpected trial ID")
+            return publish(root / "result.json", evidence)
         except BaseException as error:
             publish(
                 root / "failure.json",
@@ -234,22 +345,78 @@ async def execute(root, database, *, create_job=Job.create, client=None):
             raise
         finally:
             ACTIVE_SLOT.reset(token)
+            if paid:
+                await model_client.aclose()
 
 
 def report(root):
-    plan = read(root, "plan.json")
+    root = root.resolve()
+    plan = read_plan(root)
+    claimed = (root / "claim.json").exists()
+    if claimed and read(root, "claim.json") != claim_identity(plan):
+        raise ValueError("Archived claim differs from the frozen plan")
     if (root / "result.json").is_file():
-        result = read(root, "result.json")
-        result_path = (root / result["harbor_result"]).resolve()
-        if (
-            result["plan_sha256"] != plan["sha256"]
-            or not result_path.is_relative_to(root.resolve())
-            or file_sha256(result_path) != result["harbor_result_sha256"]
+        if not claimed:
+            raise ValueError("Archived result is missing a slot claim")
+        evidence = summarize_result(root, plan)
+        if read(root, "result.json") != evidence:
+            raise ValueError("Result summary differs from the archived evidence")
+    else:
+        evidence = {
+            "slot_id": plan["slot_id"],
+            "status": "incomplete" if claimed else "prepared",
+        }
+        if claimed and all(
+            (root / name).is_file()
+            for name in (
+                "harbor-binding.json",
+                "run-binding.json",
+                "candidate.json",
+            )
         ):
-            raise ValueError("Result evidence differs from the recorded binding")
-        return result
-    status = "incomplete" if (root / "claim.json").exists() else "prepared"
-    return {"slot_id": plan["slot_id"], "status": status}
+            # Candidate evidence may exist before the raw Harbor result is published.
+            harbor = read(root, "harbor-binding.json")
+            binding = read(root, "run-binding.json")
+            candidate = read(root, "candidate.json")
+            if (
+                harbor["slot_id"] != plan["slot_id"]
+                or binding["slot_id"] != plan["slot_id"]
+                or binding["harbor_trial_id"] != harbor["harbor_trial_id"]
+                or candidate["execution"]["harbor_trial_id"]
+                != harbor["harbor_trial_id"]
+                or candidate["execution"]["run_id"] != binding["run_id"]
+            ):
+                raise ValueError(
+                    "Interrupted candidate binding differs from the archived slot"
+                )
+            evidence["end_reason"] = candidate["end_reason"]
+            evidence["interruption"] = candidate["execution"].get("interruption")
+    legacy = root.parent / f"{plan.get('control', {}).get('name')}-evidence.json"
+    named_cleanup = (root / "cleanup-evidence.json").is_file()
+    if named_cleanup or (
+        plan.get("control", {}).get("name") == root.name and legacy.is_file()
+    ):
+        if not claimed:
+            raise ValueError("Cleanup evidence is missing a slot claim")
+        from eval.benchmarks.terminal_bench.tb22 import cleanup_evidence
+
+        proven = cleanup_evidence(root, plan)
+        if named_cleanup:
+            saved = read(root, "cleanup-evidence.json")
+        else:
+            old = read(legacy.parent, legacy.name)
+            saved = {
+                "slot_id": old["slot_id"],
+                "plan_sha256": old["plan_sha256"],
+                "harbor_trial_id": old["trial"]["harbor_trial_id"],
+                "events_sha256": old["events_sha256"],
+                "resources": old["cleanup"],
+            }
+        if saved != proven:
+            raise ValueError("Cleanup record differs from the archived Docker events")
+        evidence["cleanup"] = "verified"
+        evidence["cleanup_evidence"] = proven
+    return evidence
 
 
 def main():

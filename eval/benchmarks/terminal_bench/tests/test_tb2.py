@@ -28,6 +28,10 @@ class Backend:
         self.session_id = session_id
         self.calls = []
         self.failure = failure
+        self.stopped_services = []
+
+    async def stop_service(self, service):
+        self.stopped_services.append(service)
 
     async def exec(self, command, *, timeout_sec):
         self.calls.append((command, timeout_sec))
@@ -54,6 +58,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             current = ToolContext(path, session, run, task_id=str(trial_id))
             outcome = await tool.execute("valid", {"cmd": "pwd"}, context=current)
             self.assertTrue(outcome.outcome_unknown)
+            self.assertEqual(backend.stopped_services, ["main"])
             with self.assertRaises(PermissionError):
                 await tool.execute("late", {"cmd": "pwd"}, context=current)
             self.assertEqual(backend.calls, [("pwd", 15)])
@@ -114,6 +119,120 @@ class SlotTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "claim.json already exists"):
             await tb2.execute(self.root, None, create_job=failed)
         self.assertEqual(tb2.report(self.root)["status"], "incomplete")
+
+    async def test_unbound_client_and_command_are_rejected_before_claim(self):
+        output = self.root.parent / "controlled"
+        tb2.prepare(
+            self.root / "music-harmony",
+            output,
+            control={
+                "name": "missing",
+                "arguments_sha256": sha256_json({"cmd": "pwd"}),
+            },
+        )
+        for client in (
+            object(),
+            FakeModelClient("read_file", {"cmd": "pwd"}),
+            FakeModelClient("exec_command", {"cmd": "pwd", "timeout_sec": 1}),
+        ):
+            with (
+                self.subTest(client=type(client).__name__),
+                self.assertRaises(ValueError),
+            ):
+                await tb2.execute(output, None, client=client)
+            self.assertFalse((output / "claim.json").exists())
+
+    def test_interrupted_report_rejects_mismatched_run_binding(self):
+        plan = tb2.read_plan(self.root)
+        trial = str(uuid4())
+        binding = {
+            "slot_id": plan["slot_id"],
+            "harbor_trial_id": trial,
+            "run_id": str(uuid4()),
+        }
+        candidate = {
+            "end_reason": "user_cancelled",
+            "execution": {
+                "run_id": str(uuid4()),
+                "harbor_trial_id": trial,
+                "interruption": {"reason": "cancelled", "main_stop": "returned"},
+            },
+        }
+        files = {
+            "claim.json": tb2.claim_identity(plan),
+            "harbor-binding.json": {
+                "slot_id": plan["slot_id"],
+                "harbor_trial_id": trial,
+            },
+            "run-binding.json": binding,
+            "candidate.json": candidate,
+        }
+        for name, data in files.items():
+            (self.root / name).write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, "Interrupted candidate binding"):
+            tb2.report(self.root)
+        candidate["execution"]["run_id"] = binding["run_id"]
+        (self.root / "candidate.json").write_text(json.dumps(candidate))
+        self.assertEqual(
+            tb2.report(self.root)["interruption"],
+            candidate["execution"]["interruption"],
+        )
+
+    def test_report_checks_plan_without_using_live_execution_identity(self):
+        with patch.object(
+            tb2, "identity", side_effect=AssertionError("live checkout lookup")
+        ):
+            self.assertEqual(tb2.report(self.root)["status"], "prepared")
+        path = self.root / "plan.json"
+        plan = json.loads(path.read_text())
+        plan["profile"]["limits"]["command_timeout_sec"] += 1
+        path.write_text(json.dumps(plan))
+        with self.assertRaisesRegex(ValueError, "Frozen plan digest"):
+            tb2.report(self.root)
+
+    def test_report_verifies_claim_trial_and_raw_reward(self):
+        plan = tb2.read_plan(self.root)
+        claim = tb2.claim_identity(plan)
+        claim_path = self.root / "claim.json"
+        claim_path.write_text(json.dumps({**claim, "slot_id": str(uuid4())}))
+        with self.assertRaisesRegex(ValueError, "Archived claim differs"):
+            tb2.report(self.root)
+        claim_path.write_text(json.dumps(claim))
+        trial_id = str(uuid4())
+        (self.root / "harbor-binding.json").write_text(
+            json.dumps(
+                {
+                    "slot_id": plan["slot_id"],
+                    "harbor_trial_id": trial_id,
+                    "trial_name": "trial",
+                }
+            )
+        )
+        raw = self.root / "harbor/tb2/trial/result.json"
+        raw.parent.mkdir(parents=True)
+        raw.write_text(
+            json.dumps(
+                {
+                    "id": trial_id,
+                    "exception_info": None,
+                    "verifier_result": {"rewards": {"reward": 0.0}},
+                }
+            )
+        )
+        evidence = tb2.summarize_result(self.root, plan)
+        path = self.root / "result.json"
+        path.write_text(json.dumps(evidence))
+        self.assertEqual(
+            tb2.report(self.root)["raw_verifier_result"], {"rewards": {"reward": 0.0}}
+        )
+        forged = {**evidence, "raw_verifier_result": {"rewards": {"reward": 1.0}}}
+        path.write_text(json.dumps(forged))
+        with self.assertRaisesRegex(ValueError, "Result summary differs"):
+            tb2.report(self.root)
+        path.write_text(json.dumps(evidence))
+        raw.write_text(json.dumps({"id": str(uuid4())}))
+        with self.assertRaisesRegex(ValueError, "unexpected trial ID"):
+            tb2.report(self.root)
 
     @unittest.skipUnless(
         os.environ.get("CHAGENT_TEST_DATABASE_URL"), "Requires test PostgreSQL"

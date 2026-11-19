@@ -19,6 +19,7 @@ from chagent.storage.repositories import ConversationRepository
 from chagent.tools.base import AgentTool, AgentToolResult
 from chagent.tools.registry import ToolRegistry
 from eval.budgets import BudgetClient
+from eval.benchmarks.terminal_bench.live_policy import LiveDiagnosticBudget
 from eval.integrity import publish
 from eval.manifests import sha256_json, sha256_text
 
@@ -78,10 +79,10 @@ class TerminalCommand(AgentTool):
                     params["cmd"], timeout_sec=seconds
                 )
         except asyncio.CancelledError:
-            execution.uncertain = True
+            await execution.contain_interrupted_command("cancelled")
             raise
         except (OSError, RuntimeError):
-            execution.uncertain = True
+            await execution.contain_interrupted_command("timeout_or_backend_error")
             return AgentToolResult(
                 [TextContent("Harbor command outcome unknown.")],
                 is_error=True,
@@ -119,6 +120,33 @@ class HarborExecution:
         self.run_id = None
         self.released = False
         self.uncertain = False
+        self.interruption = None
+
+    async def contain_interrupted_command(self, reason):
+        self.uncertain = True
+        self.interruption = {"reason": reason, "main_stop": "unverified"}
+
+        # Harbor otherwise attempts recovery collection before teardown.
+        # Stop the main service through Harbor before returning to that path.
+        async def stop_main():
+            try:
+                async with asyncio.timeout(30):
+                    await self.backend.stop_service("main")
+            except (OSError, RuntimeError) as error:
+                self.interruption["stop_error"] = type(error).__name__
+            else:
+                self.interruption["main_stop"] = "returned"
+
+        stop = asyncio.create_task(stop_main())
+        cancelled = False
+        while not stop.done():
+            try:
+                await asyncio.shield(stop)
+            except asyncio.CancelledError:
+                cancelled = True
+        stop.result()
+        if cancelled:
+            raise asyncio.CancelledError()
 
     async def bind(self, session_id, run_id, workspace):
         if (
@@ -164,6 +192,11 @@ class HarborExecution:
             "tool_profile": PROFILE,
             "adapter_released": self.released,
             "command_outcome_unknown": self.uncertain,
+            **(
+                {"interruption": self.interruption}
+                if self.interruption is not None
+                else {}
+            ),
             "cleanup": "harbor_unverified",
         }
 
@@ -174,11 +207,12 @@ class HarborExecution:
 
 
 class Slot:
-    def __init__(self, root, plan, database, client):
+    def __init__(self, root, plan, database, client, *, model=MODEL):
         self.root = root
         self.plan = plan
         self.database = database
         self.client = client
+        self.model = model
         self.trial_id = self.agent_dir = self.backend = self.environment_session = None
         self.started = False
 
@@ -245,19 +279,18 @@ class ChagentTerminalAgent(BaseAgent):
             )
         slot.check(self, environment)
         slot.started = True
-        # TB2.1 uses only a scripted client. The real provider entry point is a later batch.
-        budget = {
-            "max_turns": LIMITS["max_turns"],
-            "max_tool_calls": LIMITS["max_tool_calls"],
-            "total_cost_usd": 1,
-        }
-        guard = BudgetClient(
-            slot.client,
-            SimpleNamespace(budget=budget, pricing=None),
-            SimpleNamespace(budget=budget),
-            synthetic=True,
-            expected_preamble=PROMPT,
-        )
+        profile = slot.plan["profile"]
+        limits = profile["limits"]
+        live = slot.plan.get("live")
+        if live:
+            terms = SimpleNamespace(budget=live["budget"], pricing=live["pricing"])
+            guard = LiveDiagnosticBudget(slot.client, terms, profile, PROMPT)
+        else:
+            budget = {**limits, "total_cost_usd": 1}
+            terms = SimpleNamespace(budget=budget, pricing=None)
+            guard = BudgetClient(
+                slot.client, terms, terms, synthetic=True, expected_preamble=PROMPT
+            )
         with TemporaryDirectory(prefix="chagent-tb2-control-") as control:
             workspace = Path(control)
             session_id = await ConversationRepository(slot.database).create_session(
@@ -268,13 +301,13 @@ class ChagentTerminalAgent(BaseAgent):
             )
             runner = create_bound_runner(
                 slot.database,
-                MODEL,
+                slot.model,
                 guard,
                 execution=execution,
-                max_turns=LIMITS["max_turns"],
-                timeout=LIMITS["wall_seconds"],
-                wall_timeout=LIMITS["wall_seconds"],
-                context_policy=ContextPolicy(output_tokens=MODEL.max_tokens),
+                max_turns=limits["max_turns"],
+                timeout=limits["wall_seconds"],
+                wall_timeout=limits["wall_seconds"],
+                context_policy=ContextPolicy(output_tokens=slot.model.max_tokens),
             )
             runner.context.instructions = PROMPT
 
@@ -295,7 +328,12 @@ class ChagentTerminalAgent(BaseAgent):
                     session_id, instruction, on_started=on_started
                 )
                 end_reason = result.end_reason
-                if execution.uncertain or end_reason != "model_stop" or guard.violation:
+                if (
+                    execution.uncertain
+                    or end_reason != "model_stop"
+                    or guard.violation
+                    or guard.unknown_cost
+                ):
                     raise RuntimeError(
                         "Chagent candidate did not complete its controlled run"
                     )
@@ -315,15 +353,25 @@ class ChagentTerminalAgent(BaseAgent):
                         "tool_calls": guard.tool_calls,
                         "verified_preambles": guard.verified_requests,
                         "candidate_cost": guard.cost(),
+                        **(
+                            {
+                                "usage_calls": guard.usage_calls,
+                                "usage": guard.token_totals,
+                                "budget_violation": guard.violation,
+                                "known_cost_usd": round(guard.spent, 9),
+                            }
+                            if live
+                            else {}
+                        ),
                     },
                 )
 
 
-def profile_identity():
+def profile_identity(model=MODEL, limits=LIMITS):
     return {
         "name": PROFILE,
-        "model": asdict(MODEL),
-        "limits": LIMITS,
+        "model": asdict(model),
+        "limits": limits,
         "prompt_sha256": sha256_json(
             {"instructions": PROMPT, "environment": ENVIRONMENT}
         ),

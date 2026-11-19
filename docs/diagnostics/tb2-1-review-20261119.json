@@ -1,0 +1,98 @@
+{
+  "date": "2026-11-19",
+  "batch": "TB2.1 review",
+  "local_artifacts": "eval/results/tb2-1-review-20261119",
+  "profile": "chagent-terminal-v1",
+  "checkout": {
+    "commit": "5180ded21a9254734b3767e99664669d4e30f5ed",
+    "dirty": true,
+    "patch_sha256": "f9db67f19bd8bc61a6a5fab8f82b5fd4a79990ae07c8a4e03e166ff62e29a74e"
+  },
+  "plan_sha256": "23b07d493a235197a08566ec0c03e337a14868ba75ef0602755d60c54af43236",
+  "task": "music-harmony",
+  "published_task_digest": "sha256:b77713c760d519822ee4f0da9e555c9e124241c2544d0e759a11b52eb7d26c24",
+  "harbor": "0.25.0",
+  "binding": {
+    "harbor_trial_id": "7dfa383e-213d-45e5-af86-2f33eb3208da",
+    "profile": "chagent-terminal-v1",
+    "run_id": "48f39655-575d-4e23-86de-8da9dc0c6271",
+    "session_id": "71c453c4-a8de-4a33-8d11-0df4fd5856b9",
+    "slot_id": "5a70388d-2ad9-4b53-bcc8-f9e184728a2c"
+  },
+  "synthetic_model_requests": 2,
+  "paid_model_requests": 0,
+  "official_reward": 0.0,
+  "exception": null,
+  "tool": {
+    "name": "exec_command",
+    "command": "pwd",
+    "stdout": "/app",
+    "exit_code": 0
+  },
+  "artifact_control": "missing /app/harmony.mxl",
+  "cleanup": {
+    "scope": "trial",
+    "verified": true,
+    "resources": {
+      "container": [
+        {
+          "id": "81fd869d32d18fda7d81449bcffc5cbaf070342db5b77e5bde89830441f05eae",
+          "name": "music-harmony__9ffu4t8__env-main-1",
+          "created_ns": 1795063891441046250,
+          "destroyed_ns": 1795063894108953543
+        },
+        {
+          "id": "f6c32666721106fe83f0fa5906f9b8d54d7585969cb1367ef5e80aa43c2bf33a",
+          "name": "music-harmony__9ffu4t8__verifier__trial-main-1",
+          "created_ns": 1795063894711995376,
+          "destroyed_ns": 1795063904302513214
+        }
+      ],
+      "network": [
+        {
+          "id": "9805359c1b5860df4d419282b72cd859107f13d58c7aeb8a28b8c0f1182fddb8",
+          "name": "music-harmony__9ffu4t8__env_default",
+          "created_ns": 1795063891412797333,
+          "destroyed_ns": 1795063894329190376
+        },
+        {
+          "id": "159eaa9c2083aa6cfc1a909bda860e066b35b8a009d008530845ae55d1a17c43",
+          "name": "music-harmony__9ffu4t8__verifier__trial_default",
+          "created_ns": 1795063894690358793,
+          "destroyed_ns": 1795063904504320923
+        }
+      ]
+    },
+    "unchanged_volume_inventory": true,
+    "unrelated_global_network_inventory_changed": true
+  },
+  "test": {
+    "suite": "unittest discover -s eval/benchmarks/terminal_bench/tests -v",
+    "passed": 6,
+    "source_sha256": {
+      "eval/benchmarks/terminal_bench/tb2.py": "7d66777741b4ed19c4283db344d585d4f9b213bf0943b861ffce646c666a0f0b",
+      "eval/benchmarks/terminal_bench/harbor_agent.py": "79823d422104a468de03304a0116b5e3b42bb82b423f19229563500355f91ce1",
+      "eval/benchmarks/terminal_bench/tests/test_tb2.py": "3af14d838903b8da74b0649647ee08f70772dc178b1b556b27692ee0d7acd163"
+    }
+  },
+  "sha256": {
+    "prepare.log": "1d58b120689e07d0b2aa25b52338e87de3a99a300930cf469dfd01ea86bae40f",
+    "run.log": "45f1a4455ec8e87efb1cf18c327c7b08b91d848918fe8ac7d1971417b5c23b6b",
+    "report.log": "d5b8e82a17b7f44ae7fad448c18e92ef1c7e0132bc8f61fc7545d562b0a02a69",
+    "run-meta.json": "0b3258ade91be1f83b0f267f0c34791c487c60b18d957647ef5fc2ef7eace36c",
+    "tests.log": "4a8ec9cd50395f2040338a5b0df4277a5fbcc5c680c27dfd3b8f7fb65e59c5b2",
+    "db-evidence.json": "3cbe3d8d4eb4232da77149432fb98d515bcbaebcd330d64c5ca6d8854b62e3c6",
+    "docker-events.ndjson": "2b715bfe54adfe72c3b6c5f2305148adf9ecf6bea8cd0ecd919af0d6a633e5b3",
+    "resources-before.json": "fdb614ffca6df94ced7a7db9952fbd22803f1a4a4532e4f37ebd2d88816a3893",
+    "resources-after.json": "7f02ee36f17600fe3e11fa11aa418f800f526bcfa8dbe614c9eaf9f93835a5a0",
+    "smoke/plan.json": "c28e8242ef5f37f83ea14ef0f43570620a2fbd3e18d96730d2a98d6b4033cfca",
+    "smoke/claim.json": "e1e7e82003f903a912d8ea9a923b9ffd6381695dfd67733923d09ce7f33a87ff",
+    "smoke/harbor-binding.json": "ed2837df25dbebcade39a0c6064ef21f4c2f6ae535099dbbd542dde8b3a036e8",
+    "smoke/run-binding.json": "4c03c36aa63585e1081bbd426338cc7668df8d10379ff01f210909eefadf1ebd",
+    "smoke/candidate.json": "77ebfdc5cec312d84d8afdb9189966c48da3297ad3105455a38dc730458abb8f",
+    "smoke/result.json": "d9b60008454fd66491f36b51cbea976ef092081f4ddb4a8a01841aced49e2c42",
+    "smoke/harbor/tb2/music-harmony__9ffU4t8/result.json": "027c994359ae3a2d54d45cd9ac5e556e4175b065c69487a0dc4db4e1860fa99c",
+    "smoke/harbor/tb2/music-harmony__9ffU4t8/verifier/reward.json": "7af50836f84864c1bf8fc1d78cd10520662f9166b688f8252cc5609acc886ff5",
+    "smoke/harbor/tb2/music-harmony__9ffU4t8/artifacts/manifest.json": "80a9079579a9bca46a82fcc8f40ad60517c9a8a1f45920f8bf186c90c2219c91"
+  }
+}
