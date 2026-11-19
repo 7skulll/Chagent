@@ -14,6 +14,14 @@
       "prebuilt_platform": "linux/amd64",
       "first_task": "music-harmony",
       "multi_service_candidate": "freight-dispatch-shift"
+    },
+    "published": {
+      "dataset_ref": "terminal-bench/terminal-bench@4.1.0",
+      "dataset_digest": "sha256:5881c1b1c74a96f07baef00a7c869e09802704bc0dc912c870e7acccc11440da",
+      "task_refs": {
+        "music-harmony": "sha256:b77713c760d519822ee4f0da9e555c9e124241c2544d0e759a11b52eb7d26c24",
+        "freight-dispatch-shift": "sha256:5f6e51724b93f5c5fdfbd8836cd6bd84962c51f2242ff52f4067a6ba4085d9df"
+      }
     }
   },
   "host": {
@@ -21,7 +29,7 @@
     "architecture": "arm64",
     "python": "3.13.9"
   },
-  "scope": "Static and Harbor parser preflight. Docker execution and verifier cost are unverified.",
+  "scope": "Git snapshot and optional verified published packages. Resources are parsed configuration, not runtime usage.",
   "verified_source_files": 2903,
   "tasks": [
     {
@@ -65,7 +73,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -145,13 +162,22 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": {
+        "declared_resources": {
           "cpus": 1,
           "memory_mb": 4096,
           "storage_mb": 10240,
           "gpus": 0,
           "tpu": null
         },
+        "resolved_resources": {
+          "cpus": 1,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "verifier.environment",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -231,7 +257,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 8192,
+          "storage_mb": 20480,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 4,
         "potential_fee_signals": []
@@ -310,7 +345,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": null,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 5,
         "potential_fee_signals": []
@@ -389,7 +433,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -470,7 +523,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 5,
         "potential_fee_signals": []
@@ -551,7 +613,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -634,7 +705,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": null,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [
           "api"
         ],
@@ -729,7 +809,16 @@
         "dependency_files": [
           "Dockerfile"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 8192,
+          "storage_mb": 20480,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [
           "main"
         ],
@@ -825,7 +914,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 2,
         "potential_fee_signals": []
@@ -910,7 +1008,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 8,
+          "memory_mb": 16384,
+          "storage_mb": 15000,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -992,7 +1099,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 2,
         "potential_fee_signals": []
@@ -1071,7 +1187,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -1150,7 +1275,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -1228,7 +1362,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 8,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -1311,7 +1454,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 16384,
+          "storage_mb": 30720,
+          "gpus": 1,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -1393,7 +1545,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -1476,7 +1637,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 2,
         "potential_fee_signals": []
@@ -1558,7 +1728,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -1644,7 +1823,33 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": {
+          "package_ref": "sha256:5f6e51724b93f5c5fdfbd8836cd6bd84962c51f2242ff52f4067a6ba4085d9df",
+          "declared_resources": {
+            "cpus": 2,
+            "memory_mb": 4096,
+            "storage_mb": 10240,
+            "gpus": 0,
+            "tpu": null
+          },
+          "resolved_resources": {
+            "cpus": 2,
+            "memory_mb": 4096,
+            "storage_mb": 10240,
+            "gpus": 0,
+            "tpu": null
+          },
+          "resource_source": "verifier.environment"
+        },
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -1736,7 +1941,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -1817,7 +2031,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -1909,7 +2132,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 2,
         "potential_fee_signals": []
@@ -2026,7 +2258,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -2105,7 +2346,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -2188,7 +2438,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": null,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 2,
         "potential_fee_signals": []
@@ -2278,7 +2537,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 20480,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 5,
         "potential_fee_signals": []
@@ -2393,13 +2661,22 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": {
+        "declared_resources": {
           "cpus": 16,
           "memory_mb": 32768,
           "storage_mb": 1024000,
           "gpus": 1,
           "tpu": null
         },
+        "resolved_resources": {
+          "cpus": 16,
+          "memory_mb": 32768,
+          "storage_mb": 1024000,
+          "gpus": 1,
+          "tpu": null
+        },
+        "resource_source": "verifier.environment",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -2481,7 +2758,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -2566,7 +2852,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -2652,13 +2947,22 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": {
+        "declared_resources": {
           "cpus": 2,
           "memory_mb": 4096,
           "storage_mb": 10240,
           "gpus": 0,
           "tpu": null
         },
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "verifier.environment",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -2742,7 +3046,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 2,
         "potential_fee_signals": []
@@ -2823,13 +3136,22 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": {
+        "declared_resources": {
           "cpus": 2,
           "memory_mb": 4096,
           "storage_mb": 10240,
           "gpus": 0,
           "tpu": null
         },
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "verifier.environment",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -2916,7 +3238,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 20480,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -3019,13 +3350,22 @@
         "dependency_files": [
           "Dockerfile"
         ],
-        "resources": {
+        "declared_resources": {
           "cpus": 16,
           "memory_mb": 16384,
           "storage_mb": 40960,
           "gpus": 0,
           "tpu": null
         },
+        "resolved_resources": {
+          "cpus": 16,
+          "memory_mb": 16384,
+          "storage_mb": 40960,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "verifier.environment",
+        "published_package": null,
         "collect_services": [
           "main",
           "customer",
@@ -3132,7 +3472,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 8,
+          "memory_mb": 16384,
+          "storage_mb": 30720,
+          "gpus": 1,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -3219,7 +3568,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 16384,
+          "storage_mb": 20480,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -3313,7 +3671,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 4096,
+          "storage_mb": 5120,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -3392,7 +3759,33 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": {
+          "package_ref": "sha256:b77713c760d519822ee4f0da9e555c9e124241c2544d0e759a11b52eb7d26c24",
+          "declared_resources": {
+            "cpus": 2,
+            "memory_mb": 4096,
+            "storage_mb": 10240,
+            "gpus": 0,
+            "tpu": null
+          },
+          "resolved_resources": {
+            "cpus": 2,
+            "memory_mb": 4096,
+            "storage_mb": 10240,
+            "gpus": 0,
+            "tpu": null
+          },
+          "resource_source": "verifier.environment"
+        },
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -3478,7 +3871,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 14,
         "potential_fee_signals": []
@@ -3560,7 +3962,16 @@
           "Dockerfile",
           "package.json"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 15360,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 8,
         "potential_fee_signals": []
@@ -3654,7 +4065,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 17,
         "potential_fee_signals": []
@@ -3742,13 +4162,22 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": {
+        "declared_resources": {
           "cpus": 8,
           "memory_mb": 16384,
           "storage_mb": 10240,
           "gpus": null,
           "tpu": null
         },
+        "resolved_resources": {
+          "cpus": 8,
+          "memory_mb": 16384,
+          "storage_mb": 10240,
+          "gpus": null,
+          "tpu": null
+        },
+        "resource_source": "verifier.environment",
+        "published_package": null,
         "collect_services": [
           "kafka"
         ],
@@ -3843,7 +4272,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -3924,7 +4362,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 8192,
+          "storage_mb": 4096,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 26,
         "potential_fee_signals": []
@@ -4005,7 +4452,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": null,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -4088,7 +4544,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 8192,
+          "storage_mb": 20480,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -4168,7 +4633,16 @@
           "Dockerfile",
           "package.json"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 6,
         "potential_fee_signals": []
@@ -4253,7 +4727,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -4334,7 +4817,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -4418,7 +4910,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -4498,7 +4999,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -4580,7 +5090,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -4661,7 +5180,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": null,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -4742,7 +5270,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 18000,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 2,
         "potential_fee_signals": []
@@ -4824,7 +5361,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 8,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": null,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [
           "main"
         ],
@@ -4907,7 +5453,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 2,
         "potential_fee_signals": []
@@ -4987,7 +5542,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 4,
+          "memory_mb": 16384,
+          "storage_mb": 51200,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -5069,7 +5633,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -5151,7 +5724,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 16384,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -5236,7 +5818,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 20480,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -5316,7 +5907,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -5396,7 +5996,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -5475,7 +6084,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 8192,
+          "storage_mb": 15360,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 3,
         "potential_fee_signals": []
@@ -5556,7 +6174,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 2,
+          "memory_mb": 4096,
+          "storage_mb": 10240,
+          "gpus": null,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 1,
         "potential_fee_signals": []
@@ -5638,7 +6265,16 @@
           "pyproject.toml",
           "uv.lock"
         ],
-        "resources": null,
+        "declared_resources": null,
+        "resolved_resources": {
+          "cpus": 8,
+          "memory_mb": 16384,
+          "storage_mb": 10240,
+          "gpus": 0,
+          "tpu": null
+        },
+        "resource_source": "environment (inherited)",
+        "published_package": null,
         "collect_services": [],
         "artifacts": 2,
         "potential_fee_signals": []

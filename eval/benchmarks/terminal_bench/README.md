@@ -6,7 +6,7 @@
 
 - 复用了本机已有任务快照，按官方提交的 Git 树重算目录对象，核对全部 2,903 个文件的 Git blob、执行位及文件集合，再复制到本机 `eval/results/tb0-20261119/tasks-v4.1.0`，对副本重复预检。66/66 题由 Harbor 的 `Task(path)` 成功解析，任务级 SHA-256 和静态能力见 [compatibility.json](compatibility.json)。
 - 66 题均使用独立 verifier，无多步骤声明，Agent 时限均为 28,800 秒。11 题声明环境 Compose，5 题有 collect hook，1 题声明技能目录，3 题要求加速器。默认参数下 Agent 阶段均解析为 `public`，64 题 verifier 为 `public`，2 题为 `no-network`。矩阵里的费用信号来自静态扫描，其空值仅表示扫描未命中。构建、验证时的实际联网与使用量需通过执行确认。
-- 官方镜像清单覆盖 157 个镜像条目。固定提交的发布脚本指定 `linux/amd64`。另按镜像 digest 查询注册表，核实 8 个候选任务的 20 个镜像均只声明 `linux/amd64`，见 [registry-platforms.json](registry-platforms.json)。Compose 的外部依赖镜像另列在矩阵中。Darwin arm64 本机有 8 个逻辑 CPU、24 GiB 内存。Docker daemon 未运行，VM 资源分配、镜像可拉取性和 amd64 模拟执行均待 TB1 复核。 [官方构建脚本](https://github.com/harbor-framework/terminal-bench/blob/4070d6cef56a7d20cb5dc98d5e10ada88a6b9440/scripts/release-build/release_prebuilt.py)
+- 官方镜像清单覆盖 157 个镜像条目。固定提交的发布脚本指定 `linux/amd64`。另按镜像 digest 查询注册表，核实 8 个候选任务的 20 个镜像均只声明 `linux/amd64`，见 [registry-platforms.json](registry-platforms.json)。Compose 的外部依赖镜像另列在矩阵中。Darwin arm64 本机有 8 个逻辑 CPU、24 GiB 内存。TB0 当时未启动 Docker。后续 TB1 已核实本机 amd64 执行和两道发布任务的镜像与运行链路，其余题目仍以静态预检为准。 [官方构建脚本](https://github.com/harbor-framework/terminal-bench/blob/4070d6cef56a7d20cb5dc98d5e10ada88a6b9440/scripts/release-build/release_prebuilt.py)
 - 单服务首题选 `music-harmony@2.2.1`。2 CPU、4 GiB 内存声明、约 10 GiB 存储声明、无 GPU、无 Compose。解析确认有一个声明产物，独立验证时限 60 秒。验证入口调用本地 Python 检查，依赖锁包含 RewardKit 0.2.4 和 music21 7.3.3，人工检查入口和直接依赖时未发现模型调用。
 - 多服务候选选 `freight-dispatch-shift@2.2.0`。同为 2 CPU、4 GiB 内存声明和约 10 GiB 存储声明，`main` 依赖通过健康检查的 `event-feed`。解析确认有一个声明产物，独立验证时限 300 秒。验证入口为本地检查，包含回环 HTTP 模拟服务。该题用于验证 Compose 服务链，另选声明 sidecar collect 的任务覆盖跨服务产物采集。
 
@@ -19,27 +19,36 @@
 | 外部 Agent | `AgentFactory.create_agent_from_import_path` 加载 `BaseAgent` 子类。实现 `setup(environment)` 与 `run(instruction, environment, context)`。Harbor 在调用前按任务设置默认执行用户。 [工厂](https://github.com/harbor-framework/harbor/blob/fdba28fc411e47e8765420a1a063b4918fce3def/src/harbor/agents/factory.py#L248) · [接口](https://github.com/harbor-framework/harbor/blob/fdba28fc411e47e8765420a1a063b4918fce3def/src/harbor/agents/base.py#L670) |
 | 命令与文件 | `BaseEnvironment.exec(command, cwd, env, timeout_sec, user)` 返回 `ExecResult`。Docker 实现默认进入 `main`，另有按服务执行和文件传输方法。TB2 应把 Agent 工具绑定到主环境。超时及取消可结束宿主 Compose 子进程，容器内部后代进程的行为要实跑验证。 [Docker 执行](https://github.com/harbor-framework/harbor/blob/fdba28fc411e47e8765420a1a063b4918fce3def/src/harbor/environments/docker/docker.py#L1355) |
 | 采集与验证 | `SingleStepTrial._run` 依序运行 Agent、上传日志、收集产物、停止 Agent 环境，再启动独立 verifier。需要 sidecar 产物时，`_collect_artifacts_phased` 先采集 main、尝试停止 main，再采集 sidecar。验证器接收采集结果，从 `reward.json` 或 `reward.txt` 读取官方结果。 [Trial](https://github.com/harbor-framework/harbor/blob/fdba28fc411e47e8765420a1a063b4918fce3def/src/harbor/trial/single_step.py#L37) · [采集](https://github.com/harbor-framework/harbor/blob/fdba28fc411e47e8765420a1a063b4918fce3def/src/harbor/trial/trial.py#L1623) · [判分](https://github.com/harbor-framework/harbor/blob/fdba28fc411e47e8765420a1a063b4918fce3def/src/harbor/verifier/verifier.py#L198) |
-| 取消与清理 | `Trial.run` 在取消后记录异常、尝试恢复输出，并在 `finally` 调用 `_finalize`。Agent 和独立 verifier 的环境停止由 Harbor 调用，Chagent 记录槽位和成本。TB1 需观察实际 Docker 资源回收，包含异常退出。 [取消与收尾](https://github.com/harbor-framework/harbor/blob/fdba28fc411e47e8765420a1a063b4918fce3def/src/harbor/trial/trial.py#L601) |
+| 取消与清理 | `Trial.run` 在取消后记录异常、尝试恢复输出，并在 `finally` 调用 `_finalize`。Agent 和独立 verifier 的环境停止由 Harbor 调用，Chagent 记录槽位和成本。TB1 已核对四个正常结束槽位的资源回收，异常退出仍待专项。 [取消与收尾](https://github.com/harbor-framework/harbor/blob/fdba28fc411e47e8765420a1a063b4918fce3def/src/harbor/trial/trial.py#L601) |
 
 ## 复验
 
-在 Chagent 仓库根目录运行。已有任务快照时，将最后一步的 `--tasks` 指向已有快照即可，预检会校验其内容和执行位。
+从 Chagent 仓库根目录运行。权威任务树是固定提交的 GitHub `tasks` 子树，根 ID 为 `d9f7ae82365a09d0727b01c7040ba4d4fc1d7986`。历史复验可使用本机的 `eval/results/tb0-20261119/tasks-git-tree.gz` 与已验证快照 `tasks-v4.1.0`，同时设置 `--git-tree` 和 `--tasks`。`preflight.py` 会验证文件集合、Git 对象、内容和执行位。四份历史截断下载均保存在单独的 `eval/results/tb0-20261119-incomplete-downloads/`，接口源码证据保存在完整的 `harbor-source/` 中。
+
+矩阵的 `verifier.declared_resources` 对应 Git 源码显式声明，`resolved_resources` 与 `resource_source` 按固定 Harbor 版本解析。66 道题均使用独立 verifier，其中 60 道继承任务环境配置。两道 TB1 题还在 `published_package` 记录已核验发布包的数据，其他题的发布包字段为空。两题都解析为 2 CPU、4096 MB 内存、10240 MB 存储配置。实际负载与后端约束另看运行证据，TB1 的 Agent 和 verifier 先后执行。
 
 ```sh
-tb=eval/benchmarks/terminal_bench
-work=eval/results/tb0-recheck
+tb="$PWD/eval/benchmarks/terminal_bench"
+work="$PWD/eval/results/tb0-recheck"
 mkdir -p "$work"
+uv sync --locked --project "$tb" --python 3.13
 git clone --depth 1 --branch v4.1.0 https://github.com/harbor-framework/terminal-bench.git "$work/upstream"
-test "$(git -C "$work/upstream" rev-parse HEAD)" = 4070d6cef56a7d20cb5dc98d5e10ada88a6b9440
-curl -fsSL --compressed 'https://api.github.com/repos/harbor-framework/terminal-bench/git/trees/d9f7ae82365a09d0727b01c7040ba4d4fc1d7986?recursive=1' -o "$work/tasks-tree.json"
-curl -fsSL 'https://github.com/harbor-framework/terminal-bench/releases/download/v4.1.0/prebuilt-images.json' -o "$work/prebuilt-images.json"
-uv run --locked --project "$tb" --python 3.13 python "$tb/preflight.py" \
-  --tasks "$work/upstream/tasks" --git-tree "$work/tasks-tree.json" \
-  --images "$work/prebuilt-images.json" --registry-evidence "$tb/registry-platforms.json" \
-  --output "$work/compatibility.json"
+test "$(git -C "$work/upstream" rev-parse HEAD)" = 4070d6cef56a7d20cb5dc98d5e10ada88a6b9440 || exit 1
+curl -fsSL --compressed 'https://api.github.com/repos/harbor-framework/terminal-bench/git/trees/d9f7ae82365a09d0727b01c7040ba4d4fc1d7986?recursive=1' -o "$work/tasks-tree.json.part" || exit 1
+curl -fsSL 'https://github.com/harbor-framework/terminal-bench/releases/download/v4.1.0/prebuilt-images.json' -o "$work/prebuilt-images.json.part" || exit 1
+"$tb/.venv/bin/python" "$tb/preflight.py" \
+  --tasks "$work/upstream/tasks" --git-tree "$work/tasks-tree.json.part" \
+  --images "$work/prebuilt-images.json.part" --output "$work/compatibility.json" || exit 1
+mv "$work/tasks-tree.json.part" "$work/tasks-tree.json"
+mv "$work/prebuilt-images.json.part" "$work/prebuilt-images.json"
+
+"$tb/.venv/bin/python" "$tb/scripts/verify-sources.py" --output "$work"
+"$tb/.venv/bin/python" "$tb/scripts/probe-platforms.py" \
+  --images "$work/prebuilt-images.json" --output "$work/registry-platforms.json"
 ```
 
-下节记录 TB1 使用的精确发行版发布包、Docker 实跑和原始证据。
+`verify-sources.py` 可加 `--source-dir` 从现有接口文件离线复验。要复算包含两道发布包数据的完整矩阵，使用生成的 `--registry-evidence`，并传入下一节生成的 `--published-root "$work/published"` 和 `--published-evidence "$work/published-evidence.json"`。
+
 
 ## TB1 官方参考解与空操作对照
 
@@ -56,24 +65,32 @@ uv run --locked --project "$tb" --python 3.13 python "$tb/preflight.py" \
 
 ### TB1 复验命令
 
-从仓库根目录执行，输出路径使用新的目录。下载的两个任务摘要来自 4.1.0 数据集元数据，文件哈希和镜像摘要记录在上述证据中。预检 Docker 的 amd64 执行能力后，按表中顺序运行四槽。
+从仓库根目录执行，复用上一步已校验的镜像清单。选择独立的 TB1 输出目录时，把清单路径作为 `--images` 传入。准备脚本从固定数据集 digest 下载两份发布包，核验 Hub 的逐文件哈希、大小和官方镜像引用，再生成供审计使用的元数据。
 
 ```sh
 tb="$PWD/eval/benchmarks/terminal_bench"
-work="$PWD/eval/results/tb1-recheck"
-mkdir -p "$work"
-cd "$work"
-export HARBOR_TELEMETRY=0
-"$tb/.venv/bin/harbor" tasks download \
-  'terminal-bench/music-harmony@sha256:b77713c760d519822ee4f0da9e555c9e124241c2544d0e759a11b52eb7d26c24' -o "$work/published"
-"$tb/.venv/bin/harbor" tasks download \
-  'terminal-bench/freight-dispatch-shift@sha256:5f6e51724b93f5c5fdfbd8836cd6bd84962c51f2242ff52f4067a6ba4085d9df' -o "$work/published"
+work="$PWD/eval/results/tb0-recheck"
+HARBOR_TELEMETRY=0 "$tb/.venv/bin/python" "$tb/scripts/prepare-published.py" \
+  --results "$work" --images "$work/prebuilt-images.json" || exit 1
+
+docker info --format '{"Architecture":{{json .Architecture}},"OSType":{{json .OSType}},"NCPU":{{json .NCPU}},"MemTotal":{{json .MemTotal}},"ServerVersion":{{json .ServerVersion}}}' > "$work/docker-engine.json" || exit 1
+docker compose version > "$work/compose-version.txt" || exit 1
+docker run --rm --platform linux/amd64 --network none --entrypoint uname \
+  harborframework/terminal-bench@sha256:5ec316b098f4eef4c05e7916314f980dcc27e6be64a096f78bb799705439648f \
+  -m > "$work/amd64-smoke.txt" || exit 1
+test "$(cat "$work/amd64-smoke.txt")" = x86_64 || exit 1
+
 for task in music-harmony freight-dispatch-shift; do
   for arm in oracle nop; do
-    env -i HOME="$HOME" PATH="$PATH" DOCKER_DEFAULT_PLATFORM=linux/amd64 HARBOR_TELEMETRY=0 \
-      "$tb/.venv/bin/harbor" run --path "$work/published/$task" --agent "$arm" \
-      --env docker --jobs-dir "$work/jobs" --job-name "$task-$arm" \
-      --n-concurrent 1 --n-attempts 1 --max-retries 0 --delete --no-stream || exit 1
+    "$tb/.venv/bin/python" "$tb/scripts/run-control.py" \
+      --published-root "$work/published" --published-evidence "$work/published-evidence.json" \
+      --runs-dir "$work/runs" \
+      --task "$task" --agent "$arm" --harbor "$tb/.venv/bin/harbor" || exit 1
   done
 done
+
+"$tb/.venv/bin/python" "$tb/scripts/audit-controls.py" \
+  --results "$work" --date "$(date +%F)" --output "$work/tb1-evidence.json"
 ```
+
+复核历史四槽仅需最后的审计命令，把 `--results` 改为 `eval/results/tb1-20261119`、日期改为 `2026-11-19`，并将 `--output` 指向临时文件。审计读取原始结果、判分、产物和 Docker 事件，核对失败会返回错误。新版采集器保存全局清单供诊断，并以 trial 的资源清单及销毁事件判定清理。历史槽位继续使用原有前后清单与事件。

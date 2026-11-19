@@ -13,5 +13,13 @@
     "prebuilt_platform": "linux/amd64",
     "first_task": "music-harmony",
     "multi_service_candidate": "freight-dispatch-shift"
+  },
+  "published": {
+    "dataset_ref": "terminal-bench/terminal-bench@4.1.0",
+    "dataset_digest": "sha256:5881c1b1c74a96f07baef00a7c869e09802704bc0dc912c870e7acccc11440da",
+    "task_refs": {
+      "music-harmony": "sha256:b77713c760d519822ee4f0da9e555c9e124241c2544d0e759a11b52eb7d26c24",
+      "freight-dispatch-shift": "sha256:5f6e51724b93f5c5fdfbd8836cd6bd84962c51f2242ff52f4067a6ba4085d9df"
+    }
   }
 }

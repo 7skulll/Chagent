@@ -2,4 +2,7 @@
 name = "chagent-terminal-bench-preflight"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
-dependencies = ["harbor==0.25.0", "pyyaml>=6,<7"]
+dependencies = ["chagent", "harbor==0.25.0", "pyyaml>=6,<7"]
+
+[tool.uv.sources]
+chagent = { path = "../../..", editable = true }

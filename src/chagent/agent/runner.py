@@ -330,6 +330,9 @@ class AgentRunner:
         try:
             before = (await self.task_execution.snapshot(run_id) if self.task_execution is not None
                       else await asyncio.to_thread(snapshot, root, self._manifest_cache(root)))
+            if before is None:
+                await self.runs.event(run_id, "workspace_manifest_unavailable", {"phase": "before"})
+                return None
             await self.runs.event(run_id, "workspace_manifest_before", before)
             return before
         except (OSError, ValueError, RuntimeError) as error:
@@ -344,6 +347,10 @@ class AgentRunner:
         try:
             after = (await self.task_execution.snapshot(run_id) if self.task_execution is not None
                      else await asyncio.to_thread(snapshot, root, self._manifest_cache(root)))
+            if after is None:
+                await self.runs.event(run_id, "workspace_manifest_unavailable", {"phase": "after"})
+                self._manifest_after_recorded.add(run_id)
+                return
             summary = diff(before, after) if before is not None else None
             await self.runs.event(run_id, "workspace_manifest_after", {**after, "diff": summary})
             self._manifest_after_recorded.add(run_id)

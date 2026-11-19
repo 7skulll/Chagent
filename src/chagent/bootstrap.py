@@ -252,7 +252,16 @@ def create_task_runner(database: Database, model: Model, client: ModelClient, *,
     """
     from chagent.hostexec.task_runner import TaskExecution
     execution = TaskExecution(task, session_id, control_workspace)
-    builder = BasicContextBuilder(policy=ContextPolicy.from_env(), counter=select_counter(model))
+    return create_bound_runner(database, model, client, execution=execution,
+        max_turns=max_turns, timeout=timeout, wall_timeout=wall_timeout)
+
+
+def create_bound_runner(database: Database, model: Model, client: ModelClient, *,
+                        execution, max_turns, timeout, wall_timeout,
+                        context_policy: ContextPolicy | None = None) -> AgentRunner:
+    """Assemble a run using only the supplied task-bound execution capabilities."""
+    builder = BasicContextBuilder(policy=context_policy or ContextPolicy.from_env(),
+                                  counter=select_counter(model))
     runs = RunRepository(database, inline_bytes=inline_bytes_for(builder.input_budget(model)))
     if isinstance(client, HTTPModelClient):
         async def outbound_audit(run_id, purpose):

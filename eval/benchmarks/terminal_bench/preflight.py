@@ -11,7 +11,10 @@ import platform
 import re
 
 from harbor.models.task.task import Task
-from harbor.models.task.verifier_mode import resolve_task_verifier_mode
+from harbor.models.task.verifier_mode import (
+    resolve_effective_verifier_env_config,
+    resolve_task_verifier_mode,
+)
 from harbor.models.trial.config import AgentConfig, EnvironmentConfig, VerifierConfig
 from harbor.trial.network_policy import resolve_trial_network_plan
 import yaml
@@ -103,7 +106,46 @@ def verifier_fee_signals(path, verifier):
     return signals
 
 
-def row(path, tree_id, files, official_images, registry_platforms):
+def resources(environment):
+    if environment is None:
+        return None
+    return environment.model_dump(mode="json", include={
+        "cpus", "memory_mb", "storage_mb", "gpus", "tpu",
+    })
+
+
+def verifier_resources(config):
+    declared = config.verifier.environment
+    resolved = resolve_effective_verifier_env_config(config, None)
+    source = "shared_agent_environment"
+    if resolved is not None:
+        source = "verifier.environment" if declared is not None else "environment (inherited)"
+    return {
+        "declared_resources": resources(declared),
+        "resolved_resources": resources(resolved),
+        "resource_source": source,
+    }
+
+
+def published_verifiers(root, evidence_path):
+    evidence = json.loads(evidence_path.read_text())
+    result = {}
+    for name, entry in evidence.items():
+        if PINS["published"]["task_refs"].get(name) != entry["ref"]:
+            raise ValueError(f"Published task reference differs from pins: {name}")
+        path = root / name
+        files = {file.relative_to(path).as_posix(): sha256(file.read_bytes()).hexdigest()
+                 for file in path.rglob("*") if file.is_file()}
+        if not files or files != entry["file_sha256"]:
+            raise ValueError(f"Published package file hashes differ: {name}")
+        task = Task(path)
+        if task.name != f"terminal-bench/{name}" or task.config.task.version != entry["version"]:
+            raise ValueError(f"Published package identity differs: {name}")
+        result[name] = {"package_ref": entry["ref"], **verifier_resources(task.config)}
+    return result
+
+
+def row(path, tree_id, files, official_images, registry_platforms, published_verifier):
     task = Task(path)
     config = task.config
     verifier = config.verifier
@@ -112,6 +154,7 @@ def row(path, tree_id, files, official_images, registry_platforms):
         config, AgentConfig(), EnvironmentConfig(), VerifierConfig(), None, verifier_mode=mode,
     )
     environment = config.environment
+    verifier_environment = resolve_effective_verifier_env_config(config, None)
     services = compose_services(path / "environment")
     images = [{
         "role": image["role"],
@@ -120,8 +163,8 @@ def row(path, tree_id, files, official_images, registry_platforms):
         "registry_error": registry_platforms.get(image["digest"], {}).get("error"),
     } for image in official_images]
     platform_status = "amd64_runtime_pending"
-    if environment.gpus or environment.tpu or (verifier.environment and (
-        verifier.environment.gpus or verifier.environment.tpu
+    if environment.gpus or environment.tpu or (verifier_environment and (
+        verifier_environment.gpus or verifier_environment.tpu
     )):
         platform_status = "accelerator_required"
     elif environment.os.value != "linux":
@@ -159,9 +202,8 @@ def row(path, tree_id, files, official_images, registry_platforms):
                 name for name in ("Dockerfile", "pyproject.toml", "uv.lock", "requirements.txt", "package.json")
                 if (path / "tests" / name).is_file()
             ],
-            "resources": verifier.environment.model_dump(mode="json", include={
-                "cpus", "memory_mb", "storage_mb", "gpus", "tpu",
-            }) if verifier.environment else None,
+            **verifier_resources(config),
+            "published_package": published_verifier,
             "collect_services": [hook.service for hook in verifier.collect],
             "artifacts": len(config.artifacts),
             "potential_fee_signals": verifier_fee_signals(path, verifier),
@@ -183,23 +225,30 @@ def main():
     parser.add_argument("--git-tree", required=True, type=Path)
     parser.add_argument("--images", required=True, type=Path)
     parser.add_argument("--registry-evidence", type=Path)
+    parser.add_argument("--published-root", type=Path)
+    parser.add_argument("--published-evidence", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     if version("harbor") != PINS["harbor"]["release"]:
         parser.error("Run this command in the locked Harbor environment")
+    if (args.published_root is None) != (args.published_evidence is None):
+        parser.error("--published-root and --published-evidence must be supplied together")
     directories, hashes = verify_snapshot(args.tasks, args.git_tree.read_bytes())
     images = load_images(args.images)
     if {p.parent.name for p in args.tasks.glob("*/task.toml")} != images.keys():
         raise ValueError("Task directories and official image rows differ")
     registry = json.loads(args.registry_evidence.read_text()) if args.registry_evidence else {}
+    published = published_verifiers(args.published_root, args.published_evidence) if args.published_root else {}
+    if published.keys() - images.keys():
+        raise ValueError("Published evidence includes tasks outside the pinned dataset")
     rows = [
-        row(args.tasks / name, directories[Path(name)], hashes[name], images[name], registry)
+        row(args.tasks / name, directories[Path(name)], hashes[name], images[name], registry, published.get(name))
         for name in sorted(images)
     ]
     finding = {
         "pins": PINS,
         "host": {"os": platform.system(), "architecture": platform.machine(), "python": platform.python_version()},
-        "scope": "Static and Harbor parser preflight. Docker execution and verifier cost are unverified.",
+        "scope": "Git snapshot and optional verified published packages. Resources are parsed configuration, not runtime usage.",
         "verified_source_files": sum(map(len, hashes.values())),
         "tasks": rows,
     }
