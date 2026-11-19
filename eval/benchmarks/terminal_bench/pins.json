@@ -1,0 +1,17 @@
+{
+  "harbor": {
+    "release": "0.25.0",
+    "commit": "fdba28fc411e47e8765420a1a063b4918fce3def",
+    "wheel_sha256": "51923ac567fc57b03279e93468b105f689628bcac2cd3d541d4e44aa5c0ec309"
+  },
+  "terminal_bench": {
+    "release": "v4.1.0",
+    "commit": "4070d6cef56a7d20cb5dc98d5e10ada88a6b9440",
+    "tasks_tree": "d9f7ae82365a09d0727b01c7040ba4d4fc1d7986",
+    "task_count": 66,
+    "prebuilt_manifest_sha256": "49a2b9ce70dbbb957f3eaf74c737ccb8c6d68b3167d4ccfb5c58762a9726b289",
+    "prebuilt_platform": "linux/amd64",
+    "first_task": "music-harmony",
+    "multi_service_candidate": "freight-dispatch-shift"
+  }
+}

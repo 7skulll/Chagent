@@ -1,0 +1,19 @@
+{
+  "harbor_commit": "fdba28fc411e47e8765420a1a063b4918fce3def",
+  "wheel_sources": {
+    "agents/base.py": "39362c4d34d96cb1cc5dd8a07d9ea59f83c4fa49421f72a88ecc452def68ed2a",
+    "agents/factory.py": "a4e7ad4af669217440b9006abb5adafe4c20fab6384c36e0e32ac213043a683e",
+    "environments/base.py": "63720af66d32f5615111ee84b735bceae997d8030e686b91438a733624a9679a",
+    "environments/docker/docker.py": "4f74e08941b3534864643405dd6ff43543597248539d7f5de7208ec5c2f5b511",
+    "models/task/config.py": "ac9f5d19e2cd311b2fe1c9d885c89fe21a98270613ae4546640b823540bf2163",
+    "models/task/task.py": "774291c33eb02525da252c2fcb8a791053b2c8b08522018d9bbe13bb5aedfd61",
+    "models/task/verifier_mode.py": "e5893be9cf98b8ea133abe5d2456d80ab995ebac12627d798bfab41b4b8a6f2d",
+    "trial/network_policy.py": "70885b08129b8bbce71dc0bfe538833863ae2cedcb851fd536d3ed2a9341e2ce",
+    "trial/single_step.py": "ea318d64387014169a54b73f6aa7aa588c7095256d02a3cb518f2d4d8fa9e73e",
+    "trial/trial.py": "d6ab11b45f5d90d5cb898c5eaf1fb5aec113860c041f35034109ad464939ca96",
+    "verifier/verifier.py": "fc5d9fc6d27ac6eca57a3504f6853e094b0c50f4d965708e72d9c237ad30da34"
+  },
+  "terminal_bench_commit": "4070d6cef56a7d20cb5dc98d5e10ada88a6b9440",
+  "prebuilt_release_script_sha256": "bc2fd952a8f861e4a4eb756ecf1d9bde36d9b1d26820fe5e0e190994fcc70470",
+  "prebuilt_platform": "linux/amd64"
+}

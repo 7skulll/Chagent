@@ -1,0 +1,304 @@
+{
+  "date": "2026-11-19",
+  "status": "accepted",
+  "harbor": "0.25.0",
+  "dataset": {
+    "ref": "terminal-bench/terminal-bench@4.1.0",
+    "content_digest": "sha256:5881c1b1c74a96f07baef00a7c869e09802704bc0dc912c870e7acccc11440da"
+  },
+  "published_tasks": {
+    "freight-dispatch-shift": {
+      "ref": "sha256:5f6e51724b93f5c5fdfbd8836cd6bd84962c51f2242ff52f4067a6ba4085d9df",
+      "revision": 5,
+      "registered_files": 88,
+      "matching": 88,
+      "differs": [],
+      "local_paths_without_registry_rows": []
+    },
+    "music-harmony": {
+      "ref": "sha256:b77713c760d519822ee4f0da9e555c9e124241c2544d0e759a11b52eb7d26c24",
+      "revision": 5,
+      "registered_files": 17,
+      "matching": 17,
+      "differs": [],
+      "local_paths_without_registry_rows": []
+    }
+  },
+  "docker_engine": {
+    "Architecture": "aarch64",
+    "OSType": "linux",
+    "NCPU": 8,
+    "MemTotal": 8321994752,
+    "ServerVersion": "29.4.1"
+  },
+  "docker_compose": "Docker Compose version v5.1.3",
+  "amd64_smoke": "x86_64",
+  "controls": [
+    {
+      "task": "music-harmony",
+      "agent": "oracle",
+      "trial_id": "ef739cb0-0174-4395-80bc-7ec6aa681367",
+      "trial_name": "music-harmony__wVyQMw9",
+      "task_checksum": "c7d61224a0942efc89722bab50b8e43c087a67dedf21763c1447d7f86f789ac6",
+      "reward": {
+        "reward": 1.0
+      },
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "trial_seconds": 96.934,
+      "artifact": {
+        "path": "artifacts/app/harmony.mxl",
+        "collection_status": "ok",
+        "sha256": "360aa0cecc1feef4e060f08bcd9d6d8b092847bde47d880d04fcefcf7bcdfdc1",
+        "size_bytes": 1784
+      },
+      "docker_containers": [
+        {
+          "id": "8c8183a431c7fe49a4dcc1c6ce47dfc704aaa4b456a25f90952f1d1e9b192082",
+          "project": "music-harmony__wvyqmw9__env",
+          "service": "main",
+          "image": "harborframework/terminal-bench:music-harmony-environment-2b88669317e4ec7d@sha256:5ec316b098f4eef4c05e7916314f980dcc27e6be64a096f78bb799705439648f",
+          "created_ns": 1795054148223825964,
+          "destroyed_ns": 1795054232621771170
+        },
+        {
+          "id": "064258f3c36546f68412ec755c958fc581bac8d1cf73d48552e5d5a7e87f6a4c",
+          "project": "music-harmony__wvyqmw9__verifier__trial",
+          "service": "main",
+          "image": "harborframework/terminal-bench:music-harmony-verifier-99db9bf49f74d6b1@sha256:6eae62059d17981976779c8d2a2e26a545399339d4f973cfd4cca1d74fd9af05",
+          "created_ns": 1795054233793749629,
+          "destroyed_ns": 1795054243739738217
+        }
+      ],
+      "docker_network_ids": [
+        "45f4300bfec2cb5a767f75323503049afcdcd05c9f03994b6cb3bc43276da6d0",
+        "df3bc4b57dcc325c0893f8f1ec53525e2e9343476f7c4f54d2989ff26258ee9c"
+      ],
+      "healthy_before_main": null,
+      "cleanup_verified": true,
+      "evidence": {
+        "outputs": {
+          "path": "runs/music-harmony-oracle/jobs/music-harmony-oracle/music-harmony__wVyQMw9/result.json",
+          "sha256": "01bc8280144a17489bf5d88494bb8bbc9730d55cd2e2b46914acb75fd3e3fb39"
+        },
+        "raw_reward": {
+          "path": "runs/music-harmony-oracle/jobs/music-harmony-oracle/music-harmony__wVyQMw9/verifier/reward.json",
+          "sha256": "ca274aa96d4535004e2c8d61633d4dea80c26cb38c9f5c3f143ba21147174dff"
+        },
+        "artifact_manifest": {
+          "path": "runs/music-harmony-oracle/jobs/music-harmony-oracle/music-harmony__wVyQMw9/artifacts/manifest.json",
+          "sha256": "913337bdcdb79ec9361ee27378fb1ef1e0c4917b529b38b6386cb73c199df998"
+        },
+        "docker_events": {
+          "path": "runs/music-harmony-oracle/docker-events.ndjson",
+          "sha256": "c5f6b8b61e224059f330db35bc2c815bbfbf9a6eab595b273d5f42af00c5b3e8"
+        }
+      }
+    },
+    {
+      "task": "music-harmony",
+      "agent": "nop",
+      "trial_id": "cf4f48b9-594f-4e5e-b53b-ed134c0dd0e5",
+      "trial_name": "music-harmony__3CpFBKN",
+      "task_checksum": "c7d61224a0942efc89722bab50b8e43c087a67dedf21763c1447d7f86f789ac6",
+      "reward": {
+        "reward": 0.0
+      },
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "trial_seconds": 14.072,
+      "artifact": {
+        "path": "artifacts/app/harmony.mxl",
+        "collection_status": "failed"
+      },
+      "docker_containers": [
+        {
+          "id": "99f0bf7e5e79744d1898733b2d808cc39f96fefd93d70cb5a333b4d3fc1e9f71",
+          "project": "music-harmony__3cpfbkn__env",
+          "service": "main",
+          "image": "harborframework/terminal-bench:music-harmony-environment-2b88669317e4ec7d@sha256:5ec316b098f4eef4c05e7916314f980dcc27e6be64a096f78bb799705439648f",
+          "created_ns": 1795054280910274720,
+          "destroyed_ns": 1795054283381837763
+        },
+        {
+          "id": "58d643aa7896e68c8f9c1c181a7de9e661ff1447204f6cec4974cc6422855f59",
+          "project": "music-harmony__3cpfbkn__verifier__trial",
+          "service": "main",
+          "image": "harborframework/terminal-bench:music-harmony-verifier-99db9bf49f74d6b1@sha256:6eae62059d17981976779c8d2a2e26a545399339d4f973cfd4cca1d74fd9af05",
+          "created_ns": 1795054284025989805,
+          "destroyed_ns": 1795054293387893795
+        }
+      ],
+      "docker_network_ids": [
+        "69a627556c68dd799dc6945a8081498180f5b5e0f7a5da20af9717af1c2f0bee",
+        "85ea49dbb950097432356b010acd63b1ea6bdd1987f621b63fc02a7de9cb57b8"
+      ],
+      "healthy_before_main": null,
+      "cleanup_verified": true,
+      "evidence": {
+        "outputs": {
+          "path": "runs/music-harmony-nop/jobs/music-harmony-nop/music-harmony__3CpFBKN/result.json",
+          "sha256": "cd2a70ee9c0f84d699311ecaf1299b418d29df7d5f0577ccbfe2a98c979fd70c"
+        },
+        "raw_reward": {
+          "path": "runs/music-harmony-nop/jobs/music-harmony-nop/music-harmony__3CpFBKN/verifier/reward.json",
+          "sha256": "7af50836f84864c1bf8fc1d78cd10520662f9166b688f8252cc5609acc886ff5"
+        },
+        "artifact_manifest": {
+          "path": "runs/music-harmony-nop/jobs/music-harmony-nop/music-harmony__3CpFBKN/artifacts/manifest.json",
+          "sha256": "80a9079579a9bca46a82fcc8f40ad60517c9a8a1f45920f8bf186c90c2219c91"
+        },
+        "docker_events": {
+          "path": "runs/music-harmony-nop/docker-events.ndjson",
+          "sha256": "be0721ca15cce3f6f66a27f211cfc8d332e5c702a7b29c5d3cca9716fd2f60b0"
+        }
+      }
+    },
+    {
+      "task": "freight-dispatch-shift",
+      "agent": "oracle",
+      "trial_id": "a7fbe90b-7160-4807-ad51-37150d96ad50",
+      "trial_name": "freight-dispatch-shift__Rw2u2N6",
+      "task_checksum": "ab5222aae71448270ac9f4ab9a9a8770b47e45834a58623355c02de574a47e2f",
+      "reward": {
+        "reward": 1.0
+      },
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "trial_seconds": 33.13,
+      "artifact": {
+        "path": "artifacts/workspace/dispatch",
+        "collection_status": "ok",
+        "sha256": "50d37b16070ae8b4d21c867876105e8dac3699faffd9b8d7381a05f3e2501043",
+        "size_bytes": 30457
+      },
+      "docker_containers": [
+        {
+          "id": "42b41bcbe8f34cf19ab889dfeea03715eaa3e4b0d9eb680aaf52ae64f1a4ca47",
+          "project": "freight-dispatch-shift__rw2u2n6__env",
+          "service": "event-feed",
+          "image": "harborframework/terminal-bench:freight-dispatch-shift-sidecar-event-feed-ec3b2b49db8203c5@sha256:f413d8757ac835a7dd5fbbe2594da5a8bee75604ea46853966cd737980fb97d4",
+          "created_ns": 1795054322492561378,
+          "destroyed_ns": 1795054332780281842
+        },
+        {
+          "id": "da69182cdb305a7ef1e7897aee5f3a7d934addbdd4d3e2fcc54d00eeb6a08212",
+          "project": "freight-dispatch-shift__rw2u2n6__env",
+          "service": "main",
+          "image": "harborframework/terminal-bench:freight-dispatch-shift-environment-b3850906fb566773@sha256:5c5a14a6412227a6111be00b0dc933cf0ea8540d9592980ee3c733fea245b5c3",
+          "created_ns": 1795054322515907753,
+          "destroyed_ns": 1795054331643087049
+        },
+        {
+          "id": "15c9acf464875a1ba2c5ed513777221f717c79d232a59bf115bc2578345fecdb",
+          "project": "freight-dispatch-shift__rw2u2n6__verifier__trial",
+          "service": "main",
+          "image": "harborframework/terminal-bench:freight-dispatch-shift-verifier-17219a2f76aa0a8e@sha256:3c3df0511a8c6633c482d65efcc638ba2dc312e5ed093dd071d91b80a5e8e7f4",
+          "created_ns": 1795054333412752675,
+          "destroyed_ns": 1795054354827039754
+        }
+      ],
+      "docker_network_ids": [
+        "c16b28801025d27bfdee6768eb8e3330ee019ddc741107a78c83b69322a035c3",
+        "e288c8c9be5861d7bca89b92831810bcbf1e62c4c1750ae59a99869c7fbdb9c9"
+      ],
+      "healthy_before_main": {
+        "event_feed_healthy_ns": 1795054327878955923,
+        "main_start_ns": 1795054328187713923
+      },
+      "cleanup_verified": true,
+      "evidence": {
+        "outputs": {
+          "path": "runs/freight-dispatch-shift-oracle/jobs/freight-dispatch-shift-oracle/freight-dispatch-shift__Rw2u2N6/result.json",
+          "sha256": "62439adefd7fc1fa2f8dbddaa1183e184f5cb2f15a171dc1ea2690309e200265"
+        },
+        "raw_reward": {
+          "path": "runs/freight-dispatch-shift-oracle/jobs/freight-dispatch-shift-oracle/freight-dispatch-shift__Rw2u2N6/verifier/reward.json",
+          "sha256": "ca274aa96d4535004e2c8d61633d4dea80c26cb38c9f5c3f143ba21147174dff"
+        },
+        "artifact_manifest": {
+          "path": "runs/freight-dispatch-shift-oracle/jobs/freight-dispatch-shift-oracle/freight-dispatch-shift__Rw2u2N6/artifacts/manifest.json",
+          "sha256": "1c8dfdab7e88b816eb97971971e559d526e255d12da54c336248d32436466bc0"
+        },
+        "docker_events": {
+          "path": "runs/freight-dispatch-shift-oracle/docker-events.ndjson",
+          "sha256": "ba9cca18e1864beffe81a8080b4580cdcb4ab8015544cfc663feaeffecb6d36b"
+        }
+      }
+    },
+    {
+      "task": "freight-dispatch-shift",
+      "agent": "nop",
+      "trial_id": "dbce03a7-4833-4d0e-9ebf-95668d342867",
+      "trial_name": "freight-dispatch-shift__hHWZBRy",
+      "task_checksum": "ab5222aae71448270ac9f4ab9a9a8770b47e45834a58623355c02de574a47e2f",
+      "reward": {
+        "reward": 0.0
+      },
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "trial_seconds": 20.625,
+      "artifact": {
+        "path": "artifacts/workspace/dispatch",
+        "collection_status": "failed"
+      },
+      "docker_containers": [
+        {
+          "id": "202102a3cea1779a648213a32526e01f90e642d0150bcc0b69282d130761a36a",
+          "project": "freight-dispatch-shift__hhwzbry__env",
+          "service": "event-feed",
+          "image": "harborframework/terminal-bench:freight-dispatch-shift-sidecar-event-feed-ec3b2b49db8203c5@sha256:f413d8757ac835a7dd5fbbe2594da5a8bee75604ea46853966cd737980fb97d4",
+          "created_ns": 1795054403649640180,
+          "destroyed_ns": 1795054412902079753
+        },
+        {
+          "id": "2c84c8e3a15a61bf8fd75d8b101869dc2d897f70edaaaa15bc798f82b1ce901c",
+          "project": "freight-dispatch-shift__hhwzbry__env",
+          "service": "main",
+          "image": "harborframework/terminal-bench:freight-dispatch-shift-environment-b3850906fb566773@sha256:5c5a14a6412227a6111be00b0dc933cf0ea8540d9592980ee3c733fea245b5c3",
+          "created_ns": 1795054403673651638,
+          "destroyed_ns": 1795054411779918503
+        },
+        {
+          "id": "440dd23df73b51989131038b5d345757f4c1ab86ca4195db1d17cdede7b8079c",
+          "project": "freight-dispatch-shift__hhwzbry__verifier__trial",
+          "service": "main",
+          "image": "harborframework/terminal-bench:freight-dispatch-shift-verifier-17219a2f76aa0a8e@sha256:3c3df0511a8c6633c482d65efcc638ba2dc312e5ed093dd071d91b80a5e8e7f4",
+          "created_ns": 1795054413512666337,
+          "destroyed_ns": 1795054423251884175
+        }
+      ],
+      "docker_network_ids": [
+        "973260b3856304e36b1e7dc6ec3dffe05842cdd1286a93a774a5fb4bd12504d6",
+        "a645c94a1779d369d235583218c5488f708ce5ec285027c162d97ab1139c9503"
+      ],
+      "healthy_before_main": {
+        "event_feed_healthy_ns": 1795054409049736627,
+        "main_start_ns": 1795054409361939835
+      },
+      "cleanup_verified": true,
+      "evidence": {
+        "outputs": {
+          "path": "runs/freight-dispatch-shift-nop/jobs/freight-dispatch-shift-nop/freight-dispatch-shift__hHWZBRy/result.json",
+          "sha256": "4991fc7ddc7372bc1654ef834d1bea4b7529bf1a25817b3ac0111dba7aade915"
+        },
+        "raw_reward": {
+          "path": "runs/freight-dispatch-shift-nop/jobs/freight-dispatch-shift-nop/freight-dispatch-shift__hHWZBRy/verifier/reward.json",
+          "sha256": "7af50836f84864c1bf8fc1d78cd10520662f9166b688f8252cc5609acc886ff5"
+        },
+        "artifact_manifest": {
+          "path": "runs/freight-dispatch-shift-nop/jobs/freight-dispatch-shift-nop/freight-dispatch-shift__hHWZBRy/artifacts/manifest.json",
+          "sha256": "327030aea7b6bb0682ca7b34ad8b7e8b7abeb1122764155e23900df09a788ac3"
+        },
+        "docker_events": {
+          "path": "runs/freight-dispatch-shift-nop/docker-events.ndjson",
+          "sha256": "00241fcd793c456130b4b9e3b9595e44a803b21e5edff22f424df1d773207d61"
+        }
+      }
+    }
+  ],
+  "distinct_containers": 10,
+  "distinct_networks": 8,
+  "candidate_model_calls": 0,
+  "local_artifact_directory": "eval/results/tb1-20261119"
+}
